@@ -1,11 +1,13 @@
 import { Data, Effect, Schema } from "effect";
 
 import { BILL_STATES, type BillState, isOpenBill } from "~/shared/bill-state";
+import { chunk } from "~/shared/chunk";
 import { dayOf, type Day, type Instant } from "~/shared/day";
 import { newId } from "~/shared/id";
 import type { Centavos } from "~/shared/money";
-import { normalizeName } from "~/shared/normalize-name";
+import { normalizeName, prefixRange } from "~/shared/normalize-name";
 import { PAYMENT_METHODS, type PaymentMethod } from "~/shared/payment";
+import { trimToNull } from "~/shared/text";
 
 import { CurrentUser, requireAdmin } from "./current-user";
 import { CustomerNotFound } from "./customers";
@@ -19,7 +21,6 @@ import {
   PaymentExceedsOwed,
   PaymentNotPositive,
 } from "./payments";
-import { changeStock } from "./stock";
 import { now } from "./time";
 
 /**
@@ -195,8 +196,17 @@ export type Bill = BillSummary & {
 
 const placeholders = (count: number) => Array.from({ length: count }, () => "?").join(", ");
 
-/** The note as stored: space trimmed; empty is no note. */
-const tidyNote = (note: string | null | undefined) => (note ?? "").trim();
+/**
+ * How many Lines one statement carries. Each Line binds four parameters and
+ * each statement seven more; with the shared condition's few, 20 stays far
+ * under D1's 100 bound parameters per query (spec §2.4). A selection of every
+ * Item in the catalog is then a handful of statements, well under the 50 a
+ * request may issue.
+ */
+const LINES_PER_STATEMENT = 20;
+
+const lineRows = (size: number) => Array.from({ length: size }, () => "(?, ?, ?, ?)").join(", ");
+const stockRows = (size: number) => Array.from({ length: size }, () => "(?, ?)").join(", ");
 
 /** One Line per distinct Item: the same Item twice is one Line of both quantities. */
 function mergeSelection(items: ReadonlyArray<SelectionItem>): ReadonlyArray<SelectionItem> {
@@ -297,6 +307,10 @@ export const HANDOVER_LIMIT = 10;
  * same `handover_reference` of §5.5) collapsed into one event. `LIMIT` bounds
  * the rows read to the Customer's recent money, whatever the rest of the
  * history holds (spec §2.4).
+ *
+ * Only the Payments that count: a removed Payment and the Payments of a
+ * Voided Bill count toward nothing (spec §5.7), as every §5.9 read excludes
+ * them too.
  */
 export const listCustomerHandovers = Effect.fn("listCustomerHandovers")(function* (customerId: string) {
   const db = yield* Db;
@@ -308,6 +322,8 @@ export const listCustomerHandovers = Effect.fn("listCustomerHandovers")(function
      JOIN bills b ON b.id = p.bill_id
      JOIN users u ON u.id = p.received_by
      WHERE b.customer_id = ?
+       AND b.state <> 'voided'
+       AND NOT EXISTS (SELECT 1 FROM payment_removals r WHERE r.payment_id = p.id)
      ORDER BY p.received_at DESC, p.rowid DESC
      LIMIT ?`,
     customerId,
@@ -348,6 +364,13 @@ export const listCustomerHandovers = Effect.fn("listCustomerHandovers")(function
  *   never more than the selection's total, so it can never make
  *   `paid + amount` outrun the Bill's `total` once these Lines are written.
  *
+ * The Lines and their Stock moves travel as chunked multi-row statements, the
+ * way a Count's do: one Line and one Stock move per Item would be `2N + 2`
+ * statements, and a selection of the whole ~60-Item catalog would breach the
+ * 50 a request may issue (spec §2.4). The set of Items also travels as one
+ * JSON parameter read with `json_each`, so no statement comes near D1's 100
+ * bound parameters however many Items are selected.
+ *
  * Every statement carries the same condition (`Condition`), because a D1
  * batch cannot branch: when an Item was retired or a target Bill stopped
  * being Open since it was read, nothing at all is written, the Payment
@@ -359,7 +382,7 @@ export const recordSelection = Effect.fn("recordSelection")(function* (input: Ne
 
   const customerId = input.customerId || null;
   const billId = input.billId || null;
-  const note = tidyNote(input.note) || null;
+  const note = trimToNull(input.note);
 
   if (input.items.length === 0) return yield* new EmptySelection();
   for (const { itemId, quantity } of input.items) {
@@ -443,14 +466,17 @@ export const recordSelection = Effect.fn("recordSelection")(function* (input: Ne
   /**
    * What every statement of the batch asks for, so a refused selection writes
    * nothing: all chosen Items are still active, and, when the Lines go onto
-   * an existing Bill, that Bill is still Open.
+   * an existing Bill, that Bill is still Open. The set of Items travels as one
+   * JSON parameter read with `json_each`, as a Count's condition does, so the
+   * condition fits every statement's parameter budget whatever the number of
+   * Items (spec §2.4).
    */
   const condition: Condition = {
     sql: [
-      `(SELECT COUNT(*) FROM items WHERE id IN (${placeholders(itemIds.length)}) AND retired_at IS NULL) = ?`,
+      `(SELECT COUNT(*) FROM json_each(?) AS j JOIN items i ON i.id = j.value AND i.retired_at IS NULL) = ?`,
       ...(target ? ["EXISTS (SELECT 1 FROM bills WHERE id = ? AND state IN ('open', 'partial'))"] : []),
     ].join(" AND "),
-    params: [...itemIds, itemIds.length, ...(target ? [target.id] : [])],
+    params: [JSON.stringify(itemIds), itemIds.length, ...(target ? [target.id] : [])],
   };
 
   const bill = target ?? { id: newId() };
@@ -499,30 +525,48 @@ export const recordSelection = Effect.fn("recordSelection")(function* (input: Ne
         ),
   ];
 
-  for (const line of lines) {
+  for (const part of chunk(lines, LINES_PER_STATEMENT)) {
     statements.push(
       statement(
-        // `moved_stock` is a fact about this Line, set from the Item's flag at
-        // this moment, as `changeStock` below reads it too.
+        // `moved_stock` is a fact about each Line, set from the Item's flag at
+        // this moment, as the Stock statement below reads it too. The join to
+        // `bills` keeps a new Bill's Lines out of the batch when the Bill's
+        // own insert wrote nothing.
         `INSERT INTO lines (id, bill_id, item_id, quantity, unit_price, moved_stock, added_by, added_at, day)
-         SELECT ?, ?, id, ?, ?, stock_tracked, ?, ?, ?
-         FROM items
-         WHERE id = ? AND EXISTS (SELECT 1 FROM bills WHERE id = ?) AND (${condition.sql})`,
-        line.id,
+         SELECT v.column1, ?, v.column2, v.column3, v.column4, i.stock_tracked, ?, ?, ?
+         FROM (VALUES ${lineRows(part.length)}) AS v
+         JOIN items i ON i.id = v.column2
+         JOIN bills b ON b.id = ?
+         WHERE (${condition.sql})`,
         bill.id,
-        line.quantity,
-        line.unitPrice,
         user.id,
         at,
         day,
-        line.itemId,
+        ...part.flatMap((line) => [line.id, line.itemId, line.quantity, line.unitPrice]),
         bill.id,
         ...condition.params,
       ),
     );
   }
 
-  for (const line of lines) statements.push(changeStock(line.itemId, -line.quantity, condition));
+  for (const part of chunk(lines, LINES_PER_STATEMENT)) {
+    statements.push(
+      statement(
+        // Stock moves by relative amounts, once per stock-tracked Item, so two
+        // phones adding at once both count (§7.3); an Item that is not
+        // stock-tracked at this moment gets no row, as `changeStock` does.
+        `INSERT INTO stock_levels (item_id, units)
+         SELECT v.column1, SUM(v.column2)
+         FROM (VALUES ${stockRows(part.length)}) AS v
+         JOIN items i ON i.id = v.column1 AND i.stock_tracked = 1
+         WHERE (${condition.sql})
+         GROUP BY v.column1
+         ON CONFLICT (item_id) DO UPDATE SET units = units + excluded.units`,
+        ...part.flatMap((line) => [line.itemId, -line.quantity]),
+        ...condition.params,
+      ),
+    );
+  }
 
   if (payment && paymentAmount !== null) {
     // The Payment rides in the same batch and under the same condition as the
@@ -619,7 +663,7 @@ export const editBill = Effect.fn("editBill")(function* (input: BillEditInput) {
   if (user.role !== "admin" && bill.paid > 0) return yield* new BillHasPayment({ billId });
 
   const customerId = input.customerId || null;
-  const note = tidyNote(input.note) || null;
+  const note = trimToNull(input.note);
   if (note !== null && note.length > NOTE_LIMIT) return yield* new NoteTooLong();
 
   // Only what changed becomes a fact: each change is a History entry, and a
@@ -915,9 +959,6 @@ const summaryOf = Effect.fnUntraced(function* (billId: string) {
   return summary(row);
 });
 
-/** The end of a prefix on `normalized_name`, as `searchCustomers` uses. */
-const LAST_CHARACTER = "\u{10FFFF}";
-
 /**
  * Every Open Bill, newest first: Cuentas abiertas (spec §6.1). One statement
  * driven by the index on state, so it reads the Open Bills and nothing else,
@@ -938,7 +979,7 @@ export const listOpenBills = Effect.fn("listOpenBills")(function* (typed = "") {
        prefix === "" ? "" : " AND c.normalized_name >= ? AND c.normalized_name < ?"
      }
      ORDER BY b.opened_at DESC, b.rowid DESC`,
-    ...(prefix === "" ? [] : [prefix, prefix + LAST_CHARACTER]),
+    ...(prefix === "" ? [] : [prefix, prefixRange(prefix)]),
   );
   return rows.map(summary);
 });

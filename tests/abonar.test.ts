@@ -2,12 +2,15 @@ import { env } from "cloudflare:workers";
 import { Cause, Effect, Option, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { getBill, listCustomerHandovers, listCustomerOpenBills, takeCustomerPayment, takePayment } from "~/backend/bills";
+import { getBill, listCustomerHandovers, listCustomerOpenBills, recordSelection, takeCustomerPayment, takePayment } from "~/backend/bills";
+import { removePayment, voidBill } from "~/backend/corrections";
 import { retireCustomer } from "~/backend/customers";
 import { Db } from "~/backend/db";
 
 import { as, seedUser, signedIn } from "./support/auth";
+import { seedItem } from "./support/catalog";
 import { seedCustomer } from "./support/customers";
+import { countingD1 } from "./support/d1";
 import { advanceClock, runTest, setClock } from "./support/effect";
 
 // Abonar: one amount paid across a Customer's Open Bills (spec §5.5, §7.3.2,
@@ -361,45 +364,76 @@ describe("the Customer page's reads", () => {
         expect(events[1]).toMatchObject({ by: ana.id, byName: "Ana", day: "2026-10-05" });
       }),
     ));
+
+  it("hide a removed Payment, and take it out of its handover's total", () =>
+    runTest(
+      Effect.gen(function* () {
+        yield* setClock("2026-10-05T12:00:00");
+        const ana = yield* seedUser("admin");
+        const ruiz = yield* seedCustomer("Familia con remoción", { by: ana });
+        const db = yield* Db;
+        yield* seedOpenBill(db, { id: "removida-a", customerId: ruiz.id, by: ana.id, day: "2026-10-01", openedAt: 1000, total: 3000, paid: 0, state: "open", revision: 0 });
+        yield* seedOpenBill(db, { id: "removida-b", customerId: ruiz.id, by: ana.id, day: "2026-10-02", openedAt: 2000, total: 2000, paid: 0, state: "open", revision: 0 });
+        const recorded = yield* takeCustomerPayment({
+          customerId: ruiz.id,
+          amount: 5000,
+          method: "cash",
+          expectedRevisions: expectedOf([
+            { id: "removida-a", revision: 0 },
+            { id: "removida-b", revision: 0 },
+          ]),
+        }).pipe(as(ana));
+
+        // The removed Payment of the handover stops counting, so what the
+        // event shows is what is left of it (spec §5.7: its Payments leave
+        // Collected).
+        yield* removePayment({
+          billId: "removida-a",
+          paymentId: recorded.shares[0]!.paymentId,
+          reason: "Se cobró dos veces",
+          expectedRevision: 1,
+        }).pipe(as(ana));
+
+        const afterOne = yield* listCustomerHandovers(ruiz.id);
+        expect(afterOne.map((event) => [event.amount, event.billCount, event.reference])).toEqual([
+          [2000, 1, recorded.reference],
+        ]);
+
+        // The last Payment of the event goes too; a lone Payment removed
+        // disappears the same way.
+        yield* removePayment({
+          billId: "removida-b",
+          paymentId: recorded.shares[1]!.paymentId,
+          reason: "Se cobró dos veces",
+          expectedRevision: 1,
+        }).pipe(as(ana));
+        expect(yield* listCustomerHandovers(ruiz.id)).toEqual([]);
+      }),
+    ));
+
+  it("hide the Payments of a Voided Bill, which count toward nothing", () =>
+    runTest(
+      Effect.gen(function* () {
+        yield* setClock("2026-10-05T12:00:00");
+        const ana = yield* seedUser("admin");
+        const item = yield* seedItem({ name: "Producto anulado", price: 2500, by: ana });
+        const ruiz = yield* seedCustomer("Familia anulada", { by: ana });
+
+        const bill = yield* recordSelection({
+          items: [{ itemId: item.id, quantity: 1 }],
+          customerId: ruiz.id,
+          payment: { method: "cash" },
+        }).pipe(as(ana));
+        expect(yield* listCustomerHandovers(ruiz.id)).toHaveLength(1);
+
+        yield* voidBill({ billId: bill.id, reason: "Se anuló la cuenta", expectedRevision: bill.revision }).pipe(
+          as(ana),
+        );
+
+        expect(yield* listCustomerHandovers(ruiz.id)).toEqual([]);
+      }),
+    ));
 });
-
-/**
- * The D1 binding with counts of what the operation asked of it: `prepare`
- * counts a statement, `bind` records the widest parameter list (spec §2.4,
- * §10.3). The same shape as the counters in tests/bills.test.ts.
- */
-function countingD1(d1: D1Database) {
-  const counter = { statements: 0, maxParams: 0 };
-  const measured = (statement: D1PreparedStatement): D1PreparedStatement =>
-    new Proxy(statement, {
-      get(target, property, receiver) {
-        if (property === "bind") {
-          return (...params: ReadonlyArray<string | number | null>) => {
-            counter.maxParams = Math.max(counter.maxParams, params.length);
-            return measured(target.bind(...params));
-          };
-        }
-        const value = Reflect.get(target, property, receiver);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    });
-  return {
-    counter,
-    d1: new Proxy(d1, {
-      get(target, property, receiver) {
-        if (property === "prepare") {
-          return (sql: string) => {
-            counter.statements += 1;
-            return measured(target.prepare(sql));
-          };
-        }
-        const value = Reflect.get(target, property, receiver);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    }) as D1Database,
-  };
-}
-
 it("pays 30 Open Bills in fewer than 50 statements, no query over 100 bound parameters", async () => {
   const seeded = await runTest(
     Effect.gen(function* () {

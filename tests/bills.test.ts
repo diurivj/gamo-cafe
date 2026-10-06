@@ -10,6 +10,7 @@ import { stockOf } from "~/backend/stock";
 import { as, seedUser } from "./support/auth";
 import { seedCategory, seedItem } from "./support/catalog";
 import { seedCustomer } from "./support/customers";
+import { countingD1 } from "./support/d1";
 import { advanceClock, runTest, setClock } from "./support/effect";
 
 // "Record a selection" (spec §7.3.1). Tests in one file share a D1, and
@@ -540,30 +541,11 @@ describe("Cobrar on Vender", () => {
 });
 
 /**
- * The D1 binding with a count of the statements it is asked to run. Every
+ * The statements of a selection are counted by the shared counting D1. Every
  * statement is prepared exactly once, whether it runs alone or inside a
  * batch, so a prepare counts one — and `batch` executes prepared statements
  * without preparing them again.
  */
-function countingD1(d1: D1Database) {
-  const counter = { statements: 0 };
-  return {
-    counter,
-    d1: new Proxy(d1, {
-      get(target, property, receiver) {
-        if (property === "prepare") {
-          return (sql: string) => {
-            counter.statements += 1;
-            return target.prepare(sql);
-          };
-        }
-        const value = Reflect.get(target, property, receiver);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    }) as D1Database,
-  };
-}
-
 it("records a ten-Item selection in well under 50 D1 statements", async () => {
   const seeded = await runTest(
     Effect.gen(function* () {
@@ -587,10 +569,42 @@ it("records a ten-Item selection in well under 50 D1 statements", async () => {
     }).pipe(as(seeded.ana), Effect.provide(Db.layer(d1))),
   );
 
-  // One read of the Items, the Bill and its ten Lines with their ten Stock
-  // moves, the Payment of Cobrar, then one read of the Bill: 25 statements,
+  // One read of the Items, the batch (the Bill, one Line statement, one Stock
+  // statement, the Payment of Cobrar) and one read of the Bill: 7 statements,
   // well under the 50 a request may issue (spec §2.4).
   expect(bill.total).toBe(1045);
   expect(bill.state).toBe("paid");
   expect(counter.statements).toBeLessThan(30);
+});
+
+it("records a sixty-Item selection in at most 50 statements, no query over 100 bound parameters", async () => {
+  const seeded = await runTest(
+    Effect.gen(function* () {
+      const ana = yield* seedUser("admin");
+      const category = yield* seedCategory("Catálogo completo", ana);
+      const items: Array<{ id: string }> = [];
+      for (let n = 0; n < 60; n++) {
+        items.push(
+          yield* seedItem({ name: `Producto del catálogo ${n}`, price: 100 + n, startingStock: 1, categoryId: category.id, by: ana }),
+        );
+      }
+      return { ana, items };
+    }),
+  );
+
+  const { counter, d1 } = countingD1(env.DB);
+  const bill = await Effect.runPromise(
+    recordSelection({
+      items: seeded.items.map((item) => ({ itemId: item.id, quantity: 1 })),
+      payment: { method: "cash" },
+    }).pipe(as(seeded.ana), Effect.provide(Db.layer(d1))),
+  );
+
+  // The catalog holds around 60 Items, and §2.4 allows a request 50 D1
+  // statements: the Lines and their Stock moves travel as chunked multi-row
+  // statements, never one statement per Item (2N + 2).
+  expect(bill.total).toBe(7770);
+  expect(bill.state).toBe("paid");
+  expect(counter.statements).toBeLessThanOrEqual(50);
+  expect(counter.maxParams).toBeLessThanOrEqual(100);
 });
