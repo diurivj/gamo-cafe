@@ -42,6 +42,27 @@ describe("run", () => {
     expect(result).toEqual({ error: "La cuenta b1 está cancelada." });
   });
 
+  it("makes the compiler report a rule violation that the mapping forgot", () => {
+    class PaymentExceedsOwed extends Data.TaggedError("PaymentExceedsOwed")<{}> {}
+    const program = Effect.gen(function* () {
+      if ((yield* appName) === undefined) return yield* new PaymentExceedsOwed();
+      return yield* new BillIsVoided({ billId: "b1" });
+    });
+
+    // Checked by `npm run typecheck`; never called.
+    void (() =>
+      // @ts-expect-error Not all code paths return a value: PaymentExceedsOwed is unhandled.
+      run(requestContext(), program, (error) => {
+        switch (error._tag) {
+          case "BillIsVoided":
+            return { error: "Esta cuenta está cancelada." };
+        }
+      }));
+
+    // @ts-expect-error The mapping is required when the program has rule violations.
+    void (() => run(requestContext(), program));
+  });
+
   it("lets the mapping answer with a thrown response, such as a redirect", async () => {
     const redirect = new Response(null, { status: 302, headers: { Location: "/entrar" } });
 

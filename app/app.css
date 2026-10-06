@@ -6,8 +6,8 @@
     Arial, sans-serif;
 }
 
-/* Phone first: no accidental sideways scroll, no grey flash on tap. */
+/* Phone first: no grey flash on tap, no double-tap zoom delay on controls. */
 html {
-  overflow-x: hidden;
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }

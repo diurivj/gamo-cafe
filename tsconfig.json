@@ -9,6 +9,8 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "strict": true,
+    // A `switch` over typed errors that misses a case fails to compile.
+    "noImplicitReturns": true,
     "noEmit": true,
     "allowImportingTsExtensions": true
   }
