@@ -20,7 +20,5 @@ coverage/
 playwright-report/
 test-results/
 
-# The proof kit's generated files (ticket 21)
+# The seed generator's output
 /seed.sql
-/proof-results.json
-/proof-busy-day.json

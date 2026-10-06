@@ -19,8 +19,6 @@
     "projections:rebuild:production": "node scripts/projections.ts rebuild --production",
     "seed": "node scripts/seed.ts",
     "seed:local": "node scripts/seed.ts --local",
-    "seed:production": "node scripts/seed.ts --production",
-    "proof": "node scripts/proof.ts",
     "deploy:production": "npm run build:production && wrangler deploy",
     "sign-in-code": "node scripts/sign-in-code.ts"
   },

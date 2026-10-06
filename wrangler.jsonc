@@ -20,6 +20,9 @@
     "production": {
       "name": "gamo-cafe",
       "workers_dev": true,
+      // A ceiling against a runaway request, not a target: the plan bills CPU
+      // time and has no spending cap (ADR 0007).
+      "limits": { "cpu_ms": 1000 },
       "vars": {
         "APP_ENV": "production"
       },

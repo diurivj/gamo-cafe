@@ -1,14 +1,14 @@
 /**
- * The synthetic year of the §10.7 proof kit (ticket 21): a whole cafe's
+ * The synthetic year behind the §10.7 request budgets (ticket 21): a whole cafe's
  * records — Users, Categories, Items, Customers, Bills with their Lines and
  * Payments, the corrections of §5.7, Adjustments and Counts — as plain SQL
- * that loads into the local or a disposable remote D1.
+ * that loads into the local D1.
  *
  * `scripts/seed.ts` writes these statements to a file and hands them to
  * Wrangler; `tests/proof-seed.test.ts` sends the same strings to a real D1,
- * so what the tests prove is what the proof deployment loads.
+ * so what the tests measure is what the developer loads.
  *
- * Shape the proof's requests need:
+ * Shape the budget test's requests need:
  *
  * - exactly 200 Open Bills in the last hundred Days, so Cuentas abiertas and
  *   a page of Cuentas have something to be measured against;
@@ -36,7 +36,7 @@ import { rebuildProjectionStatements } from "./rebuild.ts";
 export const SEED_FROM = "2025-10-01";
 /** The last Day of the synthetic year. */
 export const SEED_TO = "2026-09-30";
-/** The Day the proof's Día request asks for: clearly busier than any other. */
+/** The Day the budget test's Día request asks for: clearly busier than any other. */
 export const BUSIEST_DAY = "2026-08-15";
 /** The Customer with 30 Open Bills, for the Abonar request. */
 export const THIRTY_BILL_CUSTOMER_ID = "proof-customer-30";
@@ -387,28 +387,6 @@ const TABLES = [
 ] as const;
 
 type TableName = (typeof TABLES)[number]["name"];
-
-/**
- * How many b-tree entries one row leaves behind: the table itself plus every
- * index, the primary key included. Used only for the D1 Free estimate.
- */
-const INDEX_ENTRIES: Readonly<Record<TableName, number>> = {
-  users: 2,
-  categories: 2,
-  items: 4,
-  customers: 4,
-  bills: 5,
-  lines: 5,
-  payments: 5,
-  line_removals: 4,
-  payment_removals: 4,
-  bill_voids: 4,
-  bill_edits: 3,
-  adjustments: 4,
-  adjustment_cancellations: 4,
-  counts: 2,
-  count_lines: 2,
-};
 
 interface SeedData {
   readonly rows: Record<TableName, Cell[][]>;
@@ -803,12 +781,10 @@ export function seedStatements(window?: Partial<SeedWindow>): ReadonlyArray<stri
   return emit(buildData(windowOf(window)));
 }
 
-/** What the seed costs and leaves behind, for the D1 Free limits. */
+/** What the seed holds, for the report `scripts/seed.ts` prints. */
 export interface SeedStats {
   /** One count per table of the SQL itself. */
   readonly rows: Readonly<Record<string, number>>;
-  /** Table rows plus every index entry they write (spec §2.4). */
-  readonly rowsWritten: number;
   readonly statements: number;
   readonly bytes: number;
 }
@@ -817,13 +793,8 @@ export function seedStats(window?: Partial<SeedWindow>): SeedStats {
   const data = buildData(windowOf(window));
   const statements = emit(data);
   const rows = Object.fromEntries(TABLES.map((table) => [table.name, data.rows[table.name].length]));
-  const rowsWritten =
-    TABLES.reduce((sum, table) => sum + rows[table.name]! * INDEX_ENTRIES[table.name], 0) +
-    // The Stock projections the rebuild writes: one row per tracked Item.
-    ITEMS.length * 2;
   return {
     rows,
-    rowsWritten,
     statements: statements.length,
     bytes: new TextEncoder().encode(statements.join(";\n")).length,
   };

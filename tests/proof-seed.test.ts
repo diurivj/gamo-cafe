@@ -15,8 +15,8 @@ import {
 
 import { countingD1 } from "./support/d1";
 
-// The synthetic year of the §10.7 proof kit (ticket 21): its shape, its
-// consistency (the ticket 19 gate) and its size against D1 Free. Budgets are
+// The synthetic year behind the §10.7 request budgets (ticket 21): its shape
+// and its consistency (the ticket 19 gate). Budgets are
 // measured in tests/proof-budget.test.ts; this file is what the seed itself
 // has to be.
 
@@ -41,7 +41,7 @@ async function count(sql: string, ...params: ReadonlyArray<string | number>): Pr
 const year = () => seedStatements();
 
 describe("the seed's SQL", () => {
-  it("loads a year with the entities, the history and the 200 Open Bills the proof needs", async () => {
+  it("loads a year with the entities, the history and the 200 Open Bills the budget test needs", async () => {
     await load(year());
 
     expect(await count("SELECT COUNT(*) AS n FROM users")).toBe(4);
@@ -99,18 +99,8 @@ describe("the seed's SQL", () => {
     expect(differences.results).toEqual([]);
   });
 
-  it("fits D1 Free: far under the database size, and under the daily rows-written limit", async () => {
+  it("holds a year's worth of Bills for the catalog of 60 Items", () => {
     const stats = seedStats();
-
-    // 500 MB: the SQL is a couple of megabytes.
-    expect(stats.bytes).toBeLessThan(500 * 1024 * 1024);
-    // 100,000 rows written a day, counting index rows: the whole year loads
-    // in one day. Two independent numbers say so: the table-and-index
-    // estimate, and what the D1 binding itself reports writing.
-    expect(stats.rowsWritten).toBeLessThan(100_000);
-    const { counter, d1 } = countingD1(env.DB);
-    await load(year(), d1);
-    expect(counter.rowsWritten).toBeLessThan(100_000);
 
     expect(stats.rows.bills).toBeGreaterThan(2_000);
     expect(stats.rows.items).toBe(60);
