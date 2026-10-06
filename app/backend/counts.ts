@@ -1,7 +1,9 @@
 import { Data, Effect, Schema } from "effect";
 
+import { chunk } from "~/shared/chunk";
 import type { Day, Instant } from "~/shared/day";
 import { newId } from "~/shared/id";
+import { trimToNull } from "~/shared/text";
 
 import { ItemNotFound } from "./catalog";
 import { requireAdmin } from "./current-user";
@@ -106,12 +108,6 @@ const ItemStock = Schema.Struct({
 /** How many Item ids one `IN (?, …)` may carry; two bindings of them per query. */
 const ITEMS_PER_QUERY = 45;
 
-function chunk<A>(items: ReadonlyArray<A>, size: number): ReadonlyArray<ReadonlyArray<A>> {
-  const parts: Array<ReadonlyArray<A>> = [];
-  for (let at = 0; at < items.length; at += size) parts.push(items.slice(at, at + size));
-  return parts;
-}
-
 /** The named Items in the submitted order, with their Stock right now. */
 const itemsWithStock = Effect.fnUntraced(function* (itemIds: ReadonlyArray<string>) {
   const db = yield* Db;
@@ -174,7 +170,7 @@ export const recordCount = Effect.fn("recordCount")(function* (input: NewCountIn
   const db = yield* Db;
 
   const lines = yield* tidyCounted(input.lines);
-  const note = input.note?.trim() ? input.note.trim() : null;
+  const note = trimToNull(input.note);
   const id = newId();
 
   const [recorded] = yield* db.batch(

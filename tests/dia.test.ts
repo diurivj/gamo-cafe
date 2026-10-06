@@ -9,6 +9,7 @@ import { Db } from "~/backend/db";
 
 import { as, seedUser } from "./support/auth";
 import { seedItem } from "./support/catalog";
+import { countingD1 } from "./support/d1";
 import { advanceClock, runTest, setClock } from "./support/effect";
 
 // Día (spec §5.9, §6.2, §7.4, §10.6): Sold, Collected in cash and by transfer,
@@ -195,49 +196,6 @@ describe("Items sold", () => {
       }),
     ));
 });
-
-/**
- * The D1 binding with counts of what the operation asked of it. `prepare`
- * counts a statement; `all` adds the rows D1 reports reading. The same shape
- * as the counter in tests/cuentas.test.ts.
- */
-function countingD1(d1: D1Database) {
-  const counter = { statements: 0, rowsRead: 0 };
-
-  const measured = (statement: D1PreparedStatement): D1PreparedStatement =>
-    new Proxy(statement, {
-      get(target, property, receiver) {
-        if (property === "all") {
-          return async () => {
-            const result = await target.all();
-            counter.rowsRead += result.meta.rows_read;
-            return result;
-          };
-        }
-        if (property === "bind") {
-          return (...params: ReadonlyArray<string | number | null>) => measured(target.bind(...params));
-        }
-        const value = Reflect.get(target, property, receiver);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    });
-
-  return {
-    counter,
-    d1: new Proxy(d1, {
-      get(target, property, receiver) {
-        if (property === "prepare") {
-          return (sql: string) => {
-            counter.statements += 1;
-            return measured(target.prepare(sql));
-          };
-        }
-        const value = Reflect.get(target, property, receiver);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    }) as D1Database,
-  };
-}
 
 describe("Día's reads", () => {
   it("issue three statements over the range asked for, never over the history", () =>

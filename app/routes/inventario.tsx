@@ -17,8 +17,8 @@ import {
   recordAdjustment,
 } from "~/backend/inventory";
 import { run } from "~/backend/run.server";
-import type { AdjustmentReason } from "~/backend/stock";
 import { type Refusal, refuseRead, refused, requireAdminUser, text } from "~/catalog-forms.server";
+import { ADJUSTMENT_REASONS, adjustmentReasonLabel, adjustmentSign } from "~/shared/adjustment";
 import { formatDay } from "~/shared/day";
 import { newId } from "~/shared/id";
 import { parseUnits } from "~/shared/units";
@@ -26,14 +26,6 @@ import { parseUnits } from "~/shared/units";
 import type { Route } from "./+types/inventario";
 
 export const meta: Route.MetaFunction = () => [{ title: "Inventario · Gamo Cafe" }];
-
-const reasonLabel: Record<AdjustmentReason, string> = {
-  restock: "Entrada",
-  waste: "Merma",
-  internal_use: "Consumo interno",
-};
-
-const reasons = ["restock", "waste", "internal_use"] as const;
 
 export async function loader({ context }: Route.LoaderArgs) {
   const admin = requireAdminUser(context);
@@ -60,7 +52,7 @@ type InventoryError =
 function operation(form: FormData): Effect.Effect<unknown, InventoryError | DbError, Db | CurrentUser> | Refusal {
   switch (text(form, "intent")) {
     case "record-adjustment": {
-      const reason = reasons.find((known) => known === text(form, "reason"));
+      const reason = ADJUSTMENT_REASONS.find((known) => known === text(form, "reason"));
       if (!reason) return { error: "Elige un motivo." };
       const units = parseUnits(text(form, "units"));
       if (units === undefined) return { error: "Las unidades deben ser un número entero, uno o más." };
@@ -175,9 +167,9 @@ export default function Inventario({ loaderData, actionData }: Route.ComponentPr
           <label className="flex flex-col gap-1">
             <span className="font-medium">Motivo</span>
             <select name="reason" defaultValue="restock" className={field}>
-              {reasons.map((reason) => (
+              {ADJUSTMENT_REASONS.map((reason) => (
                 <option key={reason} value={reason}>
-                  {reasonLabel[reason]}
+                  {adjustmentReasonLabel[reason]}
                 </option>
               ))}
             </select>
@@ -241,11 +233,11 @@ export default function Inventario({ loaderData, actionData }: Route.ComponentPr
             {adjustments.map((adjustment) => (
               <li
                 key={adjustment.id}
-                aria-label={`${reasonLabel[adjustment.reason]} de ${adjustment.units} de ${adjustment.itemName}`}
+                aria-label={`${adjustmentReasonLabel[adjustment.reason]} de ${adjustment.units} de ${adjustment.itemName}`}
                 className="rounded-2xl border border-stone-200 bg-white p-4"
               >
-                <p className="font-medium">{`${reasonLabel[adjustment.reason]} ${
-                  adjustment.reason === "restock" ? "+" : "-"
+                <p className="font-medium">{`${adjustmentReasonLabel[adjustment.reason]} ${
+                  adjustmentSign(adjustment.reason) === 1 ? "+" : "-"
                 }${adjustment.units} · ${adjustment.itemName}`}</p>
                 <p className="break-words text-stone-600">{`${formatDay(adjustment.day)} · ${adjustment.byName}${
                   adjustment.note ? ` · ${adjustment.note}` : ""

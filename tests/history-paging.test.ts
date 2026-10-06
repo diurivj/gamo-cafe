@@ -18,6 +18,7 @@ import { cancelAdjustment, recordAdjustment } from "~/backend/inventory";
 import { as, seedUser } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { seedCustomer } from "./support/customers";
+import { countingD1 } from "./support/d1";
 import { advanceClock, runTest, setClock } from "./support/effect";
 
 // Historial's paging and its read budget (spec §2.4, §6.2, §7.4, §10.7). A
@@ -160,54 +161,6 @@ it("interleaves the fact tables in time order across page boundaries", () =>
       expect(new Set(seen.slice(0, HISTORY_PAGE_SIZE).map((entry) => entry.kind)).size).toBe(6);
     }),
   ));
-
-/**
- * The D1 binding with counts of what the read asked of it, as in
- * tests/cuentas.test.ts: `prepare` counts a statement and `all` adds the rows
- * D1 reports reading.
- */
-function countingD1(d1: D1Database) {
-  const counter = { statements: 0, rowsRead: 0 };
-  const unwrap = new WeakMap<object, D1PreparedStatement>();
-
-  const measured = (statement: D1PreparedStatement): D1PreparedStatement => {
-    const wrapper = new Proxy(statement, {
-      get(target, property, receiver) {
-        if (property === "all") {
-          return async () => {
-            const result = await target.all();
-            counter.rowsRead += result.meta.rows_read;
-            return result;
-          };
-        }
-        if (property === "bind") {
-          return (...params: ReadonlyArray<string | number | null>) => measured(target.bind(...params));
-        }
-        const value = Reflect.get(target, property, receiver);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    });
-    unwrap.set(wrapper, statement);
-    return wrapper;
-  };
-
-  return {
-    counter,
-    d1: new Proxy(d1, {
-      get(target, property, receiver) {
-        if (property === "prepare") {
-          return (sql: string) => {
-            counter.statements += 1;
-            return measured(target.prepare(sql));
-          };
-        }
-        const value = Reflect.get(target, property, receiver);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    }) as D1Database,
-  };
-}
-
 /** A page read with a D1 that counts what it does. */
 async function page(user: User, cursor: HistoryCursor | null) {
   const { counter, d1 } = countingD1(env.DB);

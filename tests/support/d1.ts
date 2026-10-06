@@ -1,11 +1,11 @@
 /**
  * A D1 binding with counts of what an operation asked of it. `prepare` counts
- * a statement; `all`, `run` and `batch` add the rows D1 reports reading. Used
- * by the reads that must stay bounded by their page, whatever the history
- * holds (spec §2.4).
+ * a statement and records the widest parameter list; `all`, `run` and `batch`
+ * add the rows D1 reports reading and writing. Used by the reads and writes
+ * that must stay bounded by their page, and under D1's limits (spec §2.4).
  */
 export function countingD1(d1: D1Database) {
-  const counter = { statements: 0, rowsRead: 0, rowsWritten: 0 };
+  const counter = { statements: 0, rowsRead: 0, rowsWritten: 0, maxParams: 0 };
   const unwrap = new WeakMap<object, D1PreparedStatement>();
 
   const measured = (statement: D1PreparedStatement): D1PreparedStatement => {
@@ -28,7 +28,10 @@ export function countingD1(d1: D1Database) {
           };
         }
         if (property === "bind") {
-          return (...params: ReadonlyArray<string | number | null>) => measured(target.bind(...params));
+          return (...params: ReadonlyArray<string | number | null>) => {
+            counter.maxParams = Math.max(counter.maxParams, params.length);
+            return measured(target.bind(...params));
+          };
         }
         const value = Reflect.get(target, property, receiver);
         return typeof value === "function" ? value.bind(target) : value;

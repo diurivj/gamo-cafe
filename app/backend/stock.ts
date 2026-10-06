@@ -1,5 +1,7 @@
 import { Effect, Schema } from "effect";
 
+import { ADJUSTMENT_REASONS, adjustmentSign, type AdjustmentReason } from "~/shared/adjustment";
+import { chunk } from "~/shared/chunk";
 import type { Day, Instant } from "~/shared/day";
 
 import { requireAdmin } from "./current-user";
@@ -37,8 +39,6 @@ export function changeStock(itemId: string, units: number, when?: Condition): St
     ...(when?.params ?? []),
   );
 }
-
-export type AdjustmentReason = "restock" | "waste" | "internal_use";
 
 /**
  * Puts a removed Line's units back, for the batch that records its removal:
@@ -111,7 +111,7 @@ export function adjustmentStatements(adjustment: NewAdjustment): ReadonlyArray<S
        SELECT ?, id, ?, ?, ?, ?, ?, ? FROM items WHERE id = ? AND stock_tracked = 1`,
       id, reason, units, note, by, at, day, itemId,
     ),
-    changeStock(itemId, reason === "restock" ? units : -units),
+    changeStock(itemId, adjustmentSign(reason) * units),
   ];
 }
 
@@ -165,12 +165,6 @@ export interface NewCount {
  * handful of statements, well under the 50 a request may issue.
  */
 const COUNTED_LINES_PER_STATEMENT = 32;
-
-function chunk<A>(items: ReadonlyArray<A>, size: number): ReadonlyArray<ReadonlyArray<A>> {
-  const parts: Array<ReadonlyArray<A>> = [];
-  for (let at = 0; at < items.length; at += size) parts.push(items.slice(at, at + size));
-  return parts;
-}
 
 const rowsOf = (size: number) => Array.from({ length: size }, () => "(?, ?, ?)").join(", ");
 
@@ -232,7 +226,7 @@ export function countStatements(count: NewCount): ReadonlyArray<Statement> {
 const Adjustment = Schema.Struct({
   id: Schema.String,
   itemId: Schema.String,
-  reason: Schema.Literals(["restock", "waste", "internal_use"]),
+  reason: Schema.Literals(ADJUSTMENT_REASONS),
   units: Schema.Int,
   note: Schema.NullOr(Schema.String),
   by: Schema.String,

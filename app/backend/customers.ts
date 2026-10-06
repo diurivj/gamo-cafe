@@ -1,7 +1,7 @@
 import { Data, Effect, Schema } from "effect";
 
 import { newId } from "~/shared/id";
-import { normalizeName } from "~/shared/normalize-name";
+import { normalizeName, prefixRange } from "~/shared/normalize-name";
 
 import { CurrentUser, requireAdmin } from "./current-user";
 import { Db } from "./db";
@@ -77,9 +77,6 @@ const FoundRow = Schema.Struct({
   retired_at: Schema.NullOr(Schema.Int),
 });
 
-/** Sorts after every name that starts with the text before it. */
-const LAST_CHARACTER = "\u{10FFFF}";
-
 /** How many Customers a search answers with at most. */
 export const SEARCH_LIMIT = 50;
 
@@ -104,7 +101,7 @@ export const searchCustomers = Effect.fn("searchCustomers")(function* (
        ${options.includeRetired ? "" : "AND retired_at IS NULL"}
      ORDER BY normalized_name, added_at
      LIMIT ?`,
-    prefix, prefix + LAST_CHARACTER, SEARCH_LIMIT,
+    prefix, prefixRange(prefix), SEARCH_LIMIT,
   );
   return rows.map((row) => ({ id: row.id, name: row.name, note: row.note, retiredAt: row.retired_at }));
 });

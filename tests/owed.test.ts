@@ -12,6 +12,7 @@ import { listOwed } from "~/backend/owed";
 import { as, seedUser } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { seedCustomer } from "./support/customers";
+import { countingD1 } from "./support/d1";
 import { advanceClock, runTest, setClock } from "./support/effect";
 
 // Por cobrar (spec §5.3, §5.9, §6.2, §4.1). The Owed figure and the row
@@ -136,50 +137,6 @@ describe("listOwed", () => {
       }),
     ));
 });
-
-/**
- * The D1 binding with counts of what the operation asked of it. `prepare`
- * counts a statement; `all` adds the rows D1 reports reading. The same shape
- * as the counter in tests/cuentas.test.ts.
- */
-function countingD1(d1: D1Database) {
-  const counter = { statements: 0, rowsRead: 0 };
-
-  const measured = (statement: D1PreparedStatement): D1PreparedStatement =>
-    new Proxy(statement, {
-      get(target, property, receiver) {
-        if (property === "all" || property === "run") {
-          return async () => {
-            const result = await target[property]();
-            counter.rowsRead += result.meta.rows_read;
-            return result;
-          };
-        }
-        if (property === "bind") {
-          return (...params: ReadonlyArray<string | number | null>) => measured(target.bind(...params));
-        }
-        const value = Reflect.get(target, property, receiver);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    });
-
-  return {
-    counter,
-    d1: new Proxy(d1, {
-      get(target, property, receiver) {
-        if (property === "prepare") {
-          return (sql: string) => {
-            counter.statements += 1;
-            return measured(target.prepare(sql));
-          };
-        }
-        const value = Reflect.get(target, property, receiver);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    }) as D1Database,
-  };
-}
-
 /** Runs `listOwed` as this Admin with a D1 that counts what it does. */
 async function listed(admin: CurrentUser["Service"]) {
   const { counter, d1 } = countingD1(env.DB);

@@ -64,7 +64,7 @@ export async function loader({ context, request }: Route.LoaderArgs) {
 }
 
 /** This page's URL for a page number, the filters kept. */
-function pageUrl(filters: ReturnType<typeof filtersOf>, page: number) {
+function filtersUrl(filters: ReturnType<typeof filtersOf>, page: number) {
   const params = new URLSearchParams();
   if (filters.day !== null) params.set("dia", filters.day);
   if (filters.state !== null) params.set("estado", filters.state);
@@ -157,7 +157,7 @@ export default function Cuentas({ loaderData }: Route.ComponentProps) {
       {page > 1 || hasMore ? (
         <nav aria-label="Páginas" className="mt-4 flex items-center justify-between gap-3">
           {page > 1 ? (
-            <Link to={pageUrl({ day, state, customerId, page }, page - 1)} className={pageLink}>
+            <Link to={filtersUrl({ day, state, customerId, page }, page - 1)} className={pageLink}>
               Anterior
             </Link>
           ) : (
@@ -165,7 +165,7 @@ export default function Cuentas({ loaderData }: Route.ComponentProps) {
           )}
           <span aria-current="page" className="text-stone-600">{`Página ${page}`}</span>
           {hasMore ? (
-            <Link to={pageUrl({ day, state, customerId, page }, page + 1)} className={pageLink}>
+            <Link to={filtersUrl({ day, state, customerId, page }, page + 1)} className={pageLink}>
               Siguiente
             </Link>
           ) : (

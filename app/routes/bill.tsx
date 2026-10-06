@@ -29,6 +29,7 @@ import { newId } from "~/shared/id";
 import { type Centavos, formatMoney, parsePesos } from "~/shared/money";
 import { PAYMENT_METHODS, paymentMethodLabel } from "~/shared/payment";
 import { paymentMessages } from "~/shared/payment-messages";
+import { trimToNull } from "~/shared/text";
 
 import type { Route } from "./+types/bill";
 
@@ -175,7 +176,7 @@ async function answerCorrection(
   if (!Number.isSafeInteger(revision)) {
     return { error: "Recarga la página e intenta de nuevo." };
   }
-  const reason = String(form.get("reason") ?? "").trim() || null;
+  const reason = trimToNull(String(form.get("reason") ?? ""));
 
   const program = Effect.gen(function* () {
     switch (intent) {

@@ -17,3 +17,13 @@ export function normalizeName(name: string): string {
     .trim()
     .replace(/\s+/g, " ");
 }
+
+/**
+ * The exclusive end of a prefix range on a `normalized_name` (spec §5.1,
+ * §5.2): a search is `normalized_name >= prefix AND normalized_name <
+ * prefixRange(prefix)`, which an index answers and in which nothing typed is
+ * a wildcard.
+ */
+export function prefixRange(prefix: string): string {
+  return prefix + "\u{10FFFF}";
+}

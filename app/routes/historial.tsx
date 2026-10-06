@@ -5,6 +5,7 @@ import { CurrentUser } from "~/backend/current-user";
 import { type HistoryCursor, type HistoryEntry, listHistory } from "~/backend/history";
 import { run } from "~/backend/run.server";
 import { refuseRead, requireAdminUser } from "~/catalog-forms.server";
+import { adjustmentReasonLabel, adjustmentSign, type AdjustmentReason } from "~/shared/adjustment";
 import { dayOf, formatDay, formatTime } from "~/shared/day";
 import { formatMoney } from "~/shared/money";
 import { paymentMethodLabel } from "~/shared/payment";
@@ -35,94 +36,95 @@ export async function loader({ context, request }: Route.LoaderArgs) {
   return page;
 }
 
-const adjustmentLabel = {
-  restock: "Entrada",
-  waste: "Merma",
-  internal_use: "Consumo interno",
-} as const;
+/**
+ * Everything one row shows, from the entry alone: its line, its link, the
+ * note under it and the reason an Admin owed. One switch per kind, so a kind
+ * the entry union gains cannot be forgotten.
+ */
+interface EntryView {
+  readonly headline: string;
+  readonly target: { readonly to: string; readonly label: string };
+  readonly detail: string | null;
+  readonly reason: string | null;
+}
 
-/** Entrada adds; Merma and Consumo interno subtract (spec §5.8). */
-const sign = (reason: keyof typeof adjustmentLabel) => (reason === "restock" ? "+" : "-");
+const billTarget = (entry: { readonly billId: string }) => ({
+  to: `/cuentas/${entry.billId}`,
+  label: "Ver cuenta",
+});
 
-/** What happened, in one line. */
-function headline(entry: HistoryEntry): string {
+const billDetail = (entry: { readonly billLabel: string | null }) =>
+  `Cuenta ${entry.billLabel === null ? "sin cliente" : `de ${entry.billLabel}`}`;
+
+/** An Adjustment's line, with the sign its reason gives it (spec §5.8). */
+const adjustmentText = (reason: AdjustmentReason, units: number, itemName: string) =>
+  `${adjustmentReasonLabel[reason]} ${adjustmentSign(reason) === 1 ? "+" : "-"}${units} · ${itemName}`;
+
+function viewOf(entry: HistoryEntry): EntryView {
   switch (entry.kind) {
     case "line_removal":
-      return `Producto quitado: ${entry.quantity} × ${entry.itemName} — ${formatMoney(entry.amount)}`;
+      return {
+        headline: `Producto quitado: ${entry.quantity} × ${entry.itemName} — ${formatMoney(entry.amount)}`,
+        target: billTarget(entry),
+        detail: billDetail(entry),
+        reason: entry.reason,
+      };
     case "payment_removal":
-      return `Pago quitado: ${formatMoney(entry.amount)} · ${paymentMethodLabel[entry.method]}`;
+      return {
+        headline: `Pago quitado: ${formatMoney(entry.amount)} · ${paymentMethodLabel[entry.method]}`,
+        target: billTarget(entry),
+        detail: billDetail(entry),
+        reason: entry.reason,
+      };
     case "bill_void":
-      return `Cuenta cancelada: ${formatMoney(entry.total)}`;
+      return {
+        headline: `Cuenta cancelada: ${formatMoney(entry.total)}`,
+        target: billTarget(entry),
+        detail: billDetail(entry),
+        reason: entry.reason,
+      };
     case "bill_edit":
-      return entry.field === "customer"
-        ? `Cliente: ${entry.previous ?? "Sin cliente"} → ${entry.next ?? "Sin cliente"}`
-        : `Nota: ${entry.previous === null ? "Sin nota" : `«${entry.previous}»`} → ${
-            entry.next === null ? "Sin nota" : `«${entry.next}»`
-          }`;
+      return {
+        headline:
+          entry.field === "customer"
+            ? `Cliente: ${entry.previous ?? "Sin cliente"} → ${entry.next ?? "Sin cliente"}`
+            : `Nota: ${entry.previous === null ? "Sin nota" : `«${entry.previous}»`} → ${
+                entry.next === null ? "Sin nota" : `«${entry.next}»`
+              }`,
+        target: billTarget(entry),
+        detail: "Cuenta",
+        reason: null,
+      };
     case "adjustment":
-      return `${adjustmentLabel[entry.reason]} ${sign(entry.reason)}${entry.units} · ${entry.itemName}`;
+      return {
+        headline: adjustmentText(entry.reason, entry.units, entry.itemName),
+        target: { to: `/productos/${entry.itemId}`, label: "Ver producto" },
+        detail: entry.note,
+        reason: null,
+      };
     case "adjustment_cancellation":
-      return `Ajuste cancelado: ${adjustmentLabel[entry.adjustmentReason]} ${sign(entry.adjustmentReason)}${
-        entry.units
-      } · ${entry.itemName}`;
-  }
-}
-
-/** The Bill an entry belongs to, or the Item an Adjustment touched. */
-function target(entry: HistoryEntry): { readonly to: string; readonly label: string } {
-  switch (entry.kind) {
-    case "adjustment":
-    case "adjustment_cancellation":
-      return { to: `/productos/${entry.itemId}`, label: "Ver producto" };
-    default:
-      return { to: `/cuentas/${entry.billId}`, label: "Ver cuenta" };
-  }
-}
-
-/** The Bill the entry corrected, and any note the Adjustment carries. */
-function detail(entry: HistoryEntry): string | null {
-  switch (entry.kind) {
-    case "line_removal":
-    case "payment_removal":
-    case "bill_void":
-      return `Cuenta ${entry.billLabel === null ? "sin cliente" : `de ${entry.billLabel}`}`;
-    case "bill_edit":
-      return "Cuenta";
-    case "adjustment":
-      return entry.note;
-    case "adjustment_cancellation":
-      return null;
-  }
-}
-
-/** The reason an Admin owed, where there is one. */
-function reasonOf(entry: HistoryEntry): string | null {
-  switch (entry.kind) {
-    case "line_removal":
-    case "payment_removal":
-    case "bill_void":
-    case "adjustment_cancellation":
-      return entry.reason;
-    default:
-      return null;
+      return {
+        headline: `Ajuste cancelado: ${adjustmentText(entry.adjustmentReason, entry.units, entry.itemName)}`,
+        target: { to: `/productos/${entry.itemId}`, label: "Ver producto" },
+        detail: null,
+        reason: entry.reason,
+      };
   }
 }
 
 function Entry({ entry }: { entry: HistoryEntry }) {
-  const link = target(entry);
-  const detailText = detail(entry);
-  const reason = reasonOf(entry);
+  const view = viewOf(entry);
   return (
     <li data-history-id={entry.id} className="rounded-2xl border border-stone-200 bg-white p-4">
-      <p className="break-words font-medium">{headline(entry)}</p>
-      {detailText === null ? null : <p className="mt-1 break-words text-stone-600">{detailText}</p>}
+      <p className="break-words font-medium">{view.headline}</p>
+      {view.detail === null ? null : <p className="mt-1 break-words text-stone-600">{view.detail}</p>}
       <p className="mt-1 text-stone-600">{`${formatDay(dayOf(entry.at))} · ${formatTime(entry.at)} · ${
         entry.byName
       }`}</p>
-      {reason === null ? null : <p className="mt-1 break-words">Motivo: {reason}</p>}
+      {view.reason === null ? null : <p className="mt-1 break-words">Motivo: {view.reason}</p>}
       <p className="mt-2">
-        <Link to={link.to} className="font-medium underline">
-          {link.label}
+        <Link to={view.target.to} className="font-medium underline">
+          {view.target.label}
         </Link>
       </p>
     </li>

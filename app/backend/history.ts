@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect";
 
+import { ADJUSTMENT_REASONS, type AdjustmentReason } from "~/shared/adjustment";
 import type { Instant } from "~/shared/day";
 import type { Centavos } from "~/shared/money";
 import type { PaymentMethod } from "~/shared/payment";
@@ -7,7 +8,6 @@ import type { PaymentMethod } from "~/shared/payment";
 import type { BillEditField } from "./bills";
 import { requireAdmin } from "./current-user";
 import { Db, type Param } from "./db";
-import type { AdjustmentReason } from "./stock";
 
 /**
  * Historial (spec §5.7, §6.2, §7.4, §10.4): the corrections and Adjustments,
@@ -205,7 +205,7 @@ const AdjustmentRow = Schema.Struct({
   id: Schema.String,
   at: Schema.Int,
   byName: Schema.String,
-  reason: Schema.Literals(["restock", "waste", "internal_use"]),
+  reason: Schema.Literals(ADJUSTMENT_REASONS),
   units: Schema.Int,
   note: Schema.NullOr(Schema.String),
   itemId: Schema.String,
@@ -218,7 +218,7 @@ const AdjustmentCancellationRow = Schema.Struct({
   byName: Schema.String,
   reason: Schema.String,
   adjustmentId: Schema.String,
-  adjustmentReason: Schema.Literals(["restock", "waste", "internal_use"]),
+  adjustmentReason: Schema.Literals(ADJUSTMENT_REASONS),
   units: Schema.Int,
   itemId: Schema.String,
   itemName: Schema.String,

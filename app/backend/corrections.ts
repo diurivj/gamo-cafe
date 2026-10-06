@@ -3,6 +3,7 @@ import { Data, Effect, Schema } from "effect";
 import { BILL_STATES } from "~/shared/bill-state";
 import { newId } from "~/shared/id";
 import type { Centavos } from "~/shared/money";
+import { trimToNull } from "~/shared/text";
 
 import { BillNotFound } from "./bills";
 import { AdminOnly, CurrentUser, requireAdmin } from "./current-user";
@@ -57,9 +58,6 @@ export class TotalBelowPayments extends Data.TaggedError("TotalBelowPayments")<{
   /** What the total would become. */
   readonly remaining: Centavos;
 }> {}
-
-/** A reason as stored: space trimmed; empty is no reason. */
-const tidyReason = (reason: string | null | undefined) => (reason ?? "").trim() || null;
 
 const BillRow = Schema.Struct({
   total: Schema.Int,
@@ -141,7 +139,7 @@ export const removeLine = Effect.fn("removeLine")(function* (input: RemoveLineIn
   const db = yield* Db;
   const user = yield* CurrentUser;
   const { billId, lineId, expectedRevision } = input;
-  const reason = tidyReason(input.reason);
+  const reason = trimToNull(input.reason);
   const isAdmin = user.role === "admin";
 
   const bill = yield* readBill(billId);
@@ -246,7 +244,7 @@ export const removePayment = Effect.fn("removePayment")(function* (input: Remove
   const db = yield* Db;
   const user = yield* requireAdmin;
   const { billId, paymentId, expectedRevision } = input;
-  const reason = tidyReason(input.reason);
+  const reason = trimToNull(input.reason);
 
   const bill = yield* readBill(billId);
   if (!bill) return yield* new BillNotFound({ billId });
@@ -333,7 +331,7 @@ export const voidBill = Effect.fn("voidBill")(function* (input: VoidBillInput) {
   const db = yield* Db;
   const user = yield* requireAdmin;
   const { billId, expectedRevision } = input;
-  const reason = tidyReason(input.reason);
+  const reason = trimToNull(input.reason);
 
   const bill = yield* readBill(billId);
   if (!bill) return yield* new BillNotFound({ billId });

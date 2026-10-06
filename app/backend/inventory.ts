@@ -1,12 +1,14 @@
 import { Data, Effect, Schema } from "effect";
 
+import { ADJUSTMENT_REASONS, type AdjustmentReason } from "~/shared/adjustment";
 import type { Day, Instant } from "~/shared/day";
 import { newId } from "~/shared/id";
+import { trimToNull } from "~/shared/text";
 
 import { ItemNotFound } from "./catalog";
 import { requireAdmin } from "./current-user";
 import { Db, statement } from "./db";
-import { adjustmentStatements, type AdjustmentReason } from "./stock";
+import { adjustmentStatements } from "./stock";
 import { now, today } from "./time";
 
 /**
@@ -97,7 +99,7 @@ export const recordAdjustment = Effect.fn("recordAdjustment")(function* (input: 
   const db = yield* Db;
 
   if (!Number.isSafeInteger(input.units) || input.units < 1) return yield* new InvalidAdjustmentUnits();
-  const note = input.note?.trim() ? input.note.trim() : null;
+  const note = trimToNull(input.note);
   const id = newId();
 
   // The fact's insert is conditional on the Item being stock-tracked, so its
@@ -136,8 +138,8 @@ export const cancelAdjustment = Effect.fn("cancelAdjustment")(function* (adjustm
   const admin = yield* requireAdmin;
   const db = yield* Db;
 
-  const why = reason.trim();
-  if (why === "") return yield* new ReasonMissing();
+  const why = trimToNull(reason);
+  if (why === null) return yield* new ReasonMissing();
   const id = newId();
 
   const [cancelled] = yield* db.batch([
@@ -185,7 +187,7 @@ const RecentRow = Schema.Struct({
   id: Schema.String,
   itemId: Schema.String,
   itemName: Schema.String,
-  reason: Schema.Literals(["restock", "waste", "internal_use"]),
+  reason: Schema.Literals(ADJUSTMENT_REASONS),
   units: Schema.Int,
   note: Schema.NullOr(Schema.String),
   byName: Schema.String,
