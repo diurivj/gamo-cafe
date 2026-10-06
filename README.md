@@ -49,6 +49,8 @@ app/
     payments.ts    the statements a Payment writes (paymentStatements and handoverStatements) and its errors
     day.ts         the figures of a Day: a User's own records (Mi día), every User's over a range and the Items sold (Día reuses them)
     owed.ts        Por cobrar: each Customer's Owed, the Open Bills with no Customer and the overall Owed
+    history.ts     Historial: the corrections and Adjustments, newest first, a keyset page over the six fact tables
+    seed.ts        the synthetic year of the §10.7 proof kit, as plain SQL that scripts/seed.ts writes
   shared/      Plain functions, no Effect. Safe in the browser.
     money.ts       centavos, formatMoney, parsePesos, changeFor
     bill-state.ts  a Bill's states, their Spanish words, isOpenBill
@@ -61,13 +63,18 @@ app/
     units.ts       parseUnits (a typed whole number of units)
     page.ts        pageFrom and pageUrl: a list's page in the URL
     discrepancy.ts discrepancyText: Faltante, Sobrante, or Sin diferencia
+    correction-messages.ts  what a correction's rule violations say on screen
+    customer-messages.ts  what a Customer form's rule violations say on screen
+    chunk.ts       chunk: a list in parts of at most N
+    adjustment.ts  an Adjustment's reasons, their Spanish words and their sign
+    text.ts        trimToNull: form text trimmed, empty as nothing said
   components/  React components used by more than one screen
     customer-picker.tsx  CustomerPicker, the form field that chooses a Customer
     payment-fields.tsx  PaymentFields, a Payment's method, amount and cash change
     item-fields.tsx  ItemFields, the fields of an Item's form, new or existing
     count-line.tsx  CountLineItem, one line of a Count as Conteo and Diferencias show it
   session.server.ts  the session middleware, requireUser, the cookie
-  catalog-forms.server.ts  what the Productos routes share: the Admin gate, form parsing, error messages
+  catalog-forms.server.ts  the shared Admin gate (`requireAdminUser`, `refuseRead`) and the Productos forms' parsing and error messages
   routes/      Route modules; resources/ holds routes without UI
     shell.tsx      the signed-in layout and its navigation; screens go inside it
   routes.ts    Route table
@@ -81,11 +88,11 @@ e2e/             Playwright
 ## Conventions
 
 - **Money** is integer centavos. Add and subtract with integer `+` and `-`; turn it into text with `formatMoney` and read typed text with `parsePesos`. Never divide or multiply an amount by 100.
-- **Time**: an instant is epoch milliseconds; a Day is `YYYY-MM-DD` in `America/Mexico_City`, computed when a record is written and stored with it. Backend code gets them only from `now` and `today` in `~/backend/time`, never from `Date`.
+- **Time**: an instant is epoch milliseconds; a Day is `YYYY-MM-DD` in `America/Mexico_City`, computed when a record is written and stored with it. Backend code gets them only from `now` and `today` in `~/backend/time`, never from `Date`. The seed generator (`~/backend/seed.ts`) is the one exception: its synthetic year does calendar arithmetic of its own (`addDays`, `weekDay`, `localInstant`), over fixed dates and not the clock.
 - **Ids** are opaque strings from `newId()`.
 - **Facts** are inserted once and never updated or deleted. **Projections** are written only in the same `db.batch` as the fact that changes them (spec §7.1). The command below recomputes them all from the facts at any time.
 - **Stock** is the projection `stock_levels`, and only `~/backend/stock` writes it. An operation that moves Stock puts `changeStock(itemId, units)` (relative, negative to lower) in the same batch as its fact; an Adjustment is `adjustmentStatements({...})`. Both do nothing to an Item that is not stock-tracked. An Item with no row has a Stock of zero.
-- **Names** of Items are stored with `tidyName` and compared with `normalizeName` (`~/shared/name`), kept in a `normalized_name` column.
+- **Names** of Items are stored as `~/backend/catalog` tidies them (trimmed, single spaces) and compared with `normalizeName` (`~/shared/normalize-name`), kept in a `normalized_name` column.
 - **Rows** read from D1 are decoded with an Effect `Schema`: `db.first` and `db.all` take the schema as their first argument.
 - **Effect**: import only from `"effect"`. Everything under a subpath (`effect/sql`, `effect/http`, …) and some `Schema` exports are unstable (ADR 0006); `tests/effect-stability.test.ts` fails if one is used. No Effect in browser code: `app/shared/` and components must not import it.
 - **Migrations** are named after the ticket that adds them: `NNNN_<slug>.sql`, where `NNNN` is the zero-padded ticket number (`0007_bills.sql`; a second one from the same ticket is `0007b_...`). Create the file by hand. Tables are `STRICT`.
@@ -161,7 +168,7 @@ export async function action({ context, params, request }: Route.ActionArgs) {
 
 - Every loader and action starts with `requireUser(context)`. The session middleware on the root route has already answered a request without a valid session with a redirect to `/entrar`, before any loader or action ran; `requireUser` hands over the User it found.
 - An operation that only an Admin may run starts with `yield* requireAdmin` (from `~/backend/current-user`). That puts `AdminOnly` among its errors, so the route's `switch` has to answer it. An Admin screen answers it with `throw new Response(null, { status: 403 })`, in its loader and in its action; [`app/routes/users.tsx`](app/routes/users.tsx) does. The root `ErrorBoundary` renders every 403 as its Spanish "No tienes acceso a esta página" page, so the status stays 403 and the words are not the framework's.
-- A route with several forms tells them apart by the submit button's `name="intent"`, and builds one program for whichever was sent, inside a single `Effect.gen`, so that `onError` gets the union of every operation's errors (`programFor` in `app/routes/users.tsx`). A form it does not understand is answered 400.
+- A route with several forms tells them apart by the submit button's `name="intent"`, and builds one program for whichever was sent inside a single `Effect.gen`, so that `onError` gets the union of every operation's errors (`programFor` in `app/routes/users.tsx`). A form it does not understand is answered 400. A route whose forms belong to distinct families may run more than one program: `app/routes/bill.tsx` runs one for the corrections, with its own `run` and its own exhaustive error map, and another for the payment and edit forms. Each `run` still gets a typed, exhaustive error map — a `switch` on `error._tag` with no `default`.
 - `run(context, program)` resolves with the program's value.
 - The third argument receives every typed error except `DbError` and returns what the route answers with, or throws a `redirect(...)`. It is required exactly when the program has such errors, and a `switch` on `error._tag` with no `default` makes the compiler report a missing case.
 - `DbError` is logged and becomes a 500 for the error boundary. A bug in the program is rethrown.
@@ -222,9 +229,10 @@ Needs a Cloudflare account on Workers Free and D1 Free (the Gamo account itself 
    ```
 
 2. In `wrangler.jsonc`, under `env.production`: set `name` to `gamo-cafe-proof`, `d1_databases[0].database_name` to `gamo-cafe-proof`, and `d1_databases[0].database_id` to the printed id.
-3. Apply the migrations and deploy. The address is `https://gamo-cafe-proof.<account>.workers.dev`:
+3. Take the export §3.3 asks for before a production migration — on a fresh disposable database there is little to export, but the runbook does it in the same order as on Gamo's account — then apply the migrations and deploy. The address is `https://gamo-cafe-proof.<account>.workers.dev`:
 
    ```sh
+   npx wrangler d1 export gamo-cafe-proof --remote --output=gamo-cafe-proof-before-migrate.sql
    npm run db:migrate:production
    npm run deploy:production
    ```
@@ -298,7 +306,7 @@ Everyone else gets their code from an Admin on **Usuarios** (`app/backend/users.
 
 ## Names, and choosing a Customer
 
-A name that must be unique or searchable "ignoring case and accents" is stored twice: as typed, and as `normalizeName(name)` from `~/shared/normalize-name` in a `normalized_name` column. Compare and search on that column only. A prefix search is a range, which an index answers and in which nothing typed is a wildcard: `normalized_name >= ? AND normalized_name < ?`, bound to the prefix and the prefix plus `"\u{10FFFF}"` (see `searchCustomers`).
+A name that must be unique or searchable "ignoring case and accents" is stored twice: as typed, and as `normalizeName(name)` from `~/shared/normalize-name` in a `normalized_name` column. Compare and search on that column only. A prefix search is a range, which an index answers and in which nothing typed is a wildcard: `normalized_name >= ? AND normalized_name < ?`, bound to the prefix and `prefixRange(prefix)` (see `searchCustomers`).
 
 `CustomerPicker` from `~/components/customer-picker` is a form field: search as the name is typed, matches first, "add new", retired Customers never offered. It talks to its own resource route (`/clientes/selector`), so the screen it sits on needs nothing for it.
 
@@ -320,7 +328,7 @@ A Payment is always recorded in the same batch as what moves the Bill's `paid` p
 
 A D1 batch cannot branch, so the rules are SQL conditions: `paid + amount <= total` on both statements, and `revision = ? AND state IN ('open', 'partial') AND total - paid >= ?` when the batch is a lone `takePayment`. `paymentStatements(payment, when)` takes the `Condition` the rest of the batch shares, so a refused operation writes neither the Payment nor the projection. Two phones paying the same Bill in full at once therefore record exactly one Payment; the other gets `BillChanged`. When the first statement's `changes` is 0, `takePayment` reads the Bill again to answer the exact rule (`BillChanged`, `BillIsVoided` or `PaymentExceedsOwed`); the routes turn those into `~/shared/payment-messages.ts`.
 
-`takePayment` returns `{ id, amount, bill }`. A Worker who pays a Bill in full is redirected to Cuentas abiertas instead of staying on the page, because a Worker may not open a Paid Bill (§4.1). The amount handed over for cash is never submitted or stored: `PaymentFields` from `~/components/payment-fields` shows `changeFor(handedOver, amount)` while it is typed.
+`takePayment` returns `{ id, amount, paid }`. A Worker who pays a Bill in full is redirected to Cuentas abiertas instead of staying on the page, because a Worker may not open a Paid Bill (§4.1). The amount handed over for cash is never submitted or stored: `PaymentFields` from `~/components/payment-fields` shows `changeFor(handedOver, amount)` while it is typed.
 
 ## Abonar across a Customer's Bills
 
