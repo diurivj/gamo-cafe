@@ -1,6 +1,6 @@
 # 21 — Free-plan proof kit: synthetic year, statement budgets and the proof runner
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 19, 20
 Spec: [`../spec.md`](../spec.md) §2.4, §10.7, §3.2 (exit rule), §3.6
 
@@ -22,3 +22,4 @@ Everything needed for the §10.7 release gate short of touching a real Cloudflar
 ## Comments
 
 - 2026-10-06: Implemented on `ticket/21-proof` (commit `7b65fb9`). `app/backend/seed.ts` builds the year as SQL, and the seed's last statements are the ticket 19 rebuild, so a loaded database is consistent by construction. `npm run seed [-- --local|:production]` writes `seed.sql` (161 statements, 1.9 MB) and loads it: 71,084 rows written as the local binding reports it, under D1 Free's 100,000 a day; `projections:verify` finds no differences after a local load. `tests/proof-budget.test.ts` measures the nine §10.7 requests as real HTTP requests (a counting D1 swapped into the binding) at four months and at a year: 2–27 statements each and the same rows read at both sizes; no request needed a fix. `tests/proof-seed.test.ts` holds the shape, consistency and limit checks. `scripts/proof.ts` runs each request at least 20 times (`--runs`, default 21) or a busy Day with `--busy-day`, and writes `proof-results.json` / `proof-busy-day.json`; it was rehearsed end to end against `npm run dev` over the seeded local D1 (180 requests, none failed). The runbook is the README's "The free-plan proof". Ticket 22 needs no code change: only `wrangler.jsonc`'s `env.production` name and database id. Notes: `21-notes.md`. Caveat: the remote paths (`seed:production`, `deploy:production` and the Cloudflare figures) were not exercised — no account — which is exactly what ticket 22 does.
+- Merged into `gamo-cafe-v1` at `7b65fb9`.
