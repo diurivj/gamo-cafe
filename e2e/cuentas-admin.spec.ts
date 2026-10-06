@@ -177,7 +177,8 @@ test("a Worker is refused Cuentas and sees no past Bills; an Admin sees Pagadas 
   const refused = await page.goto("/cuentas");
 
   expect(refused?.status()).toBe(403);
-  await expect(page.getByRole("heading", { name: "Algo salió mal" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No tienes acceso a esta página" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
   await page.goto(`/clientes/${ruiz.id}`);
 

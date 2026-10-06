@@ -266,7 +266,7 @@ const field = "w-full rounded-xl border border-stone-300 bg-white px-4 py-3 text
 const saveButton = "rounded-xl border border-stone-300 bg-white px-4 py-3 font-medium disabled:opacity-60";
 
 const quietButton =
-  "rounded-xl border border-red-300 px-3 py-2 font-medium text-red-700 active:bg-red-50 disabled:opacity-60";
+  "rounded-xl border border-red-300 px-4 py-3 font-medium text-red-700 active:bg-red-50 disabled:opacity-60";
 
 /** Who corrected something and when: the time today, else with the day. */
 const correctedAt = (billDay: string, at: Instant) => {
@@ -278,7 +278,7 @@ const correctedAt = (billDay: string, at: Instant) => {
 const reasonField = (
   <label className="flex flex-col text-sm">
     Motivo
-    <input name="reason" required className="rounded-lg border border-stone-300 px-2 py-1" />
+    <input name="reason" required className="rounded-lg border border-stone-300 px-3 py-2 text-base" />
   </label>
 );
 
@@ -344,9 +344,14 @@ export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
             Cliente y nota
           </h2>
 
-          {/* Keyed by the revision: after the Bill moves, the fields start
-              from what is stored now. */}
-          <Form key={bill.revision} method="post" className="flex flex-col gap-3">
+          {/* Keyed by what is stored: after saving, the fields show the new
+              values; while a User types, another form's revalidation leaves
+              what is typed alone (ticket 18's trap). */}
+          <Form
+            key={`${bill.customer?.id ?? "sin-cliente"}\n${bill.note ?? ""}`}
+            method="post"
+            className="flex flex-col gap-3"
+          >
             <input type="hidden" name="revision" value={bill.revision} />
             <CustomerPicker name="customerId" defaultValue={bill.customer} />
             <label htmlFor="bill-note" className="font-medium">
@@ -407,7 +412,7 @@ export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
                     }`}
                   </p>
                 ) : canCorrect && (bill.paid === 0 || (isAdmin && line.quantity * line.unitPrice <= bill.owed)) ? (
-                  <Form key={bill.revision} method="post" className="mt-2 flex flex-wrap items-end gap-2">
+                  <Form method="post" className="mt-2 flex flex-wrap items-end gap-2">
                     <input type="hidden" name="revision" value={bill.revision} />
                     <input type="hidden" name="lineId" value={line.id} />
                     {/* The reason is required once the Bill has a Payment,
@@ -464,7 +469,7 @@ export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
                     }`}
                   </p>
                 ) : canCorrect && isAdmin ? (
-                  <Form key={bill.revision} method="post" className="mt-2 flex flex-wrap items-end gap-2">
+                  <Form method="post" className="mt-2 flex flex-wrap items-end gap-2">
                     <input type="hidden" name="revision" value={bill.revision} />
                     <input type="hidden" name="paymentId" value={payment.id} />
                     {reasonField}
@@ -495,7 +500,7 @@ export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
             Cancelar cuenta
           </h2>
           <p className="text-stone-700">No se puede deshacer. Los productos regresan a existencias.</p>
-          <Form key={bill.revision} method="post" className="flex flex-wrap items-end gap-2">
+          <Form method="post" className="flex flex-wrap items-end gap-2">
             <input type="hidden" name="revision" value={bill.revision} />
             {reasonField}
             <button
@@ -543,9 +548,9 @@ export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
             Cobrar
           </h2>
 
-          {/* Keyed by the revision: after the Bill moves, the amount starts
-              again at what is now owed. */}
-          <Form key={bill.revision} method="post" className="flex flex-col gap-4">
+          {/* Keyed by what is owed: after a Payment the amount starts again at
+              what is now owed, without touching another form's fields. */}
+          <Form key={bill.owed} method="post" className="flex flex-col gap-4">
             <input type="hidden" name="revision" value={bill.revision} />
             <PaymentFields
               defaultAmount={bill.owed}

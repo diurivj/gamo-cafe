@@ -247,7 +247,7 @@ export default function Inventario({ loaderData, actionData }: Route.ComponentPr
                 <p className="font-medium">{`${reasonLabel[adjustment.reason]} ${
                   adjustment.reason === "restock" ? "+" : "-"
                 }${adjustment.units} · ${adjustment.itemName}`}</p>
-                <p className="text-stone-600">{`${formatDay(adjustment.day)} · ${adjustment.byName}${
+                <p className="break-words text-stone-600">{`${formatDay(adjustment.day)} · ${adjustment.byName}${
                   adjustment.note ? ` · ${adjustment.note}` : ""
                 }`}</p>
                 {adjustment.cancellation ? (

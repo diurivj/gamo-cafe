@@ -38,8 +38,9 @@ test("§10.4: each correction and Adjustment appears in Historial with its autho
   await pagos.getByLabel("Motivo").fill("Se cobró por error");
   await pagos.getByRole("button", { name: /Quitar pago/ }).click();
   await expect(page.getByRole("status")).toContainText("Pago quitado.");
-  // Wait for the Bill's new state, not only the action's message: the forms
-  // are keyed by the revision, and a revalidation remounts them.
+  // Wait for the Bill's new state, not only the action's message, so the next
+  // step acts on what the loader now says. The forms carry the fresh revision
+  // in a controlled field (ticket 20), so a reason typed here is not wiped.
   await expect(pagos).toContainText("Quitado por Ana");
 
   // With no Payment left, the Line goes without a reason.
@@ -125,5 +126,6 @@ test("a Worker is offered no Historial and is refused its page", async ({ page, 
 
   const response = await page.goto("/historial");
   expect(response?.status()).toBe(403);
-  await expect(page.locator("body")).toContainText("Algo salió mal");
+  await expect(page.locator("body")).toContainText("No tienes acceso a esta página");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });

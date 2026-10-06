@@ -84,5 +84,6 @@ test("a Worker is offered no Día and is refused its page", async ({ page, signI
 
   const response = await page.goto("/dia");
   expect(response?.status()).toBe(403);
-  await expect(page.locator("body")).toContainText("Algo salió mal");
+  await expect(page.locator("body")).toContainText("No tienes acceso a esta página");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });

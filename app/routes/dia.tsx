@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Form } from "react-router";
+import { Form, useNavigation } from "react-router";
 
 import { CurrentUser } from "~/backend/current-user";
 import { figuresForRange, itemsSoldForRange } from "~/backend/day";
@@ -62,6 +62,7 @@ const field = "w-full rounded-xl border border-stone-300 bg-white px-4 py-3";
 
 export default function Dia({ loaderData }: Route.ComponentProps) {
   const { desde, hasta, error, figures, items } = loaderData;
+  const busy = useNavigation().state !== "idle";
 
   return (
     <div className="flex flex-col gap-6">
@@ -78,8 +79,8 @@ export default function Dia({ loaderData }: Route.ComponentProps) {
             <input type="date" name="hasta" defaultValue={hasta} className={field} />
           </label>
         </div>
-        <button type="submit" className="mt-4 rounded-xl bg-stone-900 px-4 py-3 font-semibold text-white">
-          Ver
+        <button type="submit" disabled={busy} className="mt-4 rounded-xl bg-stone-900 px-4 py-3 font-semibold text-white disabled:opacity-60">
+          {busy ? "Viendo…" : "Ver"}
         </button>
       </Form>
 

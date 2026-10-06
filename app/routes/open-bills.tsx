@@ -1,4 +1,4 @@
-import { Form, Link, useSubmit } from "react-router";
+import { Form, Link, useNavigation, useSubmit } from "react-router";
 
 import { listOpenBills } from "~/backend/bills";
 import { run } from "~/backend/run.server";
@@ -27,6 +27,8 @@ const field = "w-full rounded-xl border border-stone-300 bg-white px-4 py-3 text
 export default function OpenBills({ loaderData }: Route.ComponentProps) {
   const { typed, bills } = loaderData;
   const submit = useSubmit();
+  // The results are a round trip away; say so at once, so no tap looks lost.
+  const searching = useNavigation().state !== "idle";
 
   return (
     <>
@@ -53,6 +55,9 @@ export default function OpenBills({ loaderData }: Route.ComponentProps) {
           placeholder="Nombre del cliente"
           className={`${field} mt-2`}
         />
+        <p aria-live="polite" className="mt-1 h-5 text-sm text-stone-600">
+          {searching ? "Buscando…" : ""}
+        </p>
       </Form>
 
       {bills.length === 0 ? (

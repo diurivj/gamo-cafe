@@ -140,3 +140,48 @@ test("§8.5: an Admin removes the Payment and then voids, each with a reason; St
 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
+
+// Ticket 18's trap: the action's status appears before the loader revalidation
+// lands, and Cuenta's forms used to be keyed by the revision, so a reason typed
+// in that window was wiped by the remount. The forms carry the fresh revision
+// in a controlled field now; a typed reason survives.
+test("a reason typed right after a correction's status is not wiped by the revalidation", async ({
+  page,
+  signInAs,
+  addCategory,
+  addItem,
+}) => {
+  const ana = await signInAs("admin", "Ana");
+  const bebidas = await addCategory("Bebidas");
+  await addItem({ name: "Chocolate", price: 2000, category: bebidas, stock: { units: 10, by: ana } });
+
+  await page.goto("/");
+  await page.getByRole("region", { name: "Bebidas" }).getByRole("button", { name: /Chocolate/ }).click();
+  await page.getByRole("button", { name: "Dejar abierta" }).click();
+  const billId = await page.getByRole("status").getAttribute("data-bill-id");
+
+  // One Line and a partial Payment, so the Payment can be removed.
+  await page.goto(`/cuentas/${billId}`);
+  const cobrar = page.getByRole("region", { name: "Cobrar" });
+  await cobrar.getByLabel("Monto").fill("10.00");
+  await cobrar.getByRole("button", { name: "Cobrar" }).click();
+  await expect(page.getByRole("status")).toContainText("Abono de $10.00 registrado.");
+
+  // Remove the Payment, with the reason an Admin owes.
+  const pagos = page.getByRole("list", { name: "Pagos" });
+  await pagos.getByLabel("Motivo").fill("Se cobró por error");
+  await pagos.getByRole("button", { name: /Quitar pago/ }).click();
+  await expect(page.getByRole("status")).toContainText("Pago quitado.");
+
+  // The loader revalidation is still on its way. Type the next reason now and
+  // send it: the form must hold the value, and the correction must go through.
+  const cancelar = page.getByRole("region", { name: "Cancelar cuenta" });
+  const motivo = cancelar.getByLabel("Motivo");
+  await motivo.fill("La cuenta era una prueba");
+  await expect(motivo).toHaveValue("La cuenta era una prueba");
+  await cancelar.getByRole("button", { name: "Cancelar cuenta" }).click();
+  await expect(page.getByRole("status")).toContainText("Cuenta cancelada.");
+  await expect(page.locator("main")).toContainText("La cuenta era una prueba");
+
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});

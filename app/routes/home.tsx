@@ -161,7 +161,7 @@ export async function action({ context, request }: Route.ActionArgs) {
 
 const tile =
   "flex min-h-20 flex-col justify-between gap-2 rounded-2xl border border-stone-300 bg-white p-4 text-left active:bg-stone-100 disabled:opacity-60";
-const step = "h-10 w-10 shrink-0 rounded-full border border-stone-300 bg-white text-xl font-semibold";
+const step = "h-11 w-11 shrink-0 rounded-full border border-stone-300 bg-white text-xl font-semibold";
 const field = "w-full rounded-xl border border-stone-300 bg-white px-4 py-3 text-lg";
 const quietButton = "rounded-xl border border-stone-300 bg-white px-4 py-2 font-medium disabled:opacity-60";
 const primaryButton = "rounded-2xl bg-stone-900 px-4 py-4 text-lg font-semibold text-white disabled:opacity-60";
@@ -297,7 +297,7 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
             <h2 id={`categoria-${category.id}`} className="text-xl font-semibold">
               {category.name}
             </h2>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {category.items.map((item) => (
                 <button key={item.id} type="button" onClick={() => change(item.id, 1)} className={tile}>
                   <span className="font-medium">{item.name}</span>

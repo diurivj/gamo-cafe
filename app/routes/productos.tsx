@@ -112,7 +112,7 @@ export default function Productos({ loaderData, actionData }: Route.ComponentPro
       <h1 className="text-3xl font-semibold tracking-tight">Productos</h1>
 
       <details className="rounded-2xl border border-stone-200 bg-white p-4">
-        <summary className="cursor-pointer py-1 text-lg font-semibold">Nuevo producto</summary>
+        <summary className="cursor-pointer py-3 text-lg font-semibold">Nuevo producto</summary>
         {active.length === 0 ? (
           <p className="mt-3 text-stone-600">Primero agrega una categoría.</p>
         ) : (
@@ -233,7 +233,7 @@ function CategorySection(props: {
       <Refused message={error} />
 
       <details className="mt-4">
-        <summary className="cursor-pointer py-2 font-medium text-stone-600">Cambiar categoría</summary>
+        <summary className="cursor-pointer py-3 font-medium text-stone-600">Cambiar categoría</summary>
         <div className="mt-2 flex flex-col gap-3">
           <div className="flex flex-wrap gap-2">
             {act("move-category", "Subir", { direction: "earlier", disabled: first })}

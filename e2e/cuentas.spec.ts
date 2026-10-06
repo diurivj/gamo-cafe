@@ -182,7 +182,8 @@ test("a Worker is refused a Paid Bill's page, and an Admin opens it", async ({
   const refused = await page.goto(`/cuentas/${billId}`);
 
   expect(refused?.status()).toBe(403);
-  await expect(page.getByRole("heading", { name: "Algo salió mal" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No tienes acceso a esta página" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   // It is not offered on Cuentas abiertas either.
   await page.goto("/cuentas-abiertas");
   await expect(page.getByRole("list", { name: "Cuentas abiertas" })).toHaveCount(0);

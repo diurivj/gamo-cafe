@@ -32,3 +32,27 @@ test("a signed-out visitor loads the Spanish shell on a phone", async ({ page, r
 
   expect(errors).toEqual([]);
 });
+
+// Spec §3.4: designed for a phone, and usable on a laptop. This is the
+// desktop-width pass over the Admin screens, with the same no-sideways rule.
+test("an Admin's screens work on a laptop width too, with nothing scrolling sideways", async ({
+  page,
+  signInAs,
+  addItem,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await signInAs("admin", "Ana");
+  await addItem({ name: "Producto de laptop", price: 1500 });
+
+  // A sale in a few taps, at the desk.
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Vender" })).toBeVisible();
+  await page.getByRole("button", { name: /Producto de laptop/ }).click();
+  await page.getByRole("button", { name: "Dejar abierta" }).click();
+  await expect(page.getByRole("status")).toContainText("Se dejó abierta");
+
+  for (const path of ["/cuentas", "/inventario", "/historial", "/usuarios", "/productos", "/por-cobrar"]) {
+    await page.goto(path);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), path).toBe(true);
+  }
+});

@@ -55,6 +55,8 @@ export default function Customers({ loaderData, actionData }: Route.ComponentPro
   const submit = useSubmit();
   const navigation = useNavigation();
   const adding = navigation.state !== "idle" && navigation.formMethod === "POST";
+  // The matches are a round trip away; say so at once, so no tap looks lost.
+  const searching = navigation.state !== "idle" && navigation.formMethod === "GET";
 
   return (
     <>
@@ -81,6 +83,9 @@ export default function Customers({ loaderData, actionData }: Route.ComponentPro
           placeholder="Nombre del cliente"
           className={`${field} mt-2`}
         />
+        <p aria-live="polite" className="mt-1 h-5 text-sm text-stone-600">
+          {searching ? "Buscando…" : ""}
+        </p>
       </Form>
 
       {actionData?.error ? (

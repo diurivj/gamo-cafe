@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Form, Link } from "react-router";
+import { Form, Link, useNavigation } from "react-router";
 
 import { type BillFilter, listBills } from "~/backend/bills";
 import { getCustomer } from "~/backend/customers";
@@ -80,6 +80,7 @@ const pageLink = "rounded-xl border border-stone-300 bg-white px-4 py-3 font-med
 export default function Cuentas({ loaderData }: Route.ComponentProps) {
   const { day, state, customerId, page, hasMore, bills, customer } = loaderData;
   const filtered = day !== null || state !== null || customerId !== null;
+  const filtering = useNavigation().state !== "idle";
 
   return (
     <>
@@ -106,8 +107,8 @@ export default function Cuentas({ loaderData }: Route.ComponentProps) {
         <CustomerPicker name="cliente" defaultValue={customer} label="Cliente" />
 
         <div className="flex items-center gap-3">
-          <button type="submit" className="rounded-xl bg-stone-900 px-4 py-3 font-semibold text-white">
-            Filtrar
+          <button type="submit" disabled={filtering} className="rounded-xl bg-stone-900 px-4 py-3 font-semibold text-white disabled:opacity-60">
+            {filtering ? "Filtrando…" : "Filtrar"}
           </button>
           {filtered ? (
             <Link to="/cuentas" className="text-stone-600 underline">

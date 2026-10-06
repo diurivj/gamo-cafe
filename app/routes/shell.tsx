@@ -1,4 +1,4 @@
-import { Form, NavLink, Outlet } from "react-router";
+import { Form, NavLink, Outlet, useNavigation } from "react-router";
 
 import { requireUser } from "~/session.server";
 
@@ -49,12 +49,12 @@ function Sections({ label, sections }: { label: string; sections: ReadonlyArray<
               <NavLink
                 to={section.to}
                 end
-                className="block rounded-full border border-stone-300 bg-white px-4 py-2 font-medium aria-[current=page]:border-stone-900 aria-[current=page]:bg-stone-900 aria-[current=page]:text-white"
+                className="block rounded-full border border-stone-300 bg-white px-4 py-3 font-medium aria-[current=page]:border-stone-900 aria-[current=page]:bg-stone-900 aria-[current=page]:text-white"
               >
                 {section.label}
               </NavLink>
             ) : (
-              <span className="block rounded-full border border-dashed border-stone-300 px-4 py-2 text-stone-500">
+              <span className="block rounded-full border border-dashed border-stone-300 px-4 py-3 text-stone-500">
                 {section.label}
               </span>
             )}
@@ -67,6 +67,9 @@ function Sections({ label, sections }: { label: string; sections: ReadonlyArray<
 
 export default function Shell({ loaderData }: Route.ComponentProps) {
   const { user, sections } = loaderData;
+  // Every tap that starts a round trip says so at once; the fixed height keeps
+  // the page from jumping (spec §3.4).
+  const busy = useNavigation().state !== "idle";
 
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-3xl flex-col px-4 pb-8">
@@ -89,6 +92,9 @@ export default function Shell({ loaderData }: Route.ComponentProps) {
         {sections.adminOnly.length > 0 ? (
           <Sections label="Administración" sections={sections.adminOnly} />
         ) : null}
+        <p aria-live="polite" className="text-sm text-stone-600">
+          {busy ? "Cargando…" : ""}
+        </p>
       </div>
 
       <main className="flex-1 py-6">

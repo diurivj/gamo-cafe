@@ -38,11 +38,17 @@ export default function App() {
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
+  // The status stays what the route threw; only the words change. A Worker who
+  // opens an Admin screen or a Bill they may not see gets this page (ticket 20,
+  // from the note left by ticket 03).
   let message = "Algo salió mal";
   let details = "Intenta de nuevo en un momento.";
   let stack: string | undefined;
 
-  if (isRouteErrorResponse(error) && error.status === 404) {
+  if (isRouteErrorResponse(error) && error.status === 403) {
+    message = "No tienes acceso a esta página";
+    details = "Tu usuario no puede verla. Pídele a un administrador si necesitas entrar.";
+  } else if (isRouteErrorResponse(error) && error.status === 404) {
     message = "No encontramos esta página";
     details = "";
   } else if (import.meta.env.DEV && error instanceof Error) {

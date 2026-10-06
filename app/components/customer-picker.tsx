@@ -105,7 +105,7 @@ export function CustomerPicker({
           <button
             type="button"
             onClick={() => choose(null)}
-            className="shrink-0 rounded-lg border border-stone-300 px-4 py-2 font-medium"
+            className="shrink-0 rounded-lg border border-stone-300 px-4 py-3 font-medium"
           >
             Quitar
           </button>

@@ -158,13 +158,14 @@ export async function action({ context, params, request }: Route.ActionArgs) {
 ```
 
 - Every loader and action starts with `requireUser(context)`. The session middleware on the root route has already answered a request without a valid session with a redirect to `/entrar`, before any loader or action ran; `requireUser` hands over the User it found.
-- An operation that only an Admin may run starts with `yield* requireAdmin` (from `~/backend/current-user`). That puts `AdminOnly` among its errors, so the route's `switch` has to answer it. An Admin screen answers it with `throw new Response(null, { status: 403 })`, in its loader and in its action; [`app/routes/users.tsx`](app/routes/users.tsx) does.
+- An operation that only an Admin may run starts with `yield* requireAdmin` (from `~/backend/current-user`). That puts `AdminOnly` among its errors, so the route's `switch` has to answer it. An Admin screen answers it with `throw new Response(null, { status: 403 })`, in its loader and in its action; [`app/routes/users.tsx`](app/routes/users.tsx) does. The root `ErrorBoundary` renders every 403 as its Spanish "No tienes acceso a esta página" page, so the status stays 403 and the words are not the framework's.
 - A route with several forms tells them apart by the submit button's `name="intent"`, and builds one program for whichever was sent, inside a single `Effect.gen`, so that `onError` gets the union of every operation's errors (`programFor` in `app/routes/users.tsx`). A form it does not understand is answered 400.
 - `run(context, program)` resolves with the program's value.
 - The third argument receives every typed error except `DbError` and returns what the route answers with, or throws a `redirect(...)`. It is required exactly when the program has such errors, and a `switch` on `error._tag` with no `default` makes the compiler report a missing case.
 - `DbError` is logged and becomes a 500 for the error boundary. A bug in the program is rethrown.
 - Add the route to `app/routes.ts`, a screen inside the `shell.tsx` layout, and give its entry in the shell's navigation a `to`. Visible text is Spanish.
 - A route answered without a session is an exception to spec §10.1. There are two, `/entrar` and `/healthz`. Another one has to be added to `PUBLIC_PATHS` in `app/session.server.ts` and, with its reason, to the exemptions in `tests/route-guard.test.ts`, which requests every route of the app signed out.
+- A new route is also unclassified until it has an entry in `tests/permissions-matrix.test.ts`. That test sweeps the route manifest and holds one entry per route — signed out, as a Worker, as an Admin, for the loader and for the action — plus one check per row of the §4.1 matrix, and it fails until the new route is classified. A Worker is refused what §4.1 reserves for Admins; `tests/worker-visibility.test.ts` reads the pages a Worker may open and checks §4.2's numbers are not in them.
 - A non-GET request must carry the app's own `Origin`, or the Worker answers 403 before any route runs. Browsers do this by themselves; a script or a test has to set the header.
 
 ## Rebuilding the projections

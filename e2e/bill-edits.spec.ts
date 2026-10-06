@@ -72,6 +72,8 @@ test("a Worker sets the Customer and the note, and every change is recorded with
     { field: "customer", previous_value: null, new_value: ruiz.id, edited_by: beto.id },
     { field: "note", previous_value: "Se lo llevó Sofía", new_value: "Paga los viernes", edited_by: beto.id },
   ]);
+
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
 test("a Worker cannot change the Bill after a Payment, and an Admin can; the picker also adds a new Customer", async ({
@@ -133,4 +135,6 @@ test("a Worker cannot change the Bill after a Payment, and an Admin can; the pic
     { field: "customer", previous_value: leo.id, new_value: null, edited_by: beto.id },
     { field: "note", previous_value: null, new_value: "Paga el viernes", edited_by: ana.id },
   ]);
+
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
