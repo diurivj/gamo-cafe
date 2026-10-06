@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Form, useNavigation } from "react-router";
+import { Form } from "react-router";
 
 import { CurrentUser } from "~/backend/current-user";
 import { figuresForRange, itemsSoldForRange } from "~/backend/day";
@@ -8,6 +8,7 @@ import { today } from "~/backend/time";
 import { refuseRead, requireAdminUser } from "~/catalog-forms.server";
 import { type Day, formatDay } from "~/shared/day";
 import { formatMoney } from "~/shared/money";
+import { SubmitButton } from "~/components/submit-button";
 
 import type { Route } from "./+types/dia";
 
@@ -62,7 +63,6 @@ const field = "w-full rounded-xl border border-stone-300 bg-white px-4 py-3";
 
 export default function Dia({ loaderData }: Route.ComponentProps) {
   const { desde, hasta, error, figures, items } = loaderData;
-  const busy = useNavigation().state !== "idle";
 
   return (
     <div className="flex flex-col gap-6">
@@ -79,9 +79,9 @@ export default function Dia({ loaderData }: Route.ComponentProps) {
             <input type="date" name="hasta" defaultValue={hasta} className={field} />
           </label>
         </div>
-        <button type="submit" disabled={busy} className="mt-4 rounded-xl bg-stone-900 px-4 py-3 font-semibold text-white disabled:opacity-60">
-          {busy ? "Viendo…" : "Ver"}
-        </button>
+        <SubmitButton pendingLabel="Viendo…" className="mt-4 rounded-xl bg-stone-900 px-4 py-3 font-semibold text-white disabled:opacity-60">
+          Ver
+        </SubmitButton>
       </Form>
 
       <p className="text-stone-600">

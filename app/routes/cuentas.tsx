@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Form, Link, useNavigation } from "react-router";
+import { Form, Link } from "react-router";
 
 import { type BillFilter, listBills } from "~/backend/bills";
 import { getCustomer } from "~/backend/customers";
@@ -7,6 +7,7 @@ import { CurrentUser } from "~/backend/current-user";
 import { run } from "~/backend/run.server";
 import { refuseRead, requireAdminUser } from "~/catalog-forms.server";
 import { CustomerPicker } from "~/components/customer-picker";
+import { SubmitButton } from "~/components/submit-button";
 import { LoadMore, usePagedList } from "~/components/paged-list";
 import { BILL_STATES, billStateLabel, type BillState } from "~/shared/bill-state";
 import { CURSOR_PARAM, cursorOf, nextText } from "~/shared/cursor";
@@ -87,7 +88,6 @@ export default function Cuentas({ loaderData }: Route.ComponentProps) {
     hrefFor: (cursor) => filtersUrl({ day, state, customerId }, cursor),
   });
   const filtered = day !== null || state !== null || customerId !== null;
-  const filtering = useNavigation().state !== "idle";
 
   return (
     <>
@@ -114,9 +114,9 @@ export default function Cuentas({ loaderData }: Route.ComponentProps) {
         <CustomerPicker name="cliente" defaultValue={customer} label="Cliente" />
 
         <div className="flex items-center gap-3">
-          <button type="submit" disabled={filtering} className="rounded-xl bg-stone-900 px-4 py-3 font-semibold text-white disabled:opacity-60">
-            {filtering ? "Filtrando…" : "Filtrar"}
-          </button>
+          <SubmitButton pendingLabel="Filtrando…" className="rounded-xl bg-stone-900 px-4 py-3 font-semibold text-white disabled:opacity-60">
+            Filtrar
+          </SubmitButton>
           {filtered ? (
             <Link to="/cuentas" className="text-stone-600 underline">
               Limpiar

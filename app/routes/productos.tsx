@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Form, Link, useNavigation } from "react-router";
+import { Form, Link } from "react-router";
 
 import {
   addCategory,
@@ -26,6 +26,7 @@ import {
   text,
 } from "~/catalog-forms.server";
 import { ItemFields } from "~/components/item-fields";
+import { SubmitButton } from "~/components/submit-button";
 import { redirectWithFlash, takeFlash } from "~/flash.server";
 import { formatMoney } from "~/shared/money";
 
@@ -99,7 +100,6 @@ function Refused({ message }: { message: string | undefined }) {
 
 export default function Productos({ loaderData, actionData }: Route.ComponentProps) {
   const { categories, flash } = loaderData;
-  const busy = useNavigation().state !== "idle";
 
   const active = categories.filter((category) => !category.retired);
   const retired = categories.filter((category) => category.retired);
@@ -128,9 +128,9 @@ export default function Productos({ loaderData, actionData }: Route.ComponentPro
               </span>
             </label>
             <Refused message={errorOn("add-item:")} />
-            <button type="submit" disabled={busy} className={primaryButton}>
+            <SubmitButton className={primaryButton}>
               Agregar producto
-            </button>
+            </SubmitButton>
           </Form>
         )}
       </details>
@@ -143,7 +143,6 @@ export default function Productos({ loaderData, actionData }: Route.ComponentPro
           category={category}
           first={index === 0}
           last={index === active.length - 1}
-          busy={busy}
           error={
             errorOn(`rename-category:${category.id}`) ??
             errorOn(`retire-category:${category.id}`) ??
@@ -163,9 +162,9 @@ export default function Productos({ loaderData, actionData }: Route.ComponentPro
             <input name="name" required maxLength={40} autoComplete="off" className={field} />
           </label>
           <Refused message={errorOn("add-category:")} />
-          <button type="submit" disabled={busy} className={button}>
+          <SubmitButton className={button}>
             Agregar categoría
-          </button>
+          </SubmitButton>
         </Form>
       </section>
 
@@ -182,9 +181,9 @@ export default function Productos({ loaderData, actionData }: Route.ComponentPro
                   <Form method="post">
                     <input type="hidden" name="intent" value="restore-category" />
                     <input type="hidden" name="id" value={category.id} />
-                    <button type="submit" disabled={busy} aria-label={`Restaurar ${category.name}`} className={button}>
+                    <SubmitButton aria-label={`Restaurar ${category.name}`} className={button}>
                       Restaurar
-                    </button>
+                    </SubmitButton>
                   </Form>
                 </div>
                 <Items category={category} />
@@ -201,10 +200,9 @@ function CategorySection(props: {
   category: CatalogCategory;
   first: boolean;
   last: boolean;
-  busy: boolean;
   error: string | undefined;
 }) {
-  const { category, first, last, busy, error } = props;
+  const { category, first, last, error } = props;
   const headingId = `category-${category.id}`;
 
   const act = (intent: string, label: string, extra?: { direction: string; disabled: boolean }) => (
@@ -212,14 +210,13 @@ function CategorySection(props: {
       <input type="hidden" name="intent" value={intent} />
       <input type="hidden" name="id" value={category.id} />
       {extra ? <input type="hidden" name="direction" value={extra.direction} /> : null}
-      <button
-        type="submit"
-        disabled={busy || extra?.disabled}
+      <SubmitButton
+        disabled={extra?.disabled}
         aria-label={`${label} ${category.name}`}
         className={button}
       >
         {label}
-      </button>
+      </SubmitButton>
     </Form>
   );
 
@@ -255,9 +252,9 @@ function CategorySection(props: {
                 className={field}
               />
             </label>
-            <button type="submit" disabled={busy} className={button}>
+            <SubmitButton className={button}>
               Guardar nombre
-            </button>
+            </SubmitButton>
           </Form>
         </div>
       </details>

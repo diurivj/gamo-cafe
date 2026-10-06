@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { data, Form, redirect, useNavigation } from "react-router";
+import { data, Form, redirect, useFetcher } from "react-router";
 
 import { CurrentUser, type Role } from "~/backend/current-user";
 import { run } from "~/backend/run.server";
@@ -15,6 +15,7 @@ import {
 import { type Flash, redirectWithFlash, takeFlash } from "~/flash.server";
 import { requireUser } from "~/session.server";
 import { formatSignInCode } from "~/shared/secret";
+import { SubmitButton } from "~/components/submit-button";
 
 import type { Route } from "./+types/users";
 
@@ -128,7 +129,6 @@ const button = "rounded-xl border border-stone-300 bg-white px-4 py-3 font-mediu
 
 export default function Users({ loaderData, actionData }: Route.ComponentProps) {
   const { users, me, flash } = loaderData;
-  const sending = useNavigation().state !== "idle";
 
   return (
     <>
@@ -186,15 +186,13 @@ export default function Users({ loaderData, actionData }: Route.ComponentProps) 
             <option value="worker">{roleLabel.worker}</option>
             <option value="admin">{roleLabel.admin}</option>
           </select>
-          <button
-            type="submit"
+          <SubmitButton
             name="intent"
             value="add"
-            disabled={sending}
             className="rounded-xl bg-stone-900 px-4 py-4 text-lg font-semibold text-white disabled:opacity-60"
           >
             Agregar y dar código
-          </button>
+          </SubmitButton>
         </Form>
       </section>
 
@@ -204,56 +202,87 @@ export default function Users({ loaderData, actionData }: Route.ComponentProps) 
         </h2>
         <ul className="mt-3 flex flex-col gap-3">
           {users.map((user) => (
-            <li
-              key={user.id}
-              aria-label={user.name}
-              className="rounded-xl border border-stone-200 bg-white p-4"
-            >
-              <p className="text-lg font-semibold break-words">
-                {user.name}
-                {user.id === me ? <span className="font-normal text-stone-600"> (tú)</span> : null}
-              </p>
-              <p className="text-stone-600">
-                {roleLabel[user.role]}
-                {user.active ? null : " · Desactivado"}
-              </p>
-              <Form method="post" className="mt-3 flex flex-wrap gap-2">
-                <input type="hidden" name="userId" value={user.id} />
-                {user.active ? (
-                  <>
-                    <button type="submit" name="intent" value="new-code" disabled={sending} className={button}>
-                      Código nuevo
-                    </button>
-                    <button
-                      type="submit"
-                      name="intent"
-                      value="sign-out-everywhere"
-                      disabled={sending}
-                      className={button}
-                    >
-                      Cerrar sesión en todos los teléfonos
-                    </button>
-                    <button type="submit" name="intent" value="deactivate" disabled={sending} className={button}>
-                      Desactivar
-                    </button>
-                  </>
-                ) : (
-                  <button type="submit" name="intent" value="reactivate" disabled={sending} className={button}>
-                    Reactivar
-                  </button>
-                )}
-              </Form>
-              <Form method="post" className="mt-2">
-                <input type="hidden" name="userId" value={user.id} />
-                <input type="hidden" name="role" value={user.role === "admin" ? "worker" : "admin"} />
-                <button type="submit" name="intent" value="change-role" disabled={sending} className={button}>
-                  {user.role === "admin" ? "Hacer empleado" : "Hacer administrador"}
-                </button>
-              </Form>
-            </li>
+            <UserRow key={user.id} user={user} isMe={user.id === me} />
           ))}
         </ul>
       </section>
     </>
+  );
+}
+
+/**
+ * One User on the list. Their role and whether they are active are harmless
+ * and reversible, so the row shows a change at once (spec §3.4): while the
+ * form is on its way the User is what was asked for, and a refusal puts them
+ * back as the server has them. What was recorded is said by the page, once
+ * the answer brings it. A new code and signing out are not shown ahead.
+ */
+function UserRow({
+  user,
+  isMe,
+}: {
+  user: Route.ComponentProps["loaderData"]["users"][number];
+  isMe: boolean;
+}) {
+  const change = useFetcher<typeof action>({ key: `user:${user.id}` });
+  const pending = change.state !== "idle";
+  const intent = change.formData?.get("intent");
+  const active = intent === "deactivate" ? false : intent === "reactivate" ? true : user.active;
+  const askedRole = intent === "change-role" ? change.formData?.get("role") : null;
+  const role = askedRole === "admin" || askedRole === "worker" ? askedRole : user.role;
+  const error = change.data && "error" in change.data ? change.data.error : null;
+
+  return (
+    <li aria-label={user.name} className="rounded-xl border border-stone-200 bg-white p-4">
+      <p className="text-lg font-semibold break-words">
+        {user.name}
+        {isMe ? <span className="font-normal text-stone-600"> (tú)</span> : null}
+      </p>
+      <p className="text-stone-600">
+        {roleLabel[role]}
+        {active ? null : " · Desactivado"}
+      </p>
+      {error ? (
+        <p role="alert" className="mt-2 text-red-800">
+          {error}
+        </p>
+      ) : null}
+      <div className="mt-3 flex flex-wrap gap-2">
+        {active ? (
+          <Form method="post" className="contents">
+            <input type="hidden" name="userId" value={user.id} />
+            <SubmitButton name="intent" value="new-code" disabled={pending} className={button}>
+              Código nuevo
+            </SubmitButton>
+            <SubmitButton name="intent" value="sign-out-everywhere" disabled={pending} className={button}>
+              Cerrar sesión en todos los teléfonos
+            </SubmitButton>
+          </Form>
+        ) : null}
+        <change.Form method="post" className="contents">
+          <input type="hidden" name="userId" value={user.id} />
+          <SubmitButton
+            name="intent"
+            value={active ? "deactivate" : "reactivate"}
+            fetcher={change}
+            className={button}
+          >
+            {active ? "Desactivar" : "Reactivar"}
+          </SubmitButton>
+        </change.Form>
+      </div>
+      <change.Form method="post" className="mt-2">
+        <input type="hidden" name="userId" value={user.id} />
+        <input type="hidden" name="role" value={role === "admin" ? "worker" : "admin"} />
+        <SubmitButton
+          name="intent"
+          value="change-role"
+          fetcher={change}
+          className={button}
+        >
+          {role === "admin" ? "Hacer empleado" : "Hacer administrador"}
+        </SubmitButton>
+      </change.Form>
+    </li>
   );
 }

@@ -18,15 +18,18 @@ const field = "w-full rounded-xl border border-stone-300 bg-white px-4 py-3 text
 export function PaymentFields({
   defaultAmount,
   initialAmount = "",
+  initialMethod = "cash",
   amountHint,
 }: {
   /** Centavos an empty amount field pays. */
   readonly defaultAmount: Centavos;
   /** What the amount field starts with. Empty means an empty field is the default. */
   readonly initialAmount?: string;
+  /** The method it starts with. */
+  readonly initialMethod?: PaymentMethod;
   readonly amountHint: string;
 }) {
-  const [method, setMethod] = useState<PaymentMethod>("cash");
+  const [method, setMethod] = useState<PaymentMethod>(initialMethod);
   const [amountText, setAmountText] = useState(initialAmount);
   const [handedText, setHandedText] = useState("");
   const amountId = useId();

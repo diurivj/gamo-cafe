@@ -1,5 +1,5 @@
 import { Effect, Result, Schema } from "effect";
-import { data, Form, Link, redirect, useNavigation } from "react-router";
+import { data, Form, Link, replace, useFetcher } from "react-router";
 
 import {
   type ExpectedBillRevision,
@@ -13,6 +13,7 @@ import { editCustomer, getCustomer, restoreCustomer, retireCustomer } from "~/ba
 import { run } from "~/backend/run.server";
 import { LoadMore, usePagedList } from "~/components/paged-list";
 import { PaymentFields } from "~/components/payment-fields";
+import { SubmitButton } from "~/components/submit-button";
 import { redirectWithFlash, takeFlash } from "~/flash.server";
 import { requireUser } from "~/session.server";
 import { billStateLabel } from "~/shared/bill-state";
@@ -195,7 +196,8 @@ export async function action({ context, params, request }: Route.ActionArgs) {
   if (outcome.recorded) {
     return redirectWithFlash(page, { message: `Abono de ${formatMoney(outcome.recorded.amount)} registrado.` });
   }
-  return redirect(page);
+  // `replace`, so the fetcher that retires or restores adds no history entry.
+  return replace(page);
 }
 
 const field = "w-full rounded-xl border border-stone-300 bg-white px-4 py-3 text-lg";
@@ -211,8 +213,13 @@ export default function Customer({ loaderData, actionData }: Route.ComponentProp
     pageOf: pastPageOf,
     hrefFor: (cursor) => `/clientes/${customer.id}?${CURSOR_PARAM}=${encodeURIComponent(cursor)}`,
   });
-  const busy = useNavigation().state !== "idle";
-  const retired = customer.retiredAt !== null;
+  // Retiring and restoring are harmless and reversible, so the page shows
+  // them at once (spec §3.4): while the form is on its way the Customer is
+  // what was asked for, and a refusal puts them back as the server has them.
+  const state = useFetcher<typeof action>({ key: `customer-state:${customer.id}` });
+  const asked = state.formData?.get("intent");
+  const retired = asked === "retire" ? true : asked === "restore" ? false : customer.retiredAt !== null;
+  const stateError = state.data && "error" in state.data ? state.data.error : null;
 
   return (
     <>
@@ -237,6 +244,11 @@ export default function Customer({ loaderData, actionData }: Route.ComponentProp
       {actionData && "error" in actionData && actionData.error ? (
         <p role="alert" className="mt-4 text-red-700">
           {actionData.error}
+        </p>
+      ) : null}
+      {stateError ? (
+        <p role="alert" className="mt-4 text-red-700">
+          {stateError}
         </p>
       ) : null}
       {flash?.message ? (
@@ -301,9 +313,9 @@ export default function Customer({ loaderData, actionData }: Route.ComponentProp
               initialAmount={formatMoney(owed)}
               amountHint="Ya viene todo lo que debe. Puedes abonar menos."
             />
-            <button type="submit" disabled={busy} className={primaryButton}>
+            <SubmitButton className={primaryButton}>
               Abonar
-            </button>
+            </SubmitButton>
           </Form>
         </section>
       ) : null}
@@ -399,28 +411,25 @@ export default function Customer({ loaderData, actionData }: Route.ComponentProp
               maxLength={200}
               className={field}
             />
-            <button
-              type="submit"
+            <SubmitButton
               name="intent"
               value="edit"
-              disabled={busy}
               className="rounded-xl bg-stone-900 px-4 py-4 text-lg font-semibold text-white disabled:opacity-60"
             >
               Guardar
-            </button>
+            </SubmitButton>
           </Form>
 
-          <Form method="post" className="flex flex-col">
-            {retired ? (
-              <button type="submit" name="intent" value="restore" disabled={busy} className={secondaryButton}>
-                Restaurar cliente
-              </button>
-            ) : (
-              <button type="submit" name="intent" value="retire" disabled={busy} className={secondaryButton}>
-                Retirar cliente
-              </button>
-            )}
-          </Form>
+          <state.Form method="post" className="flex flex-col">
+            <SubmitButton
+              name="intent"
+              value={retired ? "restore" : "retire"}
+              fetcher={state}
+              className={secondaryButton}
+            >
+              {retired ? "Restaurar cliente" : "Retirar cliente"}
+            </SubmitButton>
+          </state.Form>
         </section>
       ) : null}
     </>

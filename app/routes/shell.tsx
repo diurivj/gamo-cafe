@@ -1,6 +1,7 @@
 import { Form, NavLink, Outlet, type ShouldRevalidateFunctionArgs, useNavigation } from "react-router";
 
 import { requireUser } from "~/session.server";
+import { SubmitButton } from "~/components/submit-button";
 import { shellMiddleware } from "~/shell.server";
 
 import type { Route } from "./+types/shell";
@@ -92,9 +93,9 @@ export default function Shell({ loaderData }: Route.ComponentProps) {
           </p>
         </div>
         <Form method="post" action="/salir">
-          <button type="submit" className="rounded-xl border border-stone-300 bg-white px-4 py-3 font-medium">
+          <SubmitButton className="rounded-xl border border-stone-300 bg-white px-4 py-3 font-medium">
             Salir
-          </button>
+          </SubmitButton>
         </Form>
       </header>
 

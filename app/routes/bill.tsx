@@ -1,5 +1,5 @@
 import { Effect, Result, Schema } from "effect";
-import { data, Form, Link, redirect, useNavigation } from "react-router";
+import { data, Form, Link, redirect } from "react-router";
 
 import { type BillNotFound, editBill, getBill, takePayment } from "~/backend/bills";
 import {
@@ -16,6 +16,7 @@ import { BillChanged, BillIsVoided, PaymentExceedsOwed, PaymentNotPositive } fro
 import { run } from "~/backend/run.server";
 import { CustomerPicker } from "~/components/customer-picker";
 import { PaymentFields } from "~/components/payment-fields";
+import { SubmitButton } from "~/components/submit-button";
 import { redirectWithFlash, takeFlash } from "~/flash.server";
 import { requireUser } from "~/session.server";
 import { billStateLabel, isOpenBill } from "~/shared/bill-state";
@@ -304,7 +305,6 @@ const reasonField = (
 
 export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
   const { bill, canAddItems, canPay, isAdmin, canEdit, flash, submissionKey } = loaderData;
-  const busy = useNavigation().state !== "idle";
   // A Voided Bill accepts no further corrections (spec §5.7); a Paid Bill does,
   // which is what §8.5 is about.
   const canCorrect = bill.state !== "voided";
@@ -383,9 +383,9 @@ export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
               className={field}
             />
             <p className="text-sm text-stone-600">Hasta 80 caracteres.</p>
-            <button type="submit" name="intent" value="editar" disabled={busy} className={saveButton}>
+            <SubmitButton name="intent" value="editar" className={saveButton}>
               Guardar
-            </button>
+            </SubmitButton>
           </Form>
         </section>
       ) : null}
@@ -435,16 +435,14 @@ export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
                     {/* The reason is required once the Bill has a Payment,
                         which is what `paid > 0` says (spec §5.7). */}
                     {isAdmin && bill.paid > 0 ? reasonField : null}
-                    <button
-                      type="submit"
+                    <SubmitButton
                       name="intent"
                       value="quitar-linea"
-                      disabled={busy}
                       aria-label={`Quitar ${line.quantity} × ${line.itemName}`}
                       className={quietButton}
                     >
                       Quitar
-                    </button>
+                    </SubmitButton>
                   </Form>
                 ) : null}
               </li>
@@ -490,16 +488,14 @@ export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
                     <input type="hidden" name="revision" value={bill.revision} />
                     <input type="hidden" name="paymentId" value={payment.id} />
                     {reasonField}
-                    <button
-                      type="submit"
+                    <SubmitButton
                       name="intent"
                       value="quitar-pago"
-                      disabled={busy}
                       aria-label={`Quitar pago de ${formatMoney(payment.amount)}`}
                       className={quietButton}
                     >
                       Quitar pago
-                    </button>
+                    </SubmitButton>
                   </Form>
                 ) : null}
               </li>
@@ -520,15 +516,13 @@ export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
           <Form method="post" className="flex flex-wrap items-end gap-2">
             <input type="hidden" name="revision" value={bill.revision} />
             {reasonField}
-            <button
-              type="submit"
+            <SubmitButton
               name="intent"
               value="cancelar-cuenta"
-              disabled={busy}
               className="rounded-xl border border-red-300 bg-white px-3 py-2 font-medium text-red-700 active:bg-red-100 disabled:opacity-60"
             >
               Cancelar cuenta
-            </button>
+            </SubmitButton>
           </Form>
         </section>
       ) : null}
@@ -563,9 +557,9 @@ export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
               initialAmount={formatMoney(bill.owed)}
               amountHint="Ya viene todo lo que debe. Puedes cobrar menos."
             />
-            <button type="submit" name="intent" value="pagar" disabled={busy} className={primaryButton}>
+            <SubmitButton name="intent" value="pagar" className={primaryButton}>
               Cobrar
-            </button>
+            </SubmitButton>
           </Form>
         </section>
       ) : null}
