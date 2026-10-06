@@ -19,6 +19,7 @@ import { billStateLabel } from "~/shared/bill-state";
 import { CURSOR_PARAM, cursorOf, nextText } from "~/shared/cursor";
 import { customerNameMessages } from "~/shared/customer-messages";
 import { dayOf, formatDay, formatTime } from "~/shared/day";
+import { newId } from "~/shared/id";
 import { type Centavos, formatMoney, parsePesos } from "~/shared/money";
 import { PAYMENT_METHODS, paymentMethodLabel } from "~/shared/payment";
 import { paymentMessages } from "~/shared/payment-messages";
@@ -79,6 +80,9 @@ export async function loader({ context, params, request }: Route.LoaderArgs) {
     pastBills: past === null ? null : { bills: past.bills, next: nextText(past.next) },
     // What an Abonar that redirected here has to say (spec §3.4).
     flash: takeFlash(context),
+    // The key of the Abonar form this page renders (spec §3.4): new every
+    // time the loader runs, the same for a double tap of one rendered form.
+    submissionKey: newId(),
   };
 }
 
@@ -142,6 +146,7 @@ function programFor(id: string, form: FormData) {
           amount,
           method: method.success,
           expectedRevisions: revisions,
+          submissionKey: String(form.get("submissionKey") ?? "") || null,
         });
         return { recorded: { amount: recorded.amount } };
       }
@@ -199,7 +204,7 @@ const primaryButton =
   "block rounded-2xl bg-stone-900 px-4 py-4 text-center text-lg font-semibold text-white active:bg-stone-700 disabled:opacity-60";
 
 export default function Customer({ loaderData, actionData }: Route.ComponentProps) {
-  const { customer, openBills, owed, handovers, canManage, pastBills, flash } = loaderData;
+  const { customer, openBills, owed, handovers, canManage, pastBills, flash, submissionKey } = loaderData;
   const past = usePagedList({
     id: "cuentas-pasadas",
     data: loaderData,
@@ -287,6 +292,7 @@ export default function Customer({ loaderData, actionData }: Route.ComponentProp
               what is left, and the form carries the fresh revisions. */}
           <Form key={owed} method="post" className="flex flex-col gap-4">
             <input type="hidden" name="intent" value="abonar" />
+            <input type="hidden" name="submissionKey" value={submissionKey} />
             {openBills.map((bill) => (
               <input key={bill.id} type="hidden" name="bill" value={`${bill.id}:${bill.revision}`} />
             ))}

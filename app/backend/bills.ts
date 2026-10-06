@@ -22,6 +22,7 @@ import {
   PaymentExceedsOwed,
   PaymentNotPositive,
 } from "./payments";
+import { both, json, notYetRecorded, recordedAnswer, submissionOf, submissionStatement } from "./submissions";
 import { now } from "./time";
 
 /**
@@ -120,6 +121,12 @@ export interface NewSelection {
    * Cuenta. The amount handed over for cash is not stored, so it is not here.
    */
   readonly payment?: NewSelectionPayment | null;
+  /**
+   * The key of the form this selection came from, made when the form was
+   * rendered (spec §3.4). A second selection with the same key records
+   * nothing and is answered as the first.
+   */
+  readonly submissionKey?: string | null;
 }
 
 /** The Payment of **Cobrar**: a method, and at most the selection's total. */
@@ -198,8 +205,9 @@ export type Bill = BillSummary & {
 const placeholders = (count: number) => Array.from({ length: count }, () => "?").join(", ");
 
 /**
- * How many Lines one statement carries. Each Line binds four parameters and
- * each statement seven more; with the shared condition's few, 20 stays far
+ * How many Lines one statement carries. Each Line binds four parameters, the
+ * statement five more and the shared condition at most six (the Items, a
+ * target Bill and the form's key), so 20 Lines bind at most 91 and stay
  * under D1's 100 bound parameters per query (spec §2.4). A selection of every
  * Item in the catalog is then a handful of statements, well under the 50 a
  * request may issue.
@@ -375,11 +383,17 @@ export const listCustomerHandovers = Effect.fn("listCustomerHandovers")(function
  * Every statement carries the same condition (`Condition`), because a D1
  * batch cannot branch: when an Item was retired or a target Bill stopped
  * being Open since it was read, nothing at all is written, the Payment
- * included.
+ * included. So is "this form's key recorded nothing yet" (`./submissions`):
+ * a selection sent twice is recorded once, and the second is answered with
+ * the Bill as the first left it.
  */
 export const recordSelection = Effect.fn("recordSelection")(function* (input: NewSelection) {
   const db = yield* Db;
   const user = yield* CurrentUser;
+
+  const submission = submissionOf("selection", user.id, input.submissionKey);
+  const earlier = yield* recordedAnswer(SummaryRow, submission);
+  if (earlier) return summary(earlier);
 
   const customerId = input.customerId || null;
   const billId = input.billId || null;
@@ -472,13 +486,15 @@ export const recordSelection = Effect.fn("recordSelection")(function* (input: Ne
    * condition fits every statement's parameter budget whatever the number of
    * Items (spec §2.4).
    */
-  const condition: Condition = {
+  const rules: Condition = {
     sql: [
       `(SELECT COUNT(*) FROM json_each(?) AS j JOIN items i ON i.id = j.value AND i.retired_at IS NULL) = ?`,
       ...(target ? ["EXISTS (SELECT 1 FROM bills WHERE id = ? AND state IN ('open', 'partial'))"] : []),
     ].join(" AND "),
     params: [JSON.stringify(itemIds), itemIds.length, ...(target ? [target.id] : [])],
   };
+  // ... and this form's key has recorded nothing yet (spec §3.4).
+  const condition = both(rules, notYetRecorded(submission));
 
   const bill = target ?? { id: newId() };
 
@@ -580,8 +596,22 @@ export const recordSelection = Effect.fn("recordSelection")(function* (input: Ne
     );
   }
 
+  // The form's key, with the Bill as this batch leaves it: what a repeat of
+  // this submission is answered with.
+  statements.push(
+    submissionStatement(submission, {
+      at,
+      answer: { sql: `(${SUMMARY_JSON} WHERE b.id = ?)`, params: [bill.id] },
+      wrote: { sql: "EXISTS (SELECT 1 FROM lines WHERE id = ?)", params: [lines[0]!.id] },
+    }),
+  );
+
   const results = yield* db.batch(statements);
   if (results[0]!.changes === 0) {
+    // Another request with this form's key recorded it meanwhile: answer as
+    // that one did.
+    const meanwhile = yield* recordedAnswer(SummaryRow, submission);
+    if (meanwhile) return summary(meanwhile);
     // The shared condition refused the selection: learn which rule it was.
     if (target) {
       const state = yield* db.first(StateRow, "SELECT state FROM bills WHERE id = ?", target.id);
@@ -758,7 +788,18 @@ export interface NewPaymentInput {
    * carries another one is stale and changes nothing (spec §5.5, §7.3).
    */
   readonly expectedRevision: number;
+  /** The key of the form this Payment came from (spec §3.4); see `NewSelection`. */
+  readonly submissionKey?: string | null;
 }
+
+/** What `takePayment` answers, and what a repeat of its form is answered with. */
+const PaymentAnswer = Schema.Struct({
+  id: Schema.String,
+  amount: Schema.Int,
+  paid: Schema.Boolean,
+  total: Schema.Int,
+  owed: Schema.Int,
+});
 
 /**
  * Takes a Payment on one Bill (spec §7.3.2): the fact and the Bill's
@@ -769,11 +810,19 @@ export interface NewPaymentInput {
  * the same Bill at the same moment exactly one records a Payment and the
  * other is told that the Bill has changed (spec §2.3, §10.3). A D1 batch
  * cannot branch: both statements carry the revision in their SQL.
+ *
+ * The same form sent twice is another matter: it is the same Payment, so it
+ * is recorded once and the second is answered as the first, not told that the
+ * Bill changed (spec §3.4, `./submissions`).
  */
 export const takePayment = Effect.fn("takePayment")(function* (input: NewPaymentInput) {
   const db = yield* Db;
   const user = yield* CurrentUser;
   const billId = input.billId;
+
+  const submission = submissionOf("payment", user.id, input.submissionKey);
+  const earlier = yield* recordedAnswer(PaymentAnswer, submission);
+  if (earlier) return earlier;
 
   const bill = yield* db.first(
     PaymentBillRow,
@@ -791,16 +840,32 @@ export const takePayment = Effect.fn("takePayment")(function* (input: NewPayment
 
   const id = newId();
   const at = yield* now;
-  const condition: Condition = {
+  const rules: Condition = {
     sql: `EXISTS (SELECT 1 FROM bills
                   WHERE id = ? AND revision = ? AND state IN ('open', 'partial') AND total - paid >= ?)`,
     params: [billId, input.expectedRevision, amount],
   };
-  const [recorded] = yield* db.batch(
-    paymentStatements({ id, billId, amount, method: input.method, by: user.id, at, day: dayOf(at) }, condition),
-  );
+  // On success the batch saw the very figures just read (the revision held),
+  // so this says whether the Payment left the Bill Paid; the route needs it to
+  // know whether a Worker may stay on the page (§4.1). `total` and `owed` are
+  // the Bill's figures after the Payment, for what the screen says.
+  const answer = { id, amount, paid: bill.paid + amount === bill.total, total: bill.total, owed: owed - amount };
+  const [recorded] = yield* db.batch([
+    ...paymentStatements(
+      { id, billId, amount, method: input.method, by: user.id, at, day: dayOf(at) },
+      both(rules, notYetRecorded(submission)),
+    ),
+    submissionStatement(submission, {
+      at,
+      answer: json(answer),
+      wrote: { sql: "EXISTS (SELECT 1 FROM payments WHERE id = ?)", params: [id] },
+    }),
+  ]);
 
   if (recorded!.changes === 0) {
+    // Another request with this form's key recorded it meanwhile.
+    const meanwhile = yield* recordedAnswer(PaymentAnswer, submission);
+    if (meanwhile) return meanwhile;
     // The condition refused it: learn which rule it was, from the Bill as it
     // is now (spec §5.5: a stale submission is told the Bill has changed).
     const after = yield* db.first(
@@ -813,11 +878,7 @@ export const takePayment = Effect.fn("takePayment")(function* (input: NewPayment
     if (after.state === "voided") return yield* new BillIsVoided({ billId });
     return yield* new PaymentExceedsOwed({ owed: after.total - after.paid });
   }
-  // On success the batch saw the very figures just read (the revision held),
-  // so this says whether the Payment left the Bill Paid; the route needs it to
-  // know whether a Worker may stay on the page (§4.1). `total` and `owed` are
-  // the Bill's figures after the Payment, for what the screen says.
-  return { id, amount, paid: bill.paid + amount === bill.total, total: bill.total, owed: owed - amount };
+  return answer;
 });
 
 /** One Bill and the revision the User's page showed it at (spec §7.3). */
@@ -837,6 +898,8 @@ export interface NewCustomerPayment {
    * (spec §5.5, §7.3).
    */
   readonly expectedRevisions: ReadonlyArray<ExpectedBillRevision>;
+  /** The key of the form this Payment came from (spec §3.4); see `NewSelection`. */
+  readonly submissionKey?: string | null;
 }
 
 /** What one Bill received from a handover. */
@@ -845,6 +908,15 @@ export interface CustomerPaymentShare {
   readonly paymentId: string;
   readonly amount: Centavos;
 }
+
+/** What `takeCustomerPayment` answers, and what a repeat of its form is answered with. */
+const HandoverAnswer = Schema.Struct({
+  reference: Schema.String,
+  amount: Schema.Int,
+  shares: Schema.Array(
+    Schema.Struct({ billId: Schema.String, paymentId: Schema.String, amount: Schema.Int }),
+  ),
+});
 
 /**
  * Takes one amount across a Customer's Open Bills (spec §7.3.2, §5.5, flow
@@ -863,12 +935,19 @@ export interface CustomerPaymentShare {
  *
  * A retired Customer's Bills stay collectable (spec §5.2): nothing here looks
  * at `retired_at`.
+ *
+ * The same form sent twice is recorded once, and the second is answered as
+ * the first (spec §3.4, `./submissions`).
  */
 export const takeCustomerPayment = Effect.fn("takeCustomerPayment")(function* (
   input: NewCustomerPayment,
 ) {
   const db = yield* Db;
   const user = yield* CurrentUser;
+
+  const submission = submissionOf("handover", user.id, input.submissionKey);
+  const earlier = yield* recordedAnswer(HandoverAnswer, submission);
+  if (earlier) return earlier;
 
   const customer = yield* db.first(IdRow, "SELECT id FROM customers WHERE id = ?", input.customerId);
   if (!customer) return yield* new CustomerNotFound();
@@ -899,7 +978,7 @@ export const takeCustomerPayment = Effect.fn("takeCustomerPayment")(function* (
   // A D1 batch cannot branch: every statement carries this condition, so any
   // Bill that moved since the read refuses the whole handover (spec §7.3).
   const shown = JSON.stringify(bills.map((bill) => [bill.id, bill.revision]));
-  const condition: Condition = {
+  const rules: Condition = {
     sql: `(SELECT COUNT(*) FROM bills b
            WHERE b.customer_id = ? AND b.state IN ('open', 'partial') AND b.total > b.paid
              AND EXISTS (SELECT 1 FROM json_each(?) AS j
@@ -908,18 +987,27 @@ export const takeCustomerPayment = Effect.fn("takeCustomerPayment")(function* (
           = (SELECT COUNT(*) FROM json_each(?))`,
     params: [input.customerId, shown, shown],
   };
-  const [recorded] = yield* db.batch(
-    handoverStatements(
+  const answer = { reference, amount, shares };
+  const [recorded] = yield* db.batch([
+    ...handoverStatements(
       { reference, shares, method: input.method, by: user.id, at, day: dayOf(at) },
-      condition,
+      both(rules, notYetRecorded(submission)),
     ),
-  );
+    submissionStatement(submission, {
+      at,
+      answer: json(answer),
+      wrote: { sql: "EXISTS (SELECT 1 FROM payments WHERE id = ?)", params: [shares[0]!.paymentId] },
+    }),
+  ]);
   if (recorded!.changes !== shares.length) {
+    // Another request with this form's key recorded it meanwhile.
+    const meanwhile = yield* recordedAnswer(HandoverAnswer, submission);
+    if (meanwhile) return meanwhile;
     // The condition refused the whole batch: the Bills moved while the
     // submission was in flight, so nothing was recorded (spec §5.5).
     return yield* new CustomerBillsChanged({ customerId: input.customerId });
   }
-  return { reference, amount, shares };
+  return answer;
 });
 
 const SummaryRow = Schema.Struct({
@@ -945,6 +1033,17 @@ function summary(row: typeof SummaryRow.Type): BillSummary {
     customer: customerId === null || customerName === null ? null : { id: customerId, name: customerName },
   };
 }
+
+/**
+ * A Bill's summary as one JSON value, for the `submissions` row a selection
+ * leaves: the fields of `SummaryRow`. It ends at its `FROM`, for the caller's
+ * `WHERE`.
+ */
+const SUMMARY_JSON = `SELECT json_object(
+         'id', b.id, 'day', b.day, 'openedBy', b.opened_by, 'openedAt', b.opened_at,
+         'customerId', b.customer_id, 'customerName', c.name, 'note', b.note,
+         'total', b.total, 'paid', b.paid, 'state', b.state, 'revision', b.revision)
+       FROM bills b LEFT JOIN customers c ON c.id = b.customer_id`;
 
 const summaryOf = Effect.fnUntraced(function* (billId: string) {
   const db = yield* Db;

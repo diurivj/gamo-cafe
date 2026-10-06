@@ -34,6 +34,7 @@ app/
     sign-in.ts     codes and sessions: addUser, issueSignInCode, useSignInCode, authenticate, signOut
     users.ts       what an Admin does on Usuarios: add, new code, sign out everywhere, deactivate, role
     catalog.ts     Items and Categories; activeItemsByCategory is the read for the Sell screen
+    submissions.ts one submission per rendered form: the key a form carries, written in the batch of what it records
     stock.ts       the statements that move Stock (changeStock, adjustmentStatements, countStatements), stockOf, lastCountedAt
     inventory.ts   Inventario: Stock and Minimums, recording and cancelling Adjustments
     counts.ts      Conteo: what the entry and review steps show, recording a Count, and the Diferencias read (a page of Counts by cursor)
@@ -174,6 +175,7 @@ export async function action({ context, params, request }: Route.ActionArgs) {
 - A route with several forms tells them apart by the submit button's `name="intent"`, and builds one program for whichever was sent inside a single `Effect.gen`, so that `onError` gets the union of every operation's errors (`programFor` in `app/routes/users.tsx`). A form it does not understand is answered 400. A route whose forms belong to distinct families may run more than one program: `app/routes/bill.tsx` runs one for the corrections, with its own `run` and its own exhaustive error map, and another for the payment and edit forms. Each `run` still gets a typed, exhaustive error map — a `switch` on `error._tag` with no `default`.
 - `run(context, program)` resolves with the program's value.
 - An action that records something answers success with a redirect, never with data, so a reload or the back button records nothing twice (spec §3.4). What the screen says afterwards goes with it through `~/flash.server`: the action returns `redirectWithFlash("/clientes/abc", { message: "Abono de $20.00 registrado." })`, the loader of the page it names returns `flash: takeFlash(context)`, and the component renders `flash?.message`. The flash travels in a cookie that lasts a minute and is cleared by the request that took it, so it shows once; it is never put in the URL. Besides `message` it can name the `form` that was recorded, and every flash has a new `id`: a page keys a form on it to start that form over (`fresh` in `app/routes/inventario.tsx`, the selection in `app/routes/home.tsx`). A refusal still answers 400 with its Spanish message as action data, on the same form. An action with nothing to say returns a plain `redirect(...)`.
+- A form that creates a Bill, a Payment, an Adjustment or a Count carries a key, so a double tap or a retry on a bad connection records nothing twice (spec §3.4). The loader of the page makes it (`submissionKey: newId()`), the form sends it in a hidden `submissionKey` field, and the action hands it to the operation, which records one submission per key and answers a repeat with what the first one answered, so the action builds the same redirect and the same message. The loader runs again after every recorded form, which is what gives the next form a new key: a route that skips that revalidation would send the old key again, and the next sale would be taken for a repeat. Conteo's confirming form is rendered by the review action, which makes its key. See [One submission per form](#one-submission-per-form).
 - After a recorded form the browser's router runs every loader of the page again, and that is what a loader about Bills, Payments or Stock needs: leave it alone. Two loaders are about neither and export `shouldRevalidate` to be kept instead (spec §3.4). The shell's (`app/routes/shell.tsx`) runs again only after a form on Usuarios; when an Admin changes a User's role from another phone, `shellMiddleware` (`~/shell.server`) answers that User's next navigation with a reload of the page. Vender's Items are the loader of a layout around it (`app/routes/sell-items.tsx`), read when Vender is opened and after a refused form, not after a recorded one. A loader that takes a flash must not be skipped, or its message stays on screen. Nothing is cached anywhere else: `workers/app.ts` answers everything with `Cache-Control: no-store`, and `tests/reuse.test.ts` holds that and the D1 statements a sale costs.
 - The third argument receives every typed error except `DbError` and returns what the route answers with, or throws a `redirect(...)`. It is required exactly when the program has such errors, and a `switch` on `error._tag` with no `default` makes the compiler report a missing case.
 - `DbError` is logged and becomes a 500 for the error boundary. A bug in the program is rethrown.
@@ -258,6 +260,28 @@ A Payment is always recorded in the same batch as what moves the Bill's `paid` p
 A D1 batch cannot branch, so the rules are SQL conditions: `paid + amount <= total` on both statements, and `revision = ? AND state IN ('open', 'partial') AND total - paid >= ?` when the batch is a lone `takePayment`. `paymentStatements(payment, when)` takes the `Condition` the rest of the batch shares, so a refused operation writes neither the Payment nor the projection. Two phones paying the same Bill in full at once therefore record exactly one Payment; the other gets `BillChanged`. When the first statement's `changes` is 0, `takePayment` reads the Bill again to answer the exact rule (`BillChanged`, `BillIsVoided` or `PaymentExceedsOwed`); the routes turn those into `~/shared/payment-messages.ts`.
 
 `takePayment` returns `{ id, amount, paid }`. A Worker who pays a Bill in full is redirected to Cuentas abiertas instead of staying on the page, because a Worker may not open a Paid Bill (§4.1). The amount handed over for cash is never submitted or stored: `PaymentFields` from `~/components/payment-fields` shows `changeFor(handedOver, amount)` while it is typed.
+
+## One submission per form
+
+`~/backend/submissions.ts` is how an operation records one submission per key. Five operations use it: `recordSelection`, `takePayment`, `takeCustomerPayment`, `recordAdjustment` and `recordCount`, each with an optional `submissionKey` in its input.
+
+```ts
+const submission = submissionOf("payment", user.id, input.submissionKey);
+const earlier = yield* recordedAnswer(PaymentAnswer, submission);
+if (earlier) return earlier; // a repeat: answered as the first, before any rule is checked
+
+const [recorded] = yield* db.batch([
+  ...paymentStatements(payment, both(rules, notYetRecorded(submission))),
+  submissionStatement(submission, { at, answer: json(answer), wrote: paymentWasWritten }),
+]);
+if (recorded.changes === 0) {
+  const meanwhile = yield* recordedAnswer(PaymentAnswer, submission);
+  if (meanwhile) return meanwhile; // the other of two requests that arrived together
+  // ...otherwise a rule refused it
+}
+```
+
+The key is a row of `submissions`, written last in the batch of what the form records, with the operation's answer as JSON. Every other statement of the batch carries `notYetRecorded`, and the table's primary key (User, kind of form, key) is the rule underneath. The repeat is looked for first because the first submission moved what the rules read: a second `takePayment` would otherwise be told the Bill changed. A refused operation writes no key, so the corrected form can be sent again. An input without a key gets one of its own and is recorded like any other. A `submissions` row is a fact about the submission, not a projection: the rebuild neither reads nor writes it.
 
 ## Abonar across a Customer's Bills
 
