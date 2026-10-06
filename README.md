@@ -38,9 +38,10 @@ app/
     run.server.ts  run(): the one way a loader or action runs a program
     health.ts      the reference operation
     customers.ts   Customers: addCustomer, searchCustomers, getCustomer, editCustomer, retireCustomer, restoreCustomer
-    bills.ts       Bills and Lines: recordSelection (one batch), getBill
+    bills.ts       Bills and Lines: recordSelection (one batch), getBill (the §4.1 gate), listOpenBills
   shared/      Plain functions, no Effect. Safe in the browser.
     money.ts       centavos, formatMoney, parsePesos
+    bill-state.ts  a Bill's states, their Spanish words, isOpenBill
     day.ts         Instant, Day, dayOf, formatDay, formatTime
     id.ts          newId
     secret.ts      sign-in codes, session tokens, their hash, the cookie name

@@ -42,10 +42,11 @@ describe("recording a selection", () => {
           note: null,
           total: 6200,
           paid: 0,
+          owed: 6200,
           state: "open",
           revision: 0,
         });
-        expect(yield* getBill(bill.id)).toEqual({
+        expect(yield* getBill(bill.id).pipe(as(ana))).toEqual({
           ...bill,
           lines: [
             {
@@ -55,6 +56,7 @@ describe("recording a selection", () => {
               quantity: 2,
               unitPrice: 1850,
               by: ana.id,
+              byName: "Ana",
               at,
               day: "2026-10-05",
             },
@@ -65,6 +67,7 @@ describe("recording a selection", () => {
               quantity: 1,
               unitPrice: 2500,
               by: ana.id,
+              byName: "Ana",
               at,
               day: "2026-10-05",
             },
@@ -86,7 +89,7 @@ describe("recording a selection", () => {
           ],
         }).pipe(as(ana));
 
-        expect((yield* getBill(bill.id)).lines).toMatchObject([{ itemId: item.id, quantity: 3, unitPrice: 900 }]);
+        expect((yield* getBill(bill.id).pipe(as(ana))).lines).toMatchObject([{ itemId: item.id, quantity: 3, unitPrice: 900 }]);
         expect(bill.total).toBe(2700);
       }),
     ));
@@ -106,17 +109,17 @@ describe("recording a selection", () => {
           minimum: null,
         }).pipe(as(ana));
 
-        expect((yield* getBill(first.id)).lines).toMatchObject([{ itemId: item.id, unitPrice: 1000 }]);
-        expect((yield* getBill(first.id)).total).toBe(1000);
+        expect((yield* getBill(first.id).pipe(as(ana))).lines).toMatchObject([{ itemId: item.id, unitPrice: 1000 }]);
+        expect((yield* getBill(first.id).pipe(as(ana))).total).toBe(1000);
 
         // The next Line takes the new price, on the same Bill.
         yield* recordSelection({ items: [{ itemId: item.id, quantity: 2 }], billId: first.id }).pipe(as(ana));
 
-        expect((yield* getBill(first.id)).lines).toMatchObject([
+        expect((yield* getBill(first.id).pipe(as(ana))).lines).toMatchObject([
           { itemId: item.id, quantity: 1, unitPrice: 1000 },
           { itemId: item.id, quantity: 2, unitPrice: 1500 },
         ]);
-        expect((yield* getBill(first.id)).total).toBe(4000);
+        expect((yield* getBill(first.id).pipe(as(ana))).total).toBe(4000);
       }),
     ));
 
@@ -173,7 +176,7 @@ describe("where the Lines go", () => {
         );
         expect(targeted.id).toBe(first.id);
         expect(targeted.revision).toBe(1);
-        expect((yield* getBill(first.id)).total).toBe(2000);
+        expect((yield* getBill(first.id).pipe(as(ana))).total).toBe(2000);
       }),
     ));
 
@@ -208,7 +211,7 @@ describe("where the Lines go", () => {
         expect(third.day).toBe("2026-10-06");
         expect(third.id).not.toBe(first.id);
         expect(third.total).toBe(1000);
-        expect((yield* getBill(first.id)).lines).toHaveLength(2);
+        expect((yield* getBill(first.id).pipe(as(ana))).lines).toHaveLength(2);
       }),
     ));
 
@@ -223,7 +226,7 @@ describe("where the Lines go", () => {
         yield* advanceClock("24 hours");
         yield* recordSelection({ items: [{ itemId: item.id, quantity: 1 }], billId: bill.id }).pipe(as(ana));
 
-        const lines = (yield* getBill(bill.id)).lines;
+        const lines = (yield* getBill(bill.id).pipe(as(ana))).lines;
         expect(lines.map((line) => line.day)).toEqual(["2026-10-05", "2026-10-06"]);
       }),
     ));
@@ -304,7 +307,7 @@ describe("validation and a target Bill", () => {
         const bill = yield* recordSelection({ items: [{ itemId: item.id, quantity: 1 }], note: "x".repeat(80) }).pipe(
           as(ana),
         );
-        expect((yield* getBill(bill.id)).note).toHaveLength(80);
+        expect((yield* getBill(bill.id).pipe(as(ana))).note).toHaveLength(80);
       }),
     ));
 
@@ -331,14 +334,15 @@ describe("validation and a target Bill", () => {
 
         const error = yield* Effect.flip(recordSelection({ ...add, billId: bill.id }).pipe(as(ana)));
         expect(error._tag).toBe("BillNotOpen");
-        expect((yield* getBill(bill.id)).lines).toHaveLength(1);
+        expect((yield* getBill(bill.id).pipe(as(ana))).lines).toHaveLength(1);
       }),
     ));
 
   it("answers BillNotFound from getBill for a Bill that does not exist", () =>
     runTest(
       Effect.gen(function* () {
-        expect((yield* Effect.flip(getBill("nope")))._tag).toBe("BillNotFound");
+        const ana = yield* seedUser("admin");
+        expect((yield* Effect.flip(getBill("nope").pipe(as(ana))))._tag).toBe("BillNotFound");
       }),
     ));
 });
@@ -363,7 +367,7 @@ describe("two phones at once", () => {
     const [first, second] = await Promise.all([addition(seeded.ana), addition(seeded.beto)]);
 
     expect([first.id, second.id]).toEqual([seeded.bill.id, seeded.bill.id]);
-    const bill = await runTest(getBill(seeded.bill.id));
+    const bill = await runTest(getBill(seeded.bill.id).pipe(as(seeded.ana)));
     expect(bill.total).toBe(4500);
     expect(bill.lines.map((line) => line.by).sort()).toEqual([seeded.ana.id, seeded.ana.id, seeded.beto.id].sort());
     expect(await runTest(stockOf(seeded.item.id).pipe(as(seeded.ana)))).toBe(-1);

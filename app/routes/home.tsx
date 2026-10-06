@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { data, Form, useNavigation } from "react-router";
+import { data, Form, Link, useNavigation } from "react-router";
 import { Effect, Result, Schema } from "effect";
 
 import {
@@ -8,6 +8,7 @@ import {
   type BillSummary,
   type CustomerUnavailable,
   type EmptySelection,
+  getBill,
   type InvalidQuantity,
   type ItemUnavailable,
   type NewSelection,
@@ -27,14 +28,32 @@ import type { Route } from "./+types/home";
 
 // Vender (spec §6.1): the Items as large buttons by Category, a selection the
 // browser holds until it is recorded, a Customer or a note, and **Dejar
-// abierta**. Cobrar joins in ticket 08.
+// abierta**. With `?billId=`, Cuenta's **Agregar productos** turns it into the
+// same screen targeting one Open Bill (ticket 07). Cobrar joins in ticket 08.
 
 export const meta: Route.MetaFunction = () => [{ title: "Vender · Gamo Cafe" }];
 
-export async function loader({ context }: Route.LoaderArgs) {
-  requireUser(context);
+export async function loader({ context, request }: Route.LoaderArgs) {
+  const user = requireUser(context);
   const categories = await run(context, activeItemsByCategory);
-  return { categories };
+  const billId = new URL(request.url).searchParams.get("billId") ?? "";
+  if (billId === "") return { categories, target: null };
+
+  const bill = await run(
+    context,
+    getBill(billId).pipe(Effect.provideService(CurrentUser, user)),
+    (error) => {
+      switch (error._tag) {
+        case "BillNotFound":
+          throw new Response(null, { status: 404 });
+        case "BillNotVisible":
+          throw new Response(null, { status: 403 });
+      }
+    },
+  );
+  // The screen shows the target's figures, not its Lines.
+  const { lines: _lines, ...target } = bill;
+  return { categories, target };
 }
 
 /** The selection as the browser sends it, in the `selection` form field. */
@@ -114,8 +133,12 @@ const primaryButton = "rounded-2xl bg-stone-900 px-4 py-4 text-lg font-semibold 
 const recordedMessage = (bill: BillSummary) =>
   `Se dejó abierta ${bill.customer ? `la cuenta de ${bill.customer.name}` : "una cuenta"} por ${formatMoney(bill.total)}.`;
 
+/** What it says after Lines were added to the Bill Cuenta sent the User from. */
+const addedMessage = (bill: BillSummary) =>
+  `Se agregaron los productos a la cuenta. Total ${formatMoney(bill.total)} · Debe ${formatMoney(bill.owed)}.`;
+
 export default function Home({ loaderData, actionData }: Route.ComponentProps) {
-  const { categories } = loaderData;
+  const { categories, target } = loaderData;
   const busy = useNavigation().state !== "idle";
   const [quantities, setQuantities] = useState<Readonly<Record<string, number>>>({});
   // A new key remounts the form after a recorded selection, so the picker and
@@ -149,18 +172,39 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
     <div className="flex flex-col gap-6">
       <h1 className="text-3xl font-semibold tracking-tight">Vender</h1>
 
+      {target ? (
+        <section aria-label="Cuenta destino" className="rounded-2xl border border-amber-300 bg-amber-50 p-4">
+          <p className="font-medium">
+            {target.customer
+              ? `Agregando productos a la cuenta de ${target.customer.name}`
+              : "Agregando productos a una cuenta sin cliente"}
+          </p>
+          <p className="mt-1 text-stone-600">{`Total ${formatMoney(target.total)} · Debe ${formatMoney(target.owed)}`}</p>
+          <Link to={`/cuentas/${target.id}`} className="mt-2 inline-block font-medium underline">
+            Ver cuenta
+          </Link>
+        </section>
+      ) : null}
+
       {items.length === 0 ? (
         <p className="text-lg text-stone-600">
           Todavía no hay productos. Pídele a un administrador que agregue el menú.
         </p>
       ) : null}
 
-      {/* `?index` aims the POST at this index route's action, not the layout's. */}
-      <Form method="post" action="?index" key={formKey} className="flex flex-col gap-6">
+      {/* `?index` aims the POST at this index route's action, not the layout's.
+          A target Bill rides in the same query, so the action answers for the
+          same page the loader rendered. */}
+      <Form
+        method="post"
+        action={target ? `/?index&billId=${target.id}` : "?index"}
+        key={formKey}
+        className="flex flex-col gap-6"
+      >
         <input type="hidden" name="intent" value="dejar-abierta" />
         <input type="hidden" name="selection" value={selection} />
-        {/* Ticket 07 sets this when Vender targets an Open Bill. */}
-        <input type="hidden" name="billId" value="" />
+        {/* Set when Cuenta's Agregar productos sent the User here. */}
+        <input type="hidden" name="billId" value={target?.id ?? ""} />
 
         {selected.length > 0 ? (
           <section aria-labelledby="seleccion" className="rounded-2xl border border-stone-200 bg-white p-4">
@@ -234,16 +278,20 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
           className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-4"
         >
           <h2 id="terminar" className="text-xl font-semibold">
-            Cliente y nota
+            {target ? "Agregar a la cuenta" : "Cliente y nota"}
           </h2>
 
-          <CustomerPicker name="customerId" />
+          {/* A Bill's Customer and note are set on Cuenta (ticket 10); when
+              adding to one, the picker and the note stay out of the way. */}
+          {target ? null : <CustomerPicker name="customerId" />}
 
-          <label className="flex flex-col gap-1">
-            <span className="font-medium">Nota (opcional)</span>
-            <input name="note" maxLength={80} autoComplete="off" className={field} />
-            <span className="text-sm text-stone-600">Quién se lo lleva o cualquier detalle. Hasta 80 caracteres.</span>
-          </label>
+          {target ? null : (
+            <label className="flex flex-col gap-1">
+              <span className="font-medium">Nota (opcional)</span>
+              <input name="note" maxLength={80} autoComplete="off" className={field} />
+              <span className="text-sm text-stone-600">Quién se lo lleva o cualquier detalle. Hasta 80 caracteres.</span>
+            </label>
+          )}
 
           {actionData && "error" in actionData ? (
             <p role="alert" className="rounded-xl bg-red-50 p-3 text-red-700">
@@ -252,12 +300,12 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
           ) : null}
           {actionData && "bill" in actionData ? (
             <p role="status" data-bill-id={actionData.bill.id} className="rounded-xl bg-green-50 p-3">
-              {recordedMessage(actionData.bill)}
+              {target ? addedMessage(actionData.bill) : recordedMessage(actionData.bill)}
             </p>
           ) : null}
 
           <button type="submit" disabled={busy || items.length === 0} className={primaryButton}>
-            Dejar abierta
+            {target ? "Agregar a la cuenta" : "Dejar abierta"}
           </button>
         </section>
       </Form>

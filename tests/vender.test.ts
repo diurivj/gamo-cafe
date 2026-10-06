@@ -49,7 +49,7 @@ describe("Vender", () => {
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).toContain("Se dejó abierta una cuenta por $37.00.");
-    const bill = await runTest(getBill(billIdIn(html)));
+    const bill = await runTest(getBill(billIdIn(html)).pipe(as(beto.user)));
     expect(bill).toMatchObject({ total: 3700, paid: 0, state: "open", note: "Para la mesa 2", customer: null });
     expect(bill.lines).toMatchObject([
       { itemId: agua.id, itemName: "Agua del turno", quantity: 2, unitPrice: 1850, by: beto.user.id },
@@ -78,7 +78,7 @@ describe("Vender", () => {
     expect(secondHtml).toContain("Se dejó abierta la cuenta de Familia del turno por $40.00.");
 
     expect(billIdIn(secondHtml)).toBe(billIdIn(firstHtml));
-    expect(await runTest(getBill(billIdIn(secondHtml)))).toMatchObject({ total: 4000, state: "open" });
+    expect(await runTest(getBill(billIdIn(secondHtml)).pipe(as(beto.user)))).toMatchObject({ total: 4000, state: "open" });
   });
 
   it("is told in Spanish when the selection has a retired Item", async () => {

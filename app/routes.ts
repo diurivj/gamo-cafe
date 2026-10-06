@@ -11,6 +11,8 @@ export default [
   // The signed-in shell: screens go inside it.
   layout("routes/shell.tsx", [
     index("routes/home.tsx"),
+    route("cuentas-abiertas", "routes/open-bills.tsx"),
+    route("cuentas/:billId", "routes/bill.tsx"),
     route("clientes", "routes/customers.tsx"),
     route("clientes/:customerId", "routes/customer.tsx"),
     route("inventario", "routes/inventario.tsx"),

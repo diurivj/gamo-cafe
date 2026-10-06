@@ -1,8 +1,10 @@
 import { Data, Effect, Schema } from "effect";
 
+import { BILL_STATES, type BillState, isOpenBill } from "~/shared/bill-state";
 import { dayOf, type Day, type Instant } from "~/shared/day";
 import { newId } from "~/shared/id";
 import type { Centavos } from "~/shared/money";
+import { normalizeName } from "~/shared/normalize-name";
 
 import { CurrentUser } from "./current-user";
 import { Db, statement, type Condition, type Statement } from "./db";
@@ -14,6 +16,10 @@ import { now } from "./time";
  * first Line, and its state is derived from its records, never set by hand
  * (spec §5.6).
  *
+ * `getBill` and `listOpenBills` are the reads Cuentas abiertas and Cuenta are
+ * built on (ticket 07); `getBill` carries the §4.1 gate for a Bill that is not
+ * Open.
+ *
  * "Record a selection" (spec §7.3.1) is one batch: the new Bill when one is
  * needed, one Line per distinct Item at the price the Item had, the Bill's
  * projections and the Stock of every stock-tracked Item. Adding Lines never
@@ -22,15 +28,7 @@ import { now } from "./time";
  * Payment's statements to that same batch.
  */
 
-/** The states of §5.6, as they are stored. */
-export const BILL_STATES = ["open", "partial", "paid", "voided"] as const;
-
-export type BillState = (typeof BILL_STATES)[number];
-
 const BillStateSchema = Schema.Literals(BILL_STATES);
-
-/** A Bill that is Abierta or Pago parcial: Lines may be added to it. */
-const isOpen = (state: BillState) => state === "open" || state === "partial";
 
 /** A note as long as §5.3 allows. */
 export const NOTE_LIMIT = 80;
@@ -58,6 +56,13 @@ export class CustomerUnavailable extends Data.TaggedError("CustomerUnavailable")
 }> {}
 
 export class BillNotFound extends Data.TaggedError("BillNotFound")<{ readonly billId: string }> {}
+
+/**
+ * The Bill is Paid or Voided and the User is a Worker: a Worker opens only
+ * Open Bills (spec §4.1, §4.2). Mi día (ticket 14) is the one place their own
+ * Paid or Voided records appear.
+ */
+export class BillNotVisible extends Data.TaggedError("BillNotVisible")<{ readonly billId: string }> {}
 
 /** The target Bill is not Open: no more Lines can be added (spec §5.3). */
 export class BillNotOpen extends Data.TaggedError("BillNotOpen")<{
@@ -100,6 +105,8 @@ export interface BillSummary {
   readonly note: string | null;
   readonly total: Centavos;
   readonly paid: Centavos;
+  /** What the Bill still owes: its total minus its Payments (spec §5.6). */
+  readonly owed: Centavos;
   readonly state: BillState;
   readonly revision: number;
 }
@@ -112,6 +119,8 @@ export interface BillLine {
   readonly unitPrice: Centavos;
   /** The User who added the Line. */
   readonly by: string;
+  /** Their name, for Cuenta and Mi día to show (spec §6.1). */
+  readonly byName: string;
   readonly at: Instant;
   readonly day: Day;
 }
@@ -186,7 +195,7 @@ export const recordSelection = Effect.fn("recordSelection")(function* (input: Ne
   if (billId !== null) {
     const bill = yield* db.first(TargetRow, "SELECT id, state FROM bills WHERE id = ?", billId);
     if (!bill) return yield* new BillNotFound({ billId });
-    if (!isOpen(bill.state)) return yield* new BillNotOpen({ billId, state: bill.state });
+    if (!isOpenBill(bill.state)) return yield* new BillNotOpen({ billId, state: bill.state });
     target = bill;
   } else if (customerId !== null) {
     const route = yield* db.first(
@@ -309,7 +318,7 @@ export const recordSelection = Effect.fn("recordSelection")(function* (input: Ne
     if (target) {
       const state = yield* db.first(StateRow, "SELECT state FROM bills WHERE id = ?", target.id);
       if (!state) return yield* new BillNotFound({ billId: target.id });
-      if (!isOpen(state.state)) return yield* new BillNotOpen({ billId: target.id, state: state.state });
+      if (!isOpenBill(state.state)) return yield* new BillNotOpen({ billId: target.id, state: state.state });
     }
     const stillThere = yield* db.all(
       IdRow,
@@ -337,6 +346,16 @@ const SummaryRow = Schema.Struct({
   revision: Schema.Int,
 });
 
+/** A summary row as the app's shape: the Customer, and what the Bill owes. */
+function summary(row: typeof SummaryRow.Type): BillSummary {
+  const { customerId, customerName, ...bill } = row;
+  return {
+    ...bill,
+    owed: bill.total - bill.paid,
+    customer: customerId === null || customerName === null ? null : { id: customerId, name: customerName },
+  };
+}
+
 const summaryOf = Effect.fnUntraced(function* (billId: string) {
   const db = yield* Db;
   const row = yield* db.first(
@@ -349,11 +368,35 @@ const summaryOf = Effect.fnUntraced(function* (billId: string) {
     billId,
   );
   if (!row) return yield* new BillNotFound({ billId });
-  const { customerId, customerName, ...bill } = row;
-  return {
-    ...bill,
-    customer: customerId === null || customerName === null ? null : { id: customerId, name: customerName },
-  };
+  return summary(row);
+});
+
+/** The end of a prefix on `normalized_name`, as `searchCustomers` uses. */
+const LAST_CHARACTER = "\u{10FFFF}";
+
+/**
+ * Every Open Bill, newest first: Cuentas abiertas (spec §6.1). One statement
+ * driven by the index on state, so it reads the Open Bills and nothing else,
+ * however many Paid Bills the history holds (spec §2.4, §7.4). With `typed`,
+ * it keeps only the Bills of Customers whose name starts with it, ignoring
+ * case and accents, as on Clientes (spec §5.2).
+ */
+export const listOpenBills = Effect.fn("listOpenBills")(function* (typed = "") {
+  const db = yield* Db;
+  const prefix = normalizeName(typed);
+  const rows = yield* db.all(
+    SummaryRow,
+    `SELECT b.id, b.day, b.opened_by AS openedBy, b.opened_at AS openedAt,
+            b.customer_id AS customerId, c.name AS customerName, b.note,
+            b.total, b.paid, b.state, b.revision
+     FROM bills b LEFT JOIN customers c ON c.id = b.customer_id
+     WHERE b.state IN ('open', 'partial')${
+       prefix === "" ? "" : " AND c.normalized_name >= ? AND c.normalized_name < ?"
+     }
+     ORDER BY b.opened_at DESC, b.rowid DESC`,
+    ...(prefix === "" ? [] : [prefix, prefix + LAST_CHARACTER]),
+  );
+  return rows.map(summary);
 });
 
 const LineRow = Schema.Struct({
@@ -363,22 +406,32 @@ const LineRow = Schema.Struct({
   quantity: Schema.Int,
   unitPrice: Schema.Int,
   by: Schema.String,
+  byName: Schema.String,
   at: Schema.Int,
   day: Schema.String,
 });
 
 /**
  * One Bill with its Lines, oldest first, each with its Item, author and
- * moment. The read the tests and the Cuenta screen (ticket 07) build on.
+ * moment. The read Cuenta (ticket 07) builds on.
+ *
+ * The §4.1 gate lives here: a Worker requesting a Paid or Voided Bill is
+ * refused, and `Mi día` (ticket 14) is the only view that shows them their own
+ * records outside this rule. An Admin opens every Bill.
  */
 export const getBill = Effect.fn("getBill")(function* (billId: string) {
   const db = yield* Db;
+  const user = yield* CurrentUser;
   const bill = yield* summaryOf(billId);
+  if (!isOpenBill(bill.state) && user.role !== "admin") return yield* new BillNotVisible({ billId });
   const lines = yield* db.all(
     LineRow,
     `SELECT l.id, l.item_id AS itemId, i.name AS itemName, l.quantity,
-            l.unit_price AS unitPrice, l.added_by AS "by", l.added_at AS at, l.day
-     FROM lines l JOIN items i ON i.id = l.item_id
+            l.unit_price AS unitPrice, l.added_by AS "by", u.name AS byName,
+            l.added_at AS at, l.day
+     FROM lines l
+     JOIN items i ON i.id = l.item_id
+     JOIN users u ON u.id = l.added_by
      WHERE l.bill_id = ?
      ORDER BY l.added_at, l.rowid`,
     billId,
