@@ -1,6 +1,6 @@
 # 03 — Usuarios: Admins manage Users and sign-in codes
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 02
 Spec: [`../spec.md`](../spec.md) §3.5, §4.1, §6.2 (Usuarios), §8.8, §10.1
 
@@ -19,3 +19,7 @@ On **Usuarios**, an Admin adds a User with a name and role and is shown a one-ti
 - [ ] A User signed out everywhere, and a deactivated User, lose access on their next request.
 - [ ] The last active Admin cannot be deactivated or made a Worker, including when two requests race.
 - [ ] A Worker calling any Usuarios loader or action is refused.
+
+## Comments
+
+- 2026-10-06: Implemented on `ticket/03-usuarios`, merged into `gamo-cafe-v1` at `2cb4212`. No migration needed. The last-Admin race tests were not mutation-checked. A Worker hitting an Admin route sees the generic error page; ticket 20 should give 403 a proper Spanish page. No confirmation step before Desactivar or sign-out-everywhere.

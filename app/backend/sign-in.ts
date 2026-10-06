@@ -35,7 +35,10 @@ export class NotSignedIn extends Data.TaggedError("NotSignedIn")<{}> {}
 
 const hash = (secret: string) => Effect.promise(() => hashSecret(secret));
 
-/** Adds an active User. Who may do so is the caller's rule. */
+/**
+ * Adds an active User, with no permission check: the Admin-facing operation
+ * is `addUserWithCode` in ./users.ts.
+ */
 export const addUser = Effect.fn("addUser")(function* (name: string, role: Role) {
   const db = yield* Db;
   const user: CurrentUser["Service"] = { id: newId(), name, role };
@@ -45,8 +48,8 @@ export const addUser = Effect.fn("addUser")(function* (name: string, role: Role)
 
 /**
  * Issues a one-time code for a User and returns it, the only time it is known.
- * `issuedBy` is the Admin who asked, or `null` for the command line. Who may
- * issue one is the caller's rule.
+ * `issuedBy` is the Admin who asked, or `null` for the command line. It has no
+ * permission check: the Admin-facing operations are in ./users.ts.
  */
 export const issueSignInCode = Effect.fn("issueSignInCode")(function* (
   userId: string,

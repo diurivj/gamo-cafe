@@ -2,8 +2,10 @@ import { env, exports } from "cloudflare:workers";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
+import { CurrentUser } from "~/backend/current-user";
 import { Db } from "~/backend/db";
 import { addUser, issueSignInCode } from "~/backend/sign-in";
+import { deactivateUser, signOutEverywhere } from "~/backend/users";
 import { formatSignInCode } from "~/shared/secret";
 
 import { APP_ORIGIN, appFetch, signedIn } from "./support/auth";
@@ -16,6 +18,16 @@ function userWithCode(name: string, role: "admin" | "worker" = "worker") {
     Effect.gen(function* () {
       const user = yield* addUser(name, role);
       return { user, code: yield* issueSignInCode(user.id, null) };
+    }).pipe(Effect.provide(Db.layer(env.DB))),
+  );
+}
+
+/** Runs an Admin's operation, as a new Admin, on the real clock like the Worker. */
+function asAnAdmin<A, E>(operation: Effect.Effect<A, E, Db | CurrentUser>) {
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const admin = yield* addUser(`Admin ${crypto.randomUUID()}`, "admin");
+      return yield* operation.pipe(Effect.provideService(CurrentUser, admin));
     }).pipe(Effect.provide(Db.layer(env.DB))),
   );
 }
@@ -175,8 +187,7 @@ describe("losing access", () => {
     const phone = await signedIn("worker", "Fabio");
     expect((await phone.fetch("/")).status).toBe(200);
 
-    // Deactivating is ticket 03's operation; until it exists, this is its effect.
-    await env.DB.prepare("UPDATE users SET active = 0 WHERE id = ?").bind(phone.user.id).run();
+    await asAnAdmin(deactivateUser(phone.user.id));
 
     const response = await phone.fetch("/");
     expect(response.status).toBe(302);
@@ -186,15 +197,14 @@ describe("losing access", () => {
   it("happens on the next request after the session is revoked", async () => {
     const phone = await signedIn("worker", "Gina");
 
-    // Signing a User out everywhere is ticket 03's operation; this is its effect.
-    await env.DB.prepare("UPDATE sessions SET revoked_at = 1 WHERE user_id = ?").bind(phone.user.id).run();
+    await asAnAdmin(signOutEverywhere(phone.user.id));
 
     expect((await phone.fetch("/")).headers.get("Location")).toBe("/entrar");
   });
 
   it("means a deactivated User's code signs nobody in", async () => {
     const { user, code } = await userWithCode("Hugo");
-    await env.DB.prepare("UPDATE users SET active = 0 WHERE id = ?").bind(user.id).run();
+    await asAnAdmin(deactivateUser(user.id));
 
     const response = await enterCode(code);
 

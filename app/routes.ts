@@ -12,5 +12,7 @@ export default [
   layout("routes/shell.tsx", [
     index("routes/home.tsx"),
     route("clientes", "routes/customers.tsx"),
-    route("clientes/:customerId", "routes/customer.tsx"),  ]),
+    route("clientes/:customerId", "routes/customer.tsx"),
+    route("usuarios", "routes/users.tsx"),
+  ]),
 ] satisfies RouteConfig;
