@@ -1,6 +1,6 @@
 # 22 — Run the free-plan proof on a disposable deployment
 
-Status: ready-for-human
+Status: resolved
 Blocked by: 21
 Spec: [`../spec.md`](../spec.md) §10.7, §3.2 (exit rule), §9 (1–2)
 
@@ -14,13 +14,15 @@ If Effect is the reason a screen fails the CPU criterion, the exit rule in §3.2
 
 ## Acceptance criteria
 
-- [ ] The figures are recorded in this file under `## Answer`.
-- [ ] Every §10.7 bullet holds, or the failing request is ticketed.
-- [ ] The disposable deployment is torn down.
+- [x] The figures are recorded in this file under `## Answer`.
+- [x] Every §10.7 bullet holds, or the failing request is ticketed. (The CPU bullet did not hold; ticket 23 was opened for it and later superseded by ADR 0007.)
+- [x] The disposable deployment is torn down.
 
 ## Comments
 
 - 2026-10-06: The kit is ready on `gamo-cafe-v1` at `22c5e69`: the runbook is README's "The free-plan proof", the runner is `npm run proof` (with `--busy-day`), and the seed, its shape checks and the local budgets are green. The only things left are the account, the disposable deployment and the figures, per the runbook and acceptance criteria above; record them under `## Answer` and set `Status: resolved` when done.
+- 2026-10-06: ADR 0007 drops this proof as a release gate. The figures below stay as the record of why. The disposable deployment is torn down in ticket 24.
+- 2026-10-06: Closed. Ticket 24 confirmed the Worker and the database are gone, and `npm run proof`, `npm run seed:production` and the README runbook named above were removed in ticket 25.
 
 ## Answer
 
@@ -48,4 +50,4 @@ Run on 2026-10-06 under the developer's personal Cloudflare account (`diurivj@gm
 
 **Busy Day** (`npm run proof -- --busy-day`, 69 requests, 0 failed, 16.7 s): D1 metrics over the run's window (15:23:53–15:24:11 UTC) show **35,077 rows read and 1,793 rows written** — 3.5% and 9% of the one-fifth marks (1,000,000 and 20,000).
 
-**Remaining acceptance**: the disposable deployment is left up for inspection pending the developer's word; teardown is `npx wrangler delete gamo-cafe-proof --force && npx wrangler d1 delete gamo-cafe-proof --skip-confirmation`, then revert `wrangler.jsonc`.</｜DSML｜ parameter,
+**Teardown**: the developer deleted the `gamo-cafe-proof` Worker and database on 2026-10-06 (ticket 24), and `wrangler.jsonc` points `env.production` at `gamo-cafe` and `gamo-cafe-db` again (ticket 25).
