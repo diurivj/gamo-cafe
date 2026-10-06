@@ -18,6 +18,7 @@ export default [
     route("diferencias", "routes/diferencias.tsx"),
     route("inventario", "routes/inventario.tsx"),
     route("inventario/conteo", "routes/conteo.tsx"),
+    route("por-cobrar", "routes/owed.tsx"),
     route("productos", "routes/productos.tsx"),
     route("productos/:itemId", "routes/producto.tsx"),
     route("usuarios", "routes/users.tsx"),
