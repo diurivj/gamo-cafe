@@ -2,7 +2,7 @@ import { Data, Effect, Schema } from "effect";
 
 import { newId } from "~/shared/id";
 import type { Centavos } from "~/shared/money";
-import { normalizeName, tidyName } from "~/shared/name";
+import { normalizeName } from "~/shared/normalize-name";
 
 import { requireAdmin } from "./current-user";
 import { Db, statement } from "./db";
@@ -16,6 +16,9 @@ import { now, today } from "./time";
  * Both are entities, changed in place and retired instead of deleted. The one
  * fact written here is the Restock that records an Item's starting Stock.
  */
+
+/** A name as it is stored: trimmed, with single spaces. */
+const tidyName = (name: string) => name.trim().replace(/\s+/g, " ");
 
 /** A name was empty. */
 export class NameMissing extends Data.TaggedError("NameMissing")<{}> {}

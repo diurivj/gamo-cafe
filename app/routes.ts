@@ -6,11 +6,15 @@ export default [
   route("entrar", "routes/sign-in.tsx"),
   route("salir", "routes/resources/sign-out.ts"),
   route("healthz", "routes/resources/healthz.ts"),
+  route("clientes/selector", "routes/resources/customer-picker.ts"),
 
   // The signed-in shell: screens go inside it.
   layout("routes/shell.tsx", [
     index("routes/home.tsx"),
+    route("clientes", "routes/customers.tsx"),
+    route("clientes/:customerId", "routes/customer.tsx"),
     route("productos", "routes/productos.tsx"),
     route("productos/:itemId", "routes/producto.tsx"),
+    route("usuarios", "routes/users.tsx"),
   ]),
 ] satisfies RouteConfig;

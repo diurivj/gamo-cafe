@@ -5,7 +5,7 @@ import { createTestHarness, type TestHarness } from "wrangler";
 
 import { codeForUser } from "../app/backend/command-line.ts";
 import { dayOf } from "../app/shared/day.ts";
-import { normalizeName } from "../app/shared/name.ts";
+import { normalizeName } from "../app/shared/normalize-name.ts";
 import { hashSecret, newSessionToken, SESSION_COOKIE } from "../app/shared/secret.ts";
 
 export type Role = "admin" | "worker";
@@ -68,7 +68,20 @@ type TestFixtures = {
    * Every field has a default. Its name must not be an active Item's already.
    */
   addItem: (item?: NewSeededItem) => Promise<SeededItem>;
+  /**
+   * Adds a Customer: `await addCustomer("Familia Ruiz", { by: beto })`. `by`
+   * is the User who added them; `retired: true` adds them already retired.
+   */
+  addCustomer: (
+    name: string,
+    seed: { by: SeededUser; note?: string; retired?: boolean },
+  ) => Promise<SeededCustomer>;
 };
+
+export interface SeededCustomer {
+  readonly id: string;
+  readonly name: string;
+}
 
 type WorkerFixtures = {
   server: TestHarness;
@@ -219,6 +232,20 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
         await DB.prepare("INSERT INTO stock_levels (item_id, units) VALUES (?, ?)").bind(id, stock.units).run();
       }
       return { id, name, price, category };
+    });
+  },
+
+  addCustomer: async ({ server }, use) => {
+    await use(async (name, { by, note, retired }) => {
+      const DB = await database(server);
+      const customer = { id: crypto.randomUUID(), name };
+      const at = Date.now();
+      await DB.prepare(
+        "INSERT INTO customers (id, name, normalized_name, note, retired_at, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+        .bind(customer.id, name, normalizeName(name), note ?? null, retired ? at : null, by.id, at)
+        .run();
+      return customer;
     });
   },
 });
