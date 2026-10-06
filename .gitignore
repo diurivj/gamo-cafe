@@ -19,3 +19,8 @@ worker-configuration.d.ts
 coverage/
 playwright-report/
 test-results/
+
+# The proof kit's generated files (ticket 21)
+/seed.sql
+/proof-results.json
+/proof-busy-day.json

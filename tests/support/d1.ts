@@ -5,7 +5,7 @@
  * holds (spec §2.4).
  */
 export function countingD1(d1: D1Database) {
-  const counter = { statements: 0, rowsRead: 0 };
+  const counter = { statements: 0, rowsRead: 0, rowsWritten: 0 };
   const unwrap = new WeakMap<object, D1PreparedStatement>();
 
   const measured = (statement: D1PreparedStatement): D1PreparedStatement => {
@@ -15,6 +15,7 @@ export function countingD1(d1: D1Database) {
           return async () => {
             const result = await target.all();
             counter.rowsRead += result.meta.rows_read;
+            counter.rowsWritten += result.meta.rows_written ?? 0;
             return result;
           };
         }
@@ -22,6 +23,7 @@ export function countingD1(d1: D1Database) {
           return async () => {
             const result = await target.run();
             counter.rowsRead += result.meta.rows_read;
+            counter.rowsWritten += result.meta.rows_written ?? 0;
             return result;
           };
         }
@@ -49,7 +51,10 @@ export function countingD1(d1: D1Database) {
         if (property === "batch") {
           return async (statements: ReadonlyArray<D1PreparedStatement>) => {
             const results = await target.batch(statements.map((statement) => unwrap.get(statement) ?? statement));
-            for (const result of results) counter.rowsRead += result.meta.rows_read;
+            for (const result of results) {
+              counter.rowsRead += result.meta.rows_read;
+              counter.rowsWritten += result.meta.rows_written ?? 0;
+            }
             return results;
           };
         }

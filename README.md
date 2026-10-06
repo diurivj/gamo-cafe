@@ -18,6 +18,8 @@ React Router 8 (framework mode) on Cloudflare Workers, D1 with hand-written SQL,
 | `npm run db:migrate:production` | Applies `migrations/` to the production D1. |
 | `npm run projections:verify` | Reports every projection that disagrees with the facts. Exits 1 when there are differences. `:production` acts on the production D1. |
 | `npm run projections:rebuild` | Rewrites every projection from the facts. `:production` acts on the production D1. |
+| `npm run seed` | Writes `seed.sql`: the synthetic year of the §10.7 proof. `:local` applies it to the local D1, `:production` imports it into the production D1. |
+| `npm run proof` | Runs the §10.7 proof against a deployed URL and a session, and writes `proof-results.json`. `--busy-day` simulates a busy Day instead. |
 | `npm run deploy:production` | Builds for production and deploys with Wrangler. |
 | `npm run sign-in-code -- --new-admin "Nombre"` | Creates an Admin in the local D1 and prints a one-time sign-in code. `--user "Nombre"` issues a code for an existing User; `--production` acts on the production D1. |
 
@@ -177,6 +179,106 @@ export async function action({ context, params, request }: Route.ActionArgs) {
 - switching stock tracking on or off changes no record (spec §5.1), and the facts say what did move Stock: `moved_stock` on each Line, and the Adjustment's own record. Cancelling an Adjustment therefore reverses it even if tracking was switched off meanwhile — the same rule as the units of a removed Line. Without that rule a cancellation recorded while tracking was off moved nothing and no fact recorded it, so no rebuild could reproduce the live number.
 
 Every operation reads the clock, so events sort by their instant; the facts of one batch share it, and their kind and rowid break the tie. The tests in `tests/rebuild.test.ts` and `tests/rebuild-property.test.ts` send these statements to a real D1 whose state random sequences of the operations built, and check that verify finds nothing, a hand-corrupted projection is detected, and the rebuild restores it.
+
+## The free-plan proof
+
+Spec §10.7 is a release gate: a disposable Worker on Workers Free and a D1 Free database, loaded with a year of synthetic records, has to show that no request issues more than 50 D1 statements, that no request reads rows in proportion to the total history, that the median CPU time per request is under 10 ms over at least 20 runs of each of the nine requests, and that a simulated busy Day stays under a fifth of the daily rows-read and rows-written limits.
+
+Everything but the Cloudflare account is here: `app/backend/seed.ts` and `scripts/seed.ts` build the year, `tests/proof-seed.test.ts` and `tests/proof-budget.test.ts` prove it against a real D1, and `scripts/proof.ts` runs the requests against a deployment. Ticket 22 is a developer running the runbook below on a disposable account and recording the figures.
+
+### What is already proven locally
+
+The seed test loads the whole year into a real D1 and asserts its shape (200 Open Bills, one Customer with 30 of them, a clearly busiest Day, every History fact table), that `projections:verify`'s SQL finds no difference, and that the load stays under D1 Free's 100,000 rows-written day and 500 MB. The budget test loads four months, measures the nine requests, appends the rest of the year and measures them again: each request must issue at most 50 D1 statements and read the same rows at both sizes, and each has a cap of its own. The requests are real HTTP requests through the Worker, with a counting D1 swapped into the binding.
+
+```sh
+npm test -- tests/proof-seed.test.ts tests/proof-budget.test.ts
+```
+
+### The seed
+
+The year runs `2025-10-01` to `2026-09-30` in `America/Mexico_City`: four Users, eight Categories, 60 stock-tracked Items, 40 Customers, Bills with Lines and Payments, corrections of every kind, Adjustments with cancellations and monthly Counts. The last hundred Days hold the 200 Open Bills; the Customer `proof-customer-30` holds 30 of them and the busiest Day is `2026-08-15`. Ids, days and the record of each day derive from a hash of the Day, so a window of Days is a subset of the year.
+
+The generator writes facts and then runs the ticket 19 rebuild over them, so a loaded database is consistent by construction.
+
+```sh
+npm run seed                 # writes seed.sql and prints the report
+npm run db:migrate
+npm run seed:local           # ... and applies it to the local D1
+npm run projections:verify
+```
+
+The local load expects a fresh database: loading the seed twice fails on its own ids. Remove `.wrangler/state/v3/d1` to start the local D1 over.
+
+`npm run dev` serves that same local D1, so the whole proof can be rehearsed locally: sign in with `npm run sign-in-code -- --user "Ana"`, then run `npm run proof -- --url=http://localhost:5173 --code="..."`.
+
+### Creating the disposable deployment
+
+Needs a Cloudflare account on Workers Free and D1 Free (the Gamo account itself is created in spec §9). These steps replace the production placeholder in `wrangler.jsonc`; revert them at teardown so Gamo's account keeps its own values.
+
+1. Create the database and note the id it prints:
+
+   ```sh
+   npx wrangler d1 create gamo-cafe-proof
+   ```
+
+2. In `wrangler.jsonc`, under `env.production`: set `name` to `gamo-cafe-proof`, `d1_databases[0].database_name` to `gamo-cafe-proof`, and `d1_databases[0].database_id` to the printed id.
+3. Apply the migrations and deploy. The address is `https://gamo-cafe-proof.<account>.workers.dev`:
+
+   ```sh
+   npm run db:migrate:production
+   npm run deploy:production
+   ```
+
+4. Load the year and prove the projections:
+
+   ```sh
+   npm run seed:production
+   npm run projections:verify:production
+   ```
+
+   The import reports the rows read and written it cost. The seed's estimate is under 75,000 of the 100,000 rows written D1 Free allows a day, so the whole year loads in one day; the reported number is the figure ticket 22 records.
+5. Issue a code for one of the seeded Admins. It works once, for ten minutes:
+
+   ```sh
+   npm run sign-in-code -- --production --user "Ana"
+   ```
+
+### Running the proof
+
+```sh
+npm run proof -- --url=https://gamo-cafe-proof.<account>.workers.dev --code="ABCD 2345"
+```
+
+The runner signs in with the code (or takes `--cookie`), makes each of the nine §10.7 requests 21 times (`--runs`, at least 20) and writes `proof-results.json`: every run's status and wall time, and per-request medians. It exits 1 if any request did not answer what it should. The nine requests are the Sell screen, a ten-Item selection with Payment, Cuentas abiertas, Abonar across the 30-Bill Customer, Día for the busiest Day, a page of Cuentas, Inventario, a Count of every Item and a page of Historial.
+
+### Reading Cloudflare's figures
+
+**CPU time per request.** Cloudflare reports CPU time per invocation in Workers Logs: Workers & Pages → `gamo-cafe-proof` → **Observability**, over the run window in the results file. Each invocation row carries its CPU time; they appear in the same order as the runner's output, so the rows for one request are together. Read the median per request and record it: §10.7 wants a median under 10 ms for each. The GraphQL Analytics API's `workersInvocationsAdaptive { quantiles { cpuTimeP50 } }` gives the same quantiles per script over a window, without the per-URL split.
+
+**Statements and rows read per request.** Cloudflare does not report these per request; the local budget test is the proof of both, and it measures the same requests through the same code. Cloudflare reports D1's rows read and written per database over time, which is what the busy Day check uses.
+
+### Simulating the busy Day
+
+The busiest Day of the seeded year is 57 Bills. This replays one like it — 55 sales with their Payments, 10 handovers across the 30 Open Bills, 3 Adjustments and a Count of every Item — and writes `proof-busy-day.json`:
+
+```sh
+npm run proof -- --busy-day --url=https://gamo-cafe-proof.<account>.workers.dev --code="ABCD 2345"
+```
+
+Read the database's Rows read and Rows written immediately before and after it: D1 → `gamo-cafe-proof` → **Metrics** → Row Metrics, or the GraphQL `d1AnalyticsAdaptiveGroups` `sum { rowsRead rowsWritten }` for the UTC date (`date_geq`/`date_leq`). The difference is the busy Day's cost, and it must stay under a fifth of D1 Free's daily limits: **1,000,000 rows read and 20,000 rows written**. D1's metrics can lag a few minutes. If the readings would span UTC midnight, wait for the next day and run this step inside one UTC day.
+
+### Tearing down
+
+```sh
+npx wrangler delete gamo-cafe-proof --force
+npx wrangler d1 delete gamo-cafe-proof --skip-confirmation
+```
+
+Revert the `env.production` `name` and database id in `wrangler.jsonc`, and remove the generated `seed.sql`, `proof-results.json` and `proof-busy-day.json` (all gitignored).
+
+### What ticket 22 records
+
+Under `## Answer` in the ticket: the import's rows written, the median CPU time per request and the window it came from, the nine requests' local statement and rows-read budgets (the test's output), and the busy Day's rows read and written against the fifth-of-the-limits marks. If a screen misses its CPU criterion and Effect is the reason, spec §3.2's exit rule applies and a new ticket is opened.
 
 ## Signing in
 
