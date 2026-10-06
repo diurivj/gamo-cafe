@@ -31,8 +31,9 @@ app/
     sign-in.ts     codes and sessions: addUser, issueSignInCode, useSignInCode, authenticate, signOut
     users.ts       what an Admin does on Usuarios: add, new code, sign out everywhere, deactivate, role
     catalog.ts     Items and Categories; activeItemsByCategory is the read for the Sell screen
-    stock.ts       the statements that move Stock (changeStock, adjustmentStatements), stockOf
+    stock.ts       the statements that move Stock (changeStock, adjustmentStatements, countStatements), stockOf, lastCountedAt
     inventory.ts   Inventario: Stock and Minimums, recording and cancelling Adjustments
+    counts.ts      Conteo: what the entry and review steps show, recording a Count, and the Diferencias read
     command-line.ts  the SQL that scripts/sign-in-code.ts sends to D1
     time.ts        now, today (the only source of "now")
     run.server.ts  run(): the one way a loader or action runs a program
@@ -45,9 +46,11 @@ app/
     secret.ts      sign-in codes, session tokens, their hash, the cookie name
     normalize-name.ts  normalizeName: a name with case and accents ignored
     units.ts       parseUnits (a typed whole number of units)
+    discrepancy.ts discrepancyText: Faltante, Sobrante, or Sin diferencia
   components/  React components used by more than one screen
     customer-picker.tsx  CustomerPicker, the form field that chooses a Customer
     item-fields.tsx  ItemFields, the fields of an Item's form, new or existing
+    count-line.tsx  CountLineItem, one line of a Count as Conteo and Diferencias show it
   session.server.ts  the session middleware, requireUser, the cookie
   catalog-forms.server.ts  what the Productos routes share: the Admin gate, form parsing, error messages
   routes/      Route modules; resources/ holds routes without UI
