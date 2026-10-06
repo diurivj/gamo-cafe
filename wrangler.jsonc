@@ -27,9 +27,7 @@
         {
           "binding": "DB",
           "database_name": "gamo-cafe-db",
-          // Placeholder. Replace with the id printed by
-          // `wrangler d1 create gamo-cafe-db` in Gamo's Cloudflare account.
-          "database_id": "REPLACE_WITH_PRODUCTION_D1_DATABASE_ID",
+          "database_id": "489c5790-7285-4984-b735-89786843f70e",
           "migrations_dir": "./migrations"
         }
       ]
