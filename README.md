@@ -42,7 +42,7 @@ app/
     bills.ts       Bills, Lines and Payments: recordSelection, takePayment and takeCustomerPayment (one batch each), getBill (the §4.1 gate), listOpenBills, listCustomerOpenBills, listCustomerHandovers
     corrections.ts the corrections of Cuenta: removeLine, removePayment, voidBill (one batch each)
     payments.ts    the statements a Payment writes (paymentStatements and handoverStatements) and its errors
-    day.ts         the figures of a Day: a User's own records (Mi día) and every User's over a range (Día reuses it)
+    day.ts         the figures of a Day: a User's own records (Mi día), every User's over a range and the Items sold (Día reuses them)
   shared/      Plain functions, no Effect. Safe in the browser.
     money.ts       centavos, formatMoney, parsePesos, changeFor
     bill-state.ts  a Bill's states, their Spanish words, isOpenBill

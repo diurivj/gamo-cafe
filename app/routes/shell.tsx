@@ -21,7 +21,7 @@ const everyUser: ReadonlyArray<Section> = [
 ];
 
 const adminOnly: ReadonlyArray<Section> = [
-  { label: "Día" },
+  { label: "Día", to: "/dia" },
   { label: "Cuentas" },
   { label: "Por cobrar" },
   { label: "Inventario", to: "/inventario" },

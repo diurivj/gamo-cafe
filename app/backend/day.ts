@@ -173,6 +173,54 @@ export const figuresForRange = Effect.fn("figuresForRange")(function* (range: Da
   return { total, byUser };
 });
 
+const ItemSoldRow = Schema.Struct({
+  itemId: Schema.String,
+  itemName: Schema.String,
+  quantity: Schema.Int,
+  sold: Schema.Int,
+});
+
+/** One Item sold over a range of Days: its units and their value. */
+export interface ItemSold {
+  readonly itemId: string;
+  readonly itemName: string;
+  /** Units of every Line of this Item in the range that counts. */
+  readonly quantity: number;
+  /** Centavos of those units, at each Line's own price (spec §5.4). */
+  readonly sold: Centavos;
+}
+
+/**
+ * The Items sold over a range of Days, with their quantities and value
+ * (spec §6.2), the companion of `figuresForRange` with the same exclusions:
+ * a removed Line and the Lines of a Voided Bill count toward nothing
+ * (spec §5.7). One statement over `lines_by_day`, so the rows read follow the
+ * Days asked for and never the rest of the history (spec §2.4, §7.4). The
+ * most valuable Item comes first.
+ */
+export const itemsSoldForRange = Effect.fn("itemsSoldForRange")(function* (range: DayRange) {
+  yield* requireAdmin;
+  const db = yield* Db;
+
+  return yield* db.all(
+    ItemSoldRow,
+    `SELECT l.item_id AS itemId,
+            i.name AS itemName,
+            SUM(l.quantity) AS quantity,
+            SUM(l.quantity * l.unit_price) AS sold
+     FROM lines l
+     JOIN bills b ON b.id = l.bill_id
+     JOIN items i ON i.id = l.item_id
+     WHERE b.state <> 'voided'
+       AND NOT EXISTS (SELECT 1 FROM line_removals r WHERE r.line_id = l.id)
+       AND l.day >= ? AND l.day <= ?
+     GROUP BY l.item_id
+     ORDER BY sold DESC, itemName, l.item_id`,
+    range.from,
+    range.to,
+  );
+});
+
 const LineRow = Schema.Struct({
   id: Schema.String,
   itemName: Schema.String,
