@@ -1,10 +1,11 @@
 import { Effect, Schema } from "effect";
 
+import type { Cursor } from "~/shared/cursor";
 import type { Day } from "~/shared/day";
 import type { Centavos } from "~/shared/money";
 
 import { requireAdmin } from "./current-user";
-import { Db } from "./db";
+import { Db, type Param } from "./db";
 import { today } from "./time";
 
 /**
@@ -13,9 +14,9 @@ import { today } from "./time";
  * they are still Open on a later Day than they were opened on. Admin only
  * (spec §4.1).
  *
- * One index-driven read over `bills_by_state`; the Customer totals are folded
- * here. The rows read are the Open Bills themselves, so they are proportional
- * to the Open Bills and never to the Paid or Voided history (spec §2.4, §7.4).
+ * Index-driven reads over `bills_by_state`. The rows read are the Open Bills
+ * themselves, so they are proportional to the Open Bills and never to the
+ * Paid or Voided history (spec §2.4, §7.4).
  */
 
 /** One Customer and what their Open Bills still owe (spec §5.2, §5.9). */
@@ -38,86 +39,104 @@ export interface OwedBill {
   readonly fromEarlierDay: boolean;
 }
 
-/** The Owed list: the overall figure, then the Customers, then the loose Bills. */
+/** How many Open Bills with no Customer one page of Por cobrar holds. */
+export const OWED_BILLS_PER_PAGE = 50;
+
+/**
+ * The Owed list: the overall figure, then the Customers, then one page of the
+ * loose Bills and where the page after it starts.
+ */
 export interface Owed {
   readonly total: Centavos;
   readonly customers: ReadonlyArray<OwedCustomer>;
   readonly bills: ReadonlyArray<OwedBill>;
+  /** null when this is the last page of `bills`. */
+  readonly next: Cursor | null;
 }
 
-const OwedRow = Schema.Struct({
+const OwedGroup = Schema.Struct({
+  customerId: Schema.NullOr(Schema.String),
+  name: Schema.NullOr(Schema.String),
+  normalizedName: Schema.NullOr(Schema.String),
+  owed: Schema.Int,
+  oldestDay: Schema.String,
+});
+
+const LooseRow = Schema.Struct({
   id: Schema.String,
   day: Schema.String,
   total: Schema.Int,
   paid: Schema.Int,
-  customerId: Schema.NullOr(Schema.String),
-  customerName: Schema.NullOr(Schema.String),
-  normalizedName: Schema.NullOr(Schema.String),
+  at: Schema.Int,
+  rowid: Schema.Int,
 });
 
 /**
  * The Owed list at this moment: everything the Open Bills still owe, each
- * Customer's share with the Day of their oldest one, and the Open Bills with
- * no Customer, oldest first.
+ * Customer's share with the Day of their oldest one, and a page of the Open
+ * Bills with no Customer, oldest first.
  *
  * A Customer's owed figure is the sum of what their Open Bills still owe, so
  * a Paid or Voided Bill contributes nothing (spec §5.9); a retired Customer's
  * Open Bills stay collectable and are listed like any other (spec §5.2).
+ *
+ * Two statements. The figures are one grouped read of the Open Bills: the
+ * Customers are bounded by who buys on credit and are not paged, and the
+ * group of no Customer is what the loose Bills owe together. The loose Bills
+ * grow with time, so they come a page at a time, one arm per Open state on
+ * `bills_by_state`, seeking to the cursor: `opened_at`, then `rowid`.
  */
-export const listOwed = Effect.fn("listOwed")(function* () {
+export const listOwed = Effect.fn("listOwed")(function* (cursor: Cursor | null = null) {
   yield* requireAdmin;
   const db = yield* Db;
   const day = yield* today;
 
-  const rows = yield* db.all(
-    OwedRow,
-    `SELECT b.id, b.day, b.total, b.paid,
-            b.customer_id AS customerId, c.name AS customerName,
-            c.normalized_name AS normalizedName
-     FROM bills b
-     LEFT JOIN customers c ON c.id = b.customer_id
-     WHERE b.state IN ('open', 'partial') AND b.total > b.paid
-     ORDER BY b.opened_at, b.rowid`,
+  const groups = yield* db.all(
+    OwedGroup,
+    `SELECT g.customerId, c.name, c.normalized_name AS normalizedName, g.owed, g.oldestDay
+     FROM (
+       SELECT b.customer_id AS customerId, SUM(b.total - b.paid) AS owed, MIN(b.day) AS oldestDay
+       FROM bills b
+       WHERE b.state IN ('open', 'partial') AND b.total > b.paid
+       GROUP BY b.customer_id
+     ) AS g
+     LEFT JOIN customers c ON c.id = g.customerId`,
   );
 
-  // Oldest first, so the first row of a Customer is their oldest Open Bill.
-  const customers = new Map<
-    string,
-    { customerId: string; name: string; normalizedName: string; owed: number; oldestDay: Day }
-  >();
-  const bills: Array<OwedBill> = [];
-  let total = 0;
+  const rowid = cursor === null ? Number.NaN : Number(cursor.id);
+  const after = cursor !== null && Number.isSafeInteger(rowid);
+  const limit = OWED_BILLS_PER_PAGE + 1;
+  const arm = `SELECT * FROM (
+      SELECT b.id AS id, b.day AS day, b.total AS total, b.paid AS paid, b.opened_at AS at, b.rowid AS rowid
+      FROM bills b
+      WHERE b.state = ? AND b.customer_id IS NULL AND b.total > b.paid${
+        after ? " AND b.opened_at >= ? AND (b.opened_at > ? OR b.rowid > ?)" : ""
+      }
+      ORDER BY b.opened_at, b.rowid
+      LIMIT ?
+    )`;
+  const armParams = (state: string): ReadonlyArray<Param> => [
+    state,
+    ...(after ? [cursor.at, cursor.at, rowid] : []),
+    limit,
+  ];
+  const loose = yield* db.all(
+    LooseRow,
+    `SELECT * FROM (${arm} UNION ALL ${arm}) ORDER BY at, rowid LIMIT ?`,
+    ...armParams("open"),
+    ...armParams("partial"),
+    limit,
+  );
+  const shown = loose.slice(0, OWED_BILLS_PER_PAGE);
+  const last = shown.at(-1);
 
-  for (const row of rows) {
-    const owed = row.total - row.paid;
-    total += owed;
-    if (row.customerId === null || row.customerName === null) {
-      bills.push({
-        id: row.id,
-        day: row.day,
-        total: row.total,
-        paid: row.paid,
-        owed,
-        fromEarlierDay: row.day < day,
-      });
-      continue;
-    }
-    const customer = customers.get(row.customerId);
-    if (customer) {
-      customer.owed += owed;
-      if (row.day < customer.oldestDay) customer.oldestDay = row.day;
-    } else {
-      customers.set(row.customerId, {
-        customerId: row.customerId,
-        name: row.customerName,
-        normalizedName: row.normalizedName ?? "",
-        owed,
-        oldestDay: row.day,
-      });
-    }
-  }
-
-  const ordered = [...customers.values()]
+  const total = groups.reduce((sum, group) => sum + group.owed, 0);
+  const customers = groups
+    .flatMap((group) =>
+      group.customerId === null || group.name === null
+        ? []
+        : [{ ...group, customerId: group.customerId, name: group.name, normalizedName: group.normalizedName ?? "" }],
+    )
     .sort((left, right) => {
       if (left.oldestDay !== right.oldestDay) return left.oldestDay < right.oldestDay ? -1 : 1;
       // The same order as the `normalized_name` column: case and accents are
@@ -125,7 +144,22 @@ export const listOwed = Effect.fn("listOwed")(function* () {
       if (left.normalizedName === right.normalizedName) return 0;
       return left.normalizedName < right.normalizedName ? -1 : 1;
     })
-    .map(({ customerId, name, owed, oldestDay }) => ({ customerId, name, owed, oldestDay }));
+    .map(({ customerId, name, owed, oldestDay }): OwedCustomer => ({ customerId, name, owed, oldestDay }));
 
-  return { total, customers: ordered, bills };
+  const owed: Owed = {
+    total,
+    customers,
+    bills: shown.map(
+      (row): OwedBill => ({
+        id: row.id,
+        day: row.day,
+        total: row.total,
+        paid: row.paid,
+        owed: row.total - row.paid,
+        fromEarlierDay: row.day < day,
+      }),
+    ),
+    next: loose.length > OWED_BILLS_PER_PAGE && last ? { at: last.at, id: String(last.rowid) } : null,
+  };
+  return owed;
 });

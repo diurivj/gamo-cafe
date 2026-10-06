@@ -1,14 +1,18 @@
+import { env } from "cloudflare:workers";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { retireItem } from "~/backend/catalog";
-import { listCountItems, listCounts, previewCount, recordCount } from "~/backend/counts";
+import { COUNTS_PER_PAGE, listCountItems, listCounts, previewCount, recordCount } from "~/backend/counts";
+import type { CurrentUser } from "~/backend/current-user";
 import { Db, type Param } from "~/backend/db";
 import { recordAdjustment } from "~/backend/inventory";
 import { lastCountedAt, stockOf } from "~/backend/stock";
+import type { Cursor } from "~/shared/cursor";
 
 import { as, seedUser } from "./support/auth";
 import { seedCategory, seedItem } from "./support/catalog";
+import { countingD1 } from "./support/d1";
 import { advanceClock, runTest, setClock } from "./support/effect";
 
 // Counts through their operations: what confirming records and sets, what the
@@ -34,7 +38,7 @@ describe("recordCount", () => {
         expect(yield* stockOf(agua.id).pipe(as(ana))).toBe(7);
         expect(yield* stockOf(pan.id).pipe(as(ana))).toBe(4);
         expect(
-          (yield* listCounts().pipe(as(ana))).find((count) => count.id === id)?.lines,
+          (yield* listCounts(null, 100).pipe(as(ana))).counts.find((count) => count.id === id)?.lines,
         ).toEqual([
           { itemId: agua.id, itemName: "Contada agua", expected: 10, found: 7, difference: -3 },
           { itemId: pan.id, itemName: "Contado pan", expected: 4, found: 4, difference: 0 },
@@ -59,7 +63,7 @@ describe("recordCount", () => {
         yield* recordAdjustment({ itemId: item.id, reason: "waste", units: 4 }).pipe(as(ana));
         const { id } = yield* recordCount({ lines: [{ itemId: item.id, found: 7 }] }).pipe(as(ana));
 
-        const count = (yield* listCounts().pipe(as(ana))).find((row) => row.id === id)!;
+        const count = (yield* listCounts(null, 100).pipe(as(ana))).counts.find((row) => row.id === id)!;
         expect(count.lines).toEqual([
           { itemId: item.id, itemName: "Contado tras una venta", expected: 6, found: 7, difference: 1 },
         ]);
@@ -79,7 +83,7 @@ describe("recordCount", () => {
         const { id } = yield* recordCount({ lines: [{ itemId: item.id, found: 2 }] }).pipe(as(ana));
 
         expect(
-          (yield* listCounts().pipe(as(ana))).find((count) => count.id === id)?.lines,
+          (yield* listCounts(null, 100).pipe(as(ana))).counts.find((count) => count.id === id)?.lines,
         ).toEqual([{ itemId: item.id, itemName: "Nunca con fila", expected: 0, found: 2, difference: 2 }]);
         expect(yield* stockOf(item.id).pipe(as(ana))).toBe(2);
       }),
@@ -99,7 +103,7 @@ describe("recordCount", () => {
         }).pipe(as(ana));
 
         expect(
-          (yield* listCounts().pipe(as(ana))).find((count) => count.id === id)?.lines,
+          (yield* listCounts(null, 100).pipe(as(ana))).counts.find((count) => count.id === id)?.lines,
         ).toEqual([{ itemId: item.id, itemName: "Contado dos veces", expected: 3, found: 5, difference: 2 }]);
         expect(yield* stockOf(item.id).pipe(as(ana))).toBe(5);
       }),
@@ -110,7 +114,7 @@ describe("recordCount", () => {
       Effect.gen(function* () {
         const ana = yield* seedUser("admin");
         const item = yield* seedItem({ name: "Sin unidades válidas", startingStock: 4, by: ana });
-        const before = (yield* listCounts().pipe(as(ana))).length;
+        const before = (yield* listCounts(null, 100).pipe(as(ana))).counts.length;
 
         for (const found of [-1, 1.5, Number.NaN]) {
           const error = yield* Effect.flip(recordCount({ lines: [{ itemId: item.id, found }] }).pipe(as(ana)));
@@ -118,7 +122,7 @@ describe("recordCount", () => {
         }
         expect((yield* Effect.flip(recordCount({ lines: [] }).pipe(as(ana))))._tag).toBe("NoItemsCounted");
 
-        expect((yield* listCounts().pipe(as(ana))).length).toBe(before);
+        expect((yield* listCounts(null, 100).pipe(as(ana))).counts.length).toBe(before);
         expect(yield* stockOf(item.id).pipe(as(ana))).toBe(4);
       }),
     ));
@@ -135,7 +139,7 @@ describe("recordCount", () => {
           stockTracked: false,
           by: ana,
         });
-        const before = (yield* listCounts().pipe(as(ana))).length;
+        const before = (yield* listCounts(null, 100).pipe(as(ana))).counts.length;
 
         const missing = yield* Effect.flip(recordCount({ lines: [{ itemId: "no-existe", found: 1 }] }).pipe(as(ana)));
         expect(missing._tag).toBe("ItemNotFound");
@@ -149,7 +153,7 @@ describe("recordCount", () => {
         );
         expect(notTracked._tag).toBe("ItemNotStockTracked");
 
-        expect((yield* listCounts().pipe(as(ana))).length).toBe(before);
+        expect((yield* listCounts(null, 100).pipe(as(ana))).counts.length).toBe(before);
         expect(yield* stockOf(tracked.id).pipe(as(ana))).toBe(1);
         expect(yield* stockOf(untracked.id).pipe(as(ana))).toBe(0);
       }),
@@ -165,7 +169,7 @@ describe("recordCount", () => {
           as(ana),
         );
 
-        expect((yield* listCounts().pipe(as(ana))).find((count) => count.id === id)?.note).toBe("Conteo de prueba");
+        expect((yield* listCounts(null, 100).pipe(as(ana))).counts.find((count) => count.id === id)?.note).toBe("Conteo de prueba");
       }),
     ));
 });
@@ -228,11 +232,65 @@ describe("listCounts", () => {
         yield* advanceClock("1 minute");
         const second = yield* recordCount({ lines: [{ itemId: item.id, found: 2 }] }).pipe(as(ana));
 
-        const lines = yield* listCounts().pipe(as(ana));
+        const lines = (yield* listCounts(null, 100).pipe(as(ana))).counts;
         const ours = lines.filter((count) => [first.id, second.id].includes(count.id));
         expect(ours.map((count) => count.id)).toEqual([second.id, first.id]);
-        expect((yield* listCounts(1).pipe(as(ana))).length).toBe(1);
-        expect((yield* listCounts(1).pipe(as(ana)))[0]!.id).toBe(second.id);
+        expect((yield* listCounts(null, 1).pipe(as(ana))).counts.length).toBe(1);
+        expect((yield* listCounts(null, 1).pipe(as(ana))).counts[0]!.id).toBe(second.id);
+      }),
+    ));
+});
+
+describe("listCounts, a page at a time", () => {
+  /** Runs `listCounts` as this Admin with a D1 that counts what it does. */
+  async function pageOf(admin: CurrentUser["Service"], cursor: Cursor | null) {
+    const { counter, d1 } = countingD1(env.DB);
+    const page = await Effect.runPromise(listCounts(cursor).pipe(as(admin), Effect.provide(Db.layer(d1))));
+    return { ...counter, ...page };
+  }
+
+  it("holds a few Counts, walks them by cursor without repeating or skipping one, and reads about its own rows", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const items: Array<{ id: string }> = [];
+        for (let n = 0; n < 4; n++) items.push(yield* seedItem({ name: `Paginado ${n}`, startingStock: 1, by: ana }));
+        // Later than every other Count this file writes, so the newest are ours.
+        yield* setClock("2028-01-01T09:00:00");
+        const ids: Array<string> = [];
+        for (let n = 0; n < 3 * COUNTS_PER_PAGE; n++) {
+          // Two Counts share each instant: the cursor has to break the tie.
+          if (n % 2 === 0) yield* advanceClock("1 minute");
+          const { id } = yield* recordCount({ lines: items.map((item) => ({ itemId: item.id, found: n })) }).pipe(
+            as(ana),
+          );
+          ids.push(id);
+        }
+
+        const first = yield* Effect.promise(() => pageOf(ana, null));
+        expect(first.counts).toHaveLength(COUNTS_PER_PAGE);
+        expect(first.counts[0]!.lines).toHaveLength(4);
+        expect(first.statements).toBe(2);
+        expect(first.next).not.toBeNull();
+
+        // A Count recorded between two pages belongs to neither that follows.
+        yield* advanceClock("1 hour");
+        yield* recordCount({ lines: [{ itemId: items[0]!.id, found: 1 }] }).pipe(as(ana));
+
+        const second = yield* Effect.promise(() => pageOf(ana, first.next));
+        const third = yield* Effect.promise(() => pageOf(ana, second.next));
+        const walked = [...first.counts, ...second.counts, ...third.counts].map((count) => count.id);
+        expect(new Set(walked).size).toBe(3 * COUNTS_PER_PAGE);
+        expect([...walked].sort()).toEqual([...ids].sort());
+        // Newest first, page after page.
+        const instants = [...first.counts, ...second.counts, ...third.counts].map((count) => count.at);
+        expect(instants).toEqual([...instants].sort((a, b) => b - a));
+
+        // A later page costs what the first did, whatever was counted before.
+        expect(second.statements).toBe(2);
+        expect(second.rowsRead).toBeLessThanOrEqual(first.rowsRead + 4);
+        expect(third.rowsRead).toBeLessThanOrEqual(first.rowsRead + 4);
+        expect(first.rowsRead).toBeLessThan(COUNTS_PER_PAGE * 4 * 6);
       }),
     ));
 });
@@ -297,7 +355,7 @@ describe("a Count of every Item", () => {
         expect(budget.statements).toBeLessThan(50);
         expect(budget.maxParams).toBeLessThanOrEqual(100);
         // And it counted all sixty, each against the Stock of that moment.
-        const count = (yield* listCounts().pipe(as(ana))).find((row) => row.id === id)!;
+        const count = (yield* listCounts(null, 100).pipe(as(ana))).counts.find((row) => row.id === id)!;
         expect(count.lines).toHaveLength(60);
         for (const [at, item] of items.entries()) {
           const line = count.lines.find((row) => row.itemId === item.id)!;
@@ -317,7 +375,7 @@ describe("a Worker", () => {
         const item = yield* seedItem({ name: "Solo para admins", startingStock: 2, by: ana });
 
         expect((yield* Effect.flip(listCountItems.pipe(as(beto))))._tag).toBe("AdminOnly");
-        expect((yield* Effect.flip(listCounts().pipe(as(beto))))._tag).toBe("AdminOnly");
+        expect((yield* Effect.flip(listCounts(null, 100).pipe(as(beto))))._tag).toBe("AdminOnly");
         expect((yield* Effect.flip(previewCount([{ itemId: item.id, found: 1 }]).pipe(as(beto))))._tag).toBe(
           "AdminOnly",
         );

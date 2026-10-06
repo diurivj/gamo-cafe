@@ -189,7 +189,7 @@ describe("the rebuild after random sequences", () => {
                   { itemId: pick(rand, items), quantity: 1 + below(rand, 3) },
                   ...(chance(rand, 0.4) ? [{ itemId: pick(rand, items), quantity: 1 + below(rand, 2) }] : []),
                 ];
-                const open = yield* listOpenBills();
+                const open = (yield* listOpenBills()).bills;
                 // Onto an Open Bill sometimes; otherwise routed by Customer or
                 // started fresh, as Vender does.
                 const target = open.length > 0 && chance(rand, 0.3) ? pick(rand, open) : null;
@@ -217,7 +217,7 @@ describe("the rebuild after random sequences", () => {
                 break;
               }
               case "payment": {
-                const open = (yield* listOpenBills()).filter((bill) => bill.owed > 0);
+                const open = (yield* listOpenBills()).bills.filter((bill) => bill.owed > 0);
                 if (open.length === 0) {
                   outcome = Exit.succeed(undefined);
                   break;
@@ -252,7 +252,7 @@ describe("the rebuild after random sequences", () => {
                 break;
               }
               case "removeLine": {
-                const open = yield* listOpenBills();
+                const open = (yield* listOpenBills()).bills;
                 if (open.length === 0) {
                   outcome = Exit.succeed(undefined);
                   break;

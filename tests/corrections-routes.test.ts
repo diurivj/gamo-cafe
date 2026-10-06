@@ -178,7 +178,7 @@ describe("an Admin's corrections through Cuenta", () => {
     const after = await runTest(
       Effect.gen(function* () {
         const seen = yield* getBill(bill.id).pipe(as(ana.user));
-        return { seen, stock: yield* stockOf(item.id).pipe(as(ana.user)), open: yield* listOpenBills() };
+        return { seen, stock: yield* stockOf(item.id).pipe(as(ana.user)), open: (yield* listOpenBills()).bills };
       }),
     );
     expect(after.seen).toMatchObject({ state: "voided", revision: bill.revision + 1 });

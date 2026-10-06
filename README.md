@@ -36,18 +36,18 @@ app/
     catalog.ts     Items and Categories; activeItemsByCategory is the read for the Sell screen
     stock.ts       the statements that move Stock (changeStock, adjustmentStatements, countStatements), stockOf, lastCountedAt
     inventory.ts   Inventario: Stock and Minimums, recording and cancelling Adjustments
-    counts.ts      Conteo: what the entry and review steps show, recording a Count, and the Diferencias read
+    counts.ts      Conteo: what the entry and review steps show, recording a Count, and the Diferencias read (a page of Counts by cursor)
     command-line.ts  the SQL that scripts/sign-in-code.ts sends to D1
     rebuild.ts     the SQL that scripts/projections.ts sends to D1: recompute every projection from the facts
     time.ts        now, today (the only source of "now")
     run.server.ts  run(): the one way a loader or action runs a program
     health.ts      the reference operation
     customers.ts   Customers: addCustomer, searchCustomers, getCustomer, editCustomer, retireCustomer, restoreCustomer
-    bills.ts       Bills, Lines and Payments: recordSelection, takePayment and takeCustomerPayment (one batch each), getBill (the §4.1 gate), listOpenBills, listBills and listCustomerPastBills (paged), listCustomerOpenBills, listCustomerHandovers
+    bills.ts       Bills, Lines and Payments: recordSelection, takePayment and takeCustomerPayment (one batch each), getBill (the §4.1 gate), listOpenBills, listBills and listCustomerPastBills (a page by cursor), listCustomerOpenBills, listCustomerHandovers
     corrections.ts the corrections of Cuenta: removeLine, removePayment, voidBill (one batch each)
     payments.ts    the statements a Payment writes (paymentStatements and handoverStatements) and its errors
     day.ts         the figures of a Day: a User's own records (Mi día), every User's over a range and the Items sold (Día reuses them)
-    owed.ts        Por cobrar: each Customer's Owed, the Open Bills with no Customer and the overall Owed
+    owed.ts        Por cobrar: each Customer's Owed, a page of the Open Bills with no Customer and the overall Owed
     history.ts     Historial: the corrections and Adjustments, newest first, a keyset page over the six fact tables
     seed.ts        the synthetic year behind the §10.7 request budgets, as plain SQL that scripts/seed.ts writes
   shared/      Plain functions, no Effect. Safe in the browser.
@@ -60,7 +60,7 @@ app/
     secret.ts      sign-in codes, session tokens, their hash, the cookie name
     normalize-name.ts  normalizeName: a name with case and accents ignored
     units.ts       parseUnits (a typed whole number of units)
-    page.ts        pageFrom and pageUrl: a list's page in the URL
+    cursor.ts      Cursor: where a paged list's next page starts, and how the URL carries it
     discrepancy.ts discrepancyText: Faltante, Sobrante, or Sin diferencia
     correction-messages.ts  what a correction's rule violations say on screen
     customer-messages.ts  what a Customer form's rule violations say on screen
@@ -72,6 +72,7 @@ app/
     payment-fields.tsx  PaymentFields, a Payment's method, amount and cash change
     item-fields.tsx  ItemFields, the fields of an Item's form, new or existing
     count-line.tsx  CountLineItem, one line of a Count as Conteo and Diferencias show it
+    paged-list.tsx  usePagedList and LoadMore: a list's pages and its Cargar más
   session.server.ts  the session middleware, requireUser, the cookie
   catalog-forms.server.ts  the shared Admin gate (`requireAdminUser`, `refuseRead`) and the Productos forms' parsing and error messages
   routes/      Route modules; resources/ holds routes without UI
@@ -265,27 +266,73 @@ Removing a Line or a Payment and voiding a Bill are spec §5.7, in `~/backend/co
 
 A Worker may remove a Line while the Bill has no Payment, which is `paid = 0`; with a Payment only an Admin may, with a reason. Removing a Payment lowers `paid`, so "has a Payment" stays meaningful for ticket 10, and a Bill whose total would fall below `paid` refuses the removal. Stock comes back from the Line's own `moved_stock` fact, not from the Item's flag today, once per Line: a Line already removed is not returned again when its Bill is Voided, and rebuilding Stock from the facts (ticket 19) uses the same rule. A Voided Bill keeps its Lines, Payments and totals on record and refuses every later correction.
 
-## Cuentas: every Bill, one page at a time
+## Paged lists
 
-**Cuentas** (`app/routes/cuentas.tsx`) is the Admin screen listing every Bill
-with its state, filtered by Day, state or Customer; a Customer's page shows
-their past Bills — Pagada or Cancelada — to an Admin. Both reads are
-`listBills` in `~/backend/bills.ts`; `listCustomerPastBills` is the same read
-with `settledOnly`. They are Admin only twice over: the routes refuse a Worker
-with `requireAdminUser` before reading anything, and the operations refuse one
-again with `requireAdmin`.
+Every list that grows with time shows one page and a **Cargar más** control
+(spec §2.4, §3.4): Cuentas abiertas, Cuentas, a Customer's past Bills,
+Historial, Diferencias and the Open Bills with no Customer on Por cobrar. What
+the catalog bounds is not paged: the Items on Vender, Inventario and Conteo,
+and the Customers' totals on Por cobrar.
 
-Paging is 50 rows plus one more, and that extra row is `hasMore`: a page never
-counts the history to learn whether another follows. `pageFrom` in
-`~/shared/page.ts` reads the page from the URL. The read is one statement. A
-Customer's Bills come from `bills_by_customer_day`, whose reverse scan already
-provides `day DESC, opened_at DESC`. Everything else is one arm per state
-(`bills_by_state`, or `bills_by_day_state` when a Day is asked), each arm
-limited to the page, merged and ordered by `opened_at`; a page therefore reads
-at most about 4 × 50 rows whatever the history holds, and a page past
-`MAX_BILL_PAGE` is answered without reading anything (spec §2.4, §7.4).
-`tests/cuentas.test.ts` holds the row-budget test, using the counting D1 from
-`tests/support/d1.ts`.
+**The read** pages by cursor, never by offset. A `Cursor` (`~/shared/cursor.ts`)
+is the last row of a page as its place in the list's order: an instant and a
+tie-breaker. The operation takes the cursor, reads one row past the page and
+answers `next`, the cursor of the page after it, or null:
+
+```ts
+const first = yield* listOpenBills("familia");        // { bills, next }
+const second = yield* listOpenBills("familia", first.next);
+```
+
+Because a page is "what follows this row", a row added or removed between two
+pages neither repeats nor skips one. Each read seeks to the cursor in an index
+and stops after its page, so any page costs what the first did:
+
+- Bills in `opened_at DESC, rowid DESC`: one arm per state on `bills_by_state`
+  (or `bills_by_day_state` when a Day is asked), each limited to the page,
+  merged. Cuentas abiertas searches by Customer inside the arms, so the search
+  is over every Open Bill, not over the page.
+- One Customer's Bills in `day DESC, opened_at DESC, rowid DESC` on
+  `bills_by_customer_day`; the keyset is a row value over those columns.
+- Historial over its six fact tables, Counts on `counts_by_time`, the id
+  breaking ties.
+
+`listBills` and `listCustomerPastBills` are Admin only twice over: the routes
+refuse a Worker with `requireAdminUser` before reading anything, and the
+operations refuse one again with `requireAdmin`.
+
+**The route** reads the cursor from the URL with `cursorOf(request.url)` — the
+parameter is `desde`, and an unreadable one is the first page — and answers
+`next` as text with `nextText`. The same loader serves the first page and
+every page after it.
+
+**The screen** uses `usePagedList` and `LoadMore` from
+`~/components/paged-list`:
+
+```tsx
+const pageOf = (data: Data) => ({ rows: data.entries, next: data.next });
+const hrefFor = (cursor: string) => `/historial?${CURSOR_PARAM}=${encodeURIComponent(cursor)}`;
+
+const { rows, more } = usePagedList({ id: "historial", data: loaderData, pageOf, hrefFor });
+// ...render `rows`...
+<LoadMore more={more} />
+```
+
+`hrefFor` keeps the list's filters. The control is a link to the next page,
+which is all it is without JavaScript; with it, the link fetches that URL with
+a fetcher and appends the rows, and does so by itself when it scrolls into
+view. It says "Cargando…" and "No hay más." in a status region. New loader
+data starts the list over. Coming back to a list shows what it had loaded at
+once, so the scroll position is restored, and fetches those pages again behind
+it; the rows are remembered in memory only, per history entry.
+
+Tests: the row budgets are in `tests/cuentas.test.ts`, `tests/counts.test.ts`,
+`tests/owed.test.ts` and `tests/history-paging.test.ts`, with the counting D1
+from `tests/support/d1.ts`; `tests/paged-lists.test.ts` walks every list
+through the Worker by its link (`nextHref` in `tests/support/pages.ts`);
+`e2e/load-more.spec.ts` drives the control in a browser. A browser test that
+clicks **Cargar más** races the scroll loading; scroll the control into view
+instead, or switch scroll loading off as that spec does.
 
 ## Writing a test
 
