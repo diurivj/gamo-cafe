@@ -15,6 +15,7 @@ export default [
     route("cuentas/:billId", "routes/bill.tsx"),
     route("clientes", "routes/customers.tsx"),
     route("clientes/:customerId", "routes/customer.tsx"),
+    route("mi-dia", "routes/mi-dia.tsx"),
     route("diferencias", "routes/diferencias.tsx"),
     route("inventario", "routes/inventario.tsx"),
     route("inventario/conteo", "routes/conteo.tsx"),
