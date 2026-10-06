@@ -20,4 +20,11 @@ export const paymentMessages = {
   InvalidAmount: "El monto no es válido. Escríbelo como 18.50.",
   /** No method was chosen. */
   MethodMissing: "Elige cómo se pagó.",
+  /** A zero or negative Abonar across a Customer's Bills (spec §2.3). */
+  CustomerPaymentNotPositive: "El abono debe ser mayor que cero.",
+  /** More than what the Customer owes (spec §5.5, §10.3). */
+  CustomerPaymentExceedsOwed: "El abono no puede ser mayor que lo que debe el cliente.",
+  /** Another phone changed one of the Customer's Open Bills first (spec §5.5). */
+  CustomerBillsChanged:
+    "Las cuentas del cliente cambiaron mientras registrabas el abono. Revisa el monto y vuelve a intentar.",
 } as const;

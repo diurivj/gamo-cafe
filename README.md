@@ -39,9 +39,9 @@ app/
     run.server.ts  run(): the one way a loader or action runs a program
     health.ts      the reference operation
     customers.ts   Customers: addCustomer, searchCustomers, getCustomer, editCustomer, retireCustomer, restoreCustomer
-    bills.ts       Bills, Lines and Payments: recordSelection and takePayment (one batch each), getBill (the §4.1 gate), listOpenBills
+    bills.ts       Bills, Lines and Payments: recordSelection, takePayment and takeCustomerPayment (one batch each), getBill (the §4.1 gate), listOpenBills, listCustomerOpenBills, listCustomerHandovers
     corrections.ts the corrections of Cuenta: removeLine, removePayment, voidBill (one batch each)
-    payments.ts    the two statements a Payment writes (paymentStatements) and its errors
+    payments.ts    the statements a Payment writes (paymentStatements and handoverStatements) and its errors
   shared/      Plain functions, no Effect. Safe in the browser.
     money.ts       centavos, formatMoney, parsePesos, changeFor
     bill-state.ts  a Bill's states, their Spanish words, isOpenBill
@@ -193,14 +193,21 @@ The field's value is the chosen Customer's id, or `""` for none. `defaultValue` 
 
 ## Taking a Payment
 
-A Payment is always recorded in the same batch as what moves the Bill's `paid` projection, through the two statements in `~/backend/payments.ts` (`paymentStatements`). There are two ways in, both operations in `~/backend/bills.ts`:
+A Payment is always recorded in the same batch as what moves the Bill's `paid` projection, through the statements in `~/backend/payments.ts` (`paymentStatements`). There are three ways in, all operations in `~/backend/bills.ts`:
 
 - **Cobrar** on Vender: `recordSelection({ items, payment: { method, amount } })` records the selection and the Payment together (spec §7.3.1). Its amount defaults to the selection's total and is never more than it — prior debt is paid from Cuenta — which is also what keeps the batch's `paid + amount <= total` condition from failing after the Lines were written.
 - **Cobrar** on Cuenta: `takePayment({ billId, amount, method, expectedRevision })` (spec §7.3.2). The amount defaults to what the Bill still owes and may be less; `expectedRevision` is the revision the page was rendered from, which the form carries in a hidden field.
+- **Abonar** on a Customer's page: `takeCustomerPayment`, which spreads one amount over their Open Bills (see below).
 
 A D1 batch cannot branch, so the rules are SQL conditions: `paid + amount <= total` on both statements, and `revision = ? AND state IN ('open', 'partial') AND total - paid >= ?` when the batch is a lone `takePayment`. `paymentStatements(payment, when)` takes the `Condition` the rest of the batch shares, so a refused operation writes neither the Payment nor the projection. Two phones paying the same Bill in full at once therefore record exactly one Payment; the other gets `BillChanged`. When the first statement's `changes` is 0, `takePayment` reads the Bill again to answer the exact rule (`BillChanged`, `BillIsVoided` or `PaymentExceedsOwed`); the routes turn those into `~/shared/payment-messages.ts`.
 
 `takePayment` returns `{ id, amount, bill }`. A Worker who pays a Bill in full is redirected to Cuentas abiertas instead of staying on the page, because a Worker may not open a Paid Bill (§4.1). The amount handed over for cash is never submitted or stored: `PaymentFields` from `~/components/payment-fields` shows `changeFor(handedOver, amount)` while it is typed.
+
+## Abonar across a Customer's Bills
+
+On a Customer's page, **Abonar** spreads one amount over their Open Bills, oldest first, as one Payment per Bill with the same method, User, moment and `handover_reference` (spec §5.5, §8.3): `takeCustomerPayment({ customerId, amount, method, expectedRevisions })` in `~/backend/bills.ts`. The amount defaults to everything the Customer owes and is never more; `expectedRevisions` is one `{ billId, revision }` per Bill the page showed, which the form carries as one hidden `bill` field per Bill.
+
+All of it is recorded or none of it: the batch is two multi-row statements (`handoverStatements` in `~/backend/payments.ts`) under one `Condition` — a JSON array of `[billId, paymentId, amount]` read with `json_each`, and a guard that the Customer's Open Bills that still owe are exactly the submitted ones at the submitted revisions. A Bill that changed since the page was rendered makes every statement refuse and the User is told the Bills changed (`CustomerBillsChanged`); a retired Customer is still collected. The page groups the Payments that share a reference into one event (`listCustomerHandovers`), and `listCustomerOpenBills` gives its Open Bills and what they owe.
 
 ## Correcting a Bill
 

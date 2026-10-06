@@ -1,7 +1,7 @@
 import { Effect, Result, Schema } from "effect";
 import { data, Form, Link, redirect, useNavigation } from "react-router";
 
-import { type BillNotFound, getBill, takePayment } from "~/backend/bills";
+import { type BillNotFound, editBill, getBill, takePayment } from "~/backend/bills";
 import {
   type LineNotFound,
   type PaymentNotFound,
@@ -14,6 +14,7 @@ import {
 import { AdminOnly, CurrentUser } from "~/backend/current-user";
 import { BillChanged, BillIsVoided, PaymentExceedsOwed, PaymentNotPositive } from "~/backend/payments";
 import { run } from "~/backend/run.server";
+import { CustomerPicker } from "~/components/customer-picker";
 import { PaymentFields } from "~/components/payment-fields";
 import { requireUser } from "~/session.server";
 import { billStateLabel, isOpenBill } from "~/shared/bill-state";
@@ -34,10 +35,11 @@ import type { Route } from "./+types/bill";
 // Cuenta (spec §6.1): one Bill with its Lines, who added each and when, its
 // Payments with who, when and method, its state and what it owes. **Agregar
 // productos** opens Vender targeting this Bill, so any User can add Lines to
-// any Open Bill, and **Cobrar** takes a Payment (ticket 08). An Admin's
+// any Open Bill, and **Cobrar** takes a Payment (ticket 08). **Cliente y nota**
+// sets or changes the Bill's Customer or note (ticket 10). An Admin's
 // corrections — removing a Line or a Payment, voiding the Bill — and a
-// Worker's removal of a Line from a Bill with no Payment join here (ticket
-// 11, spec §5.7); Customer and note edits (10) join here later.
+// Worker's removal of a Line from a Bill with no Payment are here too (ticket
+// 11, spec §5.7).
 
 export const meta: Route.MetaFunction = () => [{ title: "Cuenta · Gamo Cafe" }];
 
@@ -60,25 +62,68 @@ export async function loader({ context, params }: Route.LoaderArgs) {
     canAddItems: isOpenBill(bill.state),
     canPay: isOpenBill(bill.state) && bill.owed > 0,
     isAdmin: user.role === "admin",
+    // Any User may while the Bill has no Payment; an Admin may afterwards
+    // (spec §4.1). A Voided Bill accepts no corrections, this one included.
+    canEdit: bill.state !== "voided" && (user.role === "admin" || bill.paid === 0),
   };
 }
 
-type PaymentError = BillNotFound | BillChanged | BillIsVoided | PaymentExceedsOwed | PaymentNotPositive;
+/** What each rule violation of `editBill` answers, in Spanish. */
+const editMessages = {
+  CustomerUnavailable: "Ese cliente no existe o está retirado.",
+  NoteTooLong: "La nota no puede pasar de 80 caracteres.",
+  BillHasPayment: "Esta cuenta ya tiene pagos. Solo un administrador puede cambiar el cliente o la nota.",
+  BillChanged: "La cuenta cambió. Vuelve a cargarla e intenta de nuevo.",
+} as const;
 
-/** What each rule violation of `takePayment` answers, in Spanish. */
-function answerPaymentError(error: PaymentError): { readonly error: string } {
-  switch (error._tag) {
-    case "BillNotFound":
-      throw new Response(null, { status: 404 });
-    case "PaymentNotPositive":
-      return { error: paymentMessages.PaymentNotPositive };
-    case "PaymentExceedsOwed":
-      return { error: paymentMessages.PaymentExceedsOwed };
-    case "BillIsVoided":
-      return { error: paymentMessages.BillIsVoided };
-    case "BillChanged":
-      return { error: paymentMessages.BillChanged };
+/** The revision every form of this page submits; without it the page is stale. */
+function readRevision(form: FormData): number {
+  const revision = Number(String(form.get("revision") ?? ""));
+  if (!Number.isSafeInteger(revision)) {
+    throw data({ error: "Recarga la página e intenta de nuevo." }, { status: 400 });
   }
+  return revision;
+}
+
+/**
+ * The one program this route runs for whichever of its forms was sent, so
+ * that `run` gets the union of both operations' errors (README, "Writing a
+ * route"). A form it does not understand is answered 400.
+ */
+function programFor(form: FormData, billId: string) {
+  // One generator, so that its value and error types are the union of both
+  // operations'.
+  return Effect.gen(function* () {
+    const intent = String(form.get("intent") ?? "");
+
+    if (intent === "pagar") {
+      const decoded = Schema.decodeUnknownResult(Schema.Literals(PAYMENT_METHODS))(
+        String(form.get("method") ?? ""),
+      );
+      if (!Result.isSuccess(decoded)) throw data({ error: paymentMessages.MethodMissing }, { status: 400 });
+
+      // An empty amount means everything the Bill still owes (spec §5.5).
+      const typed = String(form.get("amount") ?? "").trim();
+      let amount: Centavos | null = null;
+      if (typed !== "") {
+        const parsed = parsePesos(typed);
+        if (parsed === undefined) throw data({ error: paymentMessages.InvalidAmount }, { status: 400 });
+        amount = parsed;
+      }
+      return yield* takePayment({ billId, amount, method: decoded.success, expectedRevision: readRevision(form) });
+    }
+
+    if (intent === "editar") {
+      return yield* editBill({
+        billId,
+        customerId: String(form.get("customerId") ?? "") || null,
+        note: String(form.get("note") ?? ""),
+        expectedRevision: readRevision(form),
+      });
+    }
+
+    throw data({ error: "No entendimos esa acción. Recarga la página e intenta de nuevo." }, { status: 400 });
+  });
 }
 
 type CorrectionError =
@@ -170,53 +215,55 @@ export async function action({ context, params, request }: Route.ActionArgs) {
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
 
+  // The corrections have their own program and their own answer: a Worker
+  // posting an Admin-only one is refused with a 403.
   if ((CORRECTION_INTENTS as ReadonlyArray<string>).includes(intent)) {
     const answered = await answerCorrection(context, user, params.billId, intent as CorrectionIntent, form);
     if ("error" in answered) return data(answered, { status: 400 });
     return answered;
   }
 
-  if (intent !== "pagar") {
-    return data({ error: "No entendimos esa acción. Recarga la página e intenta de nuevo." }, { status: 400 });
-  }
-
-  const decoded = Schema.decodeUnknownResult(Schema.Literals(PAYMENT_METHODS))(
-    String(form.get("method") ?? ""),
-  );
-  if (!Result.isSuccess(decoded)) return data({ error: paymentMessages.MethodMissing }, { status: 400 });
-
-  // An empty amount means everything the Bill still owes (spec §5.5).
-  const typed = String(form.get("amount") ?? "").trim();
-  let amount: Centavos | null = null;
-  if (typed !== "") {
-    const parsed = parsePesos(typed);
-    if (parsed === undefined) return data({ error: paymentMessages.InvalidAmount }, { status: 400 });
-    amount = parsed;
-  }
-
-  // The revision the page was rendered from: a stale submission changes
-  // nothing and is told the Bill has changed (spec §7.3).
-  const revision = Number(String(form.get("revision") ?? ""));
-  if (!Number.isSafeInteger(revision)) {
-    return data({ error: "Recarga la página e intenta de nuevo." }, { status: 400 });
-  }
-
   const result = await run(
     context,
-    takePayment({ billId: params.billId, amount, method: decoded.success, expectedRevision: revision }).pipe(
-      Effect.provideService(CurrentUser, user),
-    ),
-    answerPaymentError,
+    programFor(form, params.billId).pipe(Effect.provideService(CurrentUser, user)),
+    (error) => {
+      switch (error._tag) {
+        case "BillNotFound":
+          throw new Response(null, { status: 404 });
+        case "PaymentNotPositive":
+          return { error: paymentMessages.PaymentNotPositive };
+        case "PaymentExceedsOwed":
+          return { error: paymentMessages.PaymentExceedsOwed };
+        case "BillIsVoided":
+          return { error: paymentMessages.BillIsVoided };
+        case "BillChanged":
+          // The edit form is the only other form, and says it its own way.
+          return { error: intent === "editar" ? editMessages.BillChanged : paymentMessages.BillChanged };
+        case "BillHasPayment":
+          return { error: editMessages.BillHasPayment };
+        case "CustomerUnavailable":
+          return { error: editMessages.CustomerUnavailable };
+        case "NoteTooLong":
+          return { error: editMessages.NoteTooLong };
+      }
+    },
   );
+
   if ("error" in result) return data(result, { status: 400 });
-  // A Worker may not open a Paid Bill (§4.1, §4.2); the list is where they see
-  // it is gone. An Admin stays and sees it Pagada.
-  if (result.paid && user.role !== "admin") throw redirect("/cuentas-abiertas");
-  return { done: newId(), amount: result.amount };
+  if ("amount" in result) {
+    // A Worker who pays a Bill in full is redirected to Cuentas abiertas
+    // instead of staying on the page (spec §4.1): they may not open a Paid
+    // Bill. An Admin stays and sees it Pagada.
+    if (result.paid && user.role !== "admin") throw redirect("/cuentas-abiertas");
+    return { done: newId(), kind: "pago" as const, amount: result.amount };
+  }
+  return { done: newId(), kind: "edicion" as const };
 }
 
 const primaryButton =
   "block rounded-2xl bg-stone-900 px-4 py-4 text-center text-lg font-semibold text-white active:bg-stone-700 disabled:opacity-60";
+const field = "w-full rounded-xl border border-stone-300 bg-white px-4 py-3 text-lg";
+const saveButton = "rounded-xl border border-stone-300 bg-white px-4 py-3 font-medium disabled:opacity-60";
 
 const quietButton =
   "rounded-xl border border-red-300 px-3 py-2 font-medium text-red-700 active:bg-red-50 disabled:opacity-60";
@@ -236,10 +283,11 @@ const reasonField = (
 );
 
 export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
-  const { bill, canAddItems, canPay, isAdmin } = loaderData;
+  const { bill, canAddItems, canPay, isAdmin, canEdit } = loaderData;
   const busy = useNavigation().state !== "idle";
-  const paidNow = actionData && "done" in actionData && "amount" in actionData ? actionData : undefined;
-  const corrected = actionData && "done" in actionData && "message" in actionData ? actionData : undefined;
+  const paidNow = actionData && "kind" in actionData && actionData.kind === "pago" ? actionData : undefined;
+  const editedNow = actionData && "kind" in actionData && actionData.kind === "edicion" ? actionData : undefined;
+  const corrected = actionData && "message" in actionData ? actionData : undefined;
   // A Voided Bill accepts no further corrections (spec §5.7); a Paid Bill does,
   // which is what §8.5 is about.
   const canCorrect = bill.state !== "voided";
@@ -286,6 +334,39 @@ export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
           <dd className="text-lg font-semibold tabular-nums">{formatMoney(bill.owed)}</dd>
         </div>
       </dl>
+
+      {canEdit ? (
+        <section
+          aria-labelledby="cliente-nota"
+          className="mt-4 flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-4"
+        >
+          <h2 id="cliente-nota" className="text-xl font-semibold">
+            Cliente y nota
+          </h2>
+
+          {/* Keyed by the revision: after the Bill moves, the fields start
+              from what is stored now. */}
+          <Form key={bill.revision} method="post" className="flex flex-col gap-3">
+            <input type="hidden" name="revision" value={bill.revision} />
+            <CustomerPicker name="customerId" defaultValue={bill.customer} />
+            <label htmlFor="bill-note" className="font-medium">
+              Nota (opcional)
+            </label>
+            <input
+              id="bill-note"
+              name="note"
+              defaultValue={bill.note ?? ""}
+              maxLength={80}
+              autoComplete="off"
+              className={field}
+            />
+            <p className="text-sm text-stone-600">Hasta 80 caracteres.</p>
+            <button type="submit" name="intent" value="editar" disabled={busy} className={saveButton}>
+              Guardar
+            </button>
+          </Form>
+        </section>
+      ) : null}
 
       {canAddItems ? (
         <Link to={`/?billId=${bill.id}`} className={`mt-4 ${primaryButton}`}>
@@ -438,6 +519,11 @@ export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
       {corrected ? (
         <p role="status" className="mt-6 rounded-xl bg-green-50 p-3">
           {corrected.message}
+        </p>
+      ) : null}
+      {editedNow ? (
+        <p role="status" className="mt-6 rounded-xl bg-green-50 p-3">
+          Se guardaron los cambios de la cuenta.
         </p>
       ) : null}
       {paidNow ? (
