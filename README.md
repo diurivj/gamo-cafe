@@ -16,6 +16,8 @@ React Router 8 (framework mode) on Cloudflare Workers, D1 with hand-written SQL,
 | `npm run verify` | `typecheck` and `test`. Run before every commit. |
 | `npm run db:migrate` | Applies `migrations/` to the local D1. |
 | `npm run db:migrate:production` | Applies `migrations/` to the production D1. |
+| `npm run projections:verify` | Reports every projection that disagrees with the facts. Exits 1 when there are differences. `:production` acts on the production D1. |
+| `npm run projections:rebuild` | Rewrites every projection from the facts. `:production` acts on the production D1. |
 | `npm run deploy:production` | Builds for production and deploys with Wrangler. |
 | `npm run sign-in-code -- --new-admin "Nombre"` | Creates an Admin in the local D1 and prints a one-time sign-in code. `--user "Nombre"` issues a code for an existing User; `--production` acts on the production D1. |
 
@@ -42,6 +44,7 @@ app/
     bills.ts       Bills, Lines and Payments: recordSelection, takePayment and takeCustomerPayment (one batch each), getBill (the §4.1 gate), listOpenBills, listCustomerOpenBills, listCustomerHandovers
     corrections.ts the corrections of Cuenta: removeLine, removePayment, voidBill (one batch each)
     payments.ts    the statements a Payment writes (paymentStatements and handoverStatements) and its errors
+    rebuild.ts   the SQL that scripts/projections.ts sends to D1: recompute every projection from the facts
   shared/      Plain functions, no Effect. Safe in the browser.
     money.ts       centavos, formatMoney, parsePesos, changeFor
     bill-state.ts  a Bill's states, their Spanish words, isOpenBill
@@ -75,7 +78,7 @@ e2e/             Playwright
 - **Money** is integer centavos. Add and subtract with integer `+` and `-`; turn it into text with `formatMoney` and read typed text with `parsePesos`. Never divide or multiply an amount by 100.
 - **Time**: an instant is epoch milliseconds; a Day is `YYYY-MM-DD` in `America/Mexico_City`, computed when a record is written and stored with it. Backend code gets them only from `now` and `today` in `~/backend/time`, never from `Date`.
 - **Ids** are opaque strings from `newId()`.
-- **Facts** are inserted once and never updated or deleted. **Projections** are written only in the same `db.batch` as the fact that changes them (spec §7.1).
+- **Facts** are inserted once and never updated or deleted. **Projections** are written only in the same `db.batch` as the fact that changes them (spec §7.1). The command below recomputes them all from the facts at any time.
 - **Stock** is the projection `stock_levels`, and only `~/backend/stock` writes it. An operation that moves Stock puts `changeStock(itemId, units)` (relative, negative to lower) in the same batch as its fact; an Adjustment is `adjustmentStatements({...})`. Both do nothing to an Item that is not stock-tracked. An Item with no row has a Stock of zero.
 - **Names** of Items are stored with `tidyName` and compared with `normalizeName` (`~/shared/name`), kept in a `normalized_name` column.
 - **Rows** read from D1 are decoded with an Effect `Schema`: `db.first` and `db.all` take the schema as their first argument.
@@ -160,6 +163,16 @@ export async function action({ context, params, request }: Route.ActionArgs) {
 - Add the route to `app/routes.ts`, a screen inside the `shell.tsx` layout, and give its entry in the shell's navigation a `to`. Visible text is Spanish.
 - A route answered without a session is an exception to spec §10.1. There are two, `/entrar` and `/healthz`. Another one has to be added to `PUBLIC_PATHS` in `app/session.server.ts` and, with its reason, to the exemptions in `tests/route-guard.test.ts`, which requests every route of the app signed out.
 - A non-GET request must carry the app's own `Origin`, or the Worker answers 403 before any route runs. Browsers do this by themselves; a script or a test has to set the header.
+
+## Rebuilding the projections
+
+`npm run projections:verify` recomputes every projection from the facts and reports each difference; `npm run projections:rebuild` rewrites them. Add `:production` to act on the production D1 (take an export first, as before any production migration). Every column either is a fact or comes back:
+
+- a Bill's `total` is its unremoved Lines, `paid` its unremoved Payments, and its `state` follows from those two or from its void. Its current Customer and note are the last `bill_edits` fact of each field; a field never edited is what the Bill was created for — the facts `opened_customer_id` and `opened_note`, which `recordSelection` writes (migration `0019_bills_created_for.sql`). `revision` is a counter, not derived, and is left alone.
+- an Item's Stock replays the facts in time order: its Lines that moved Stock (`lines.moved_stock`) down, their removals and their Bills' voids up (once per Line), Adjustments by their signed units, cancelled Adjustments reversed, and Counts as resets to the units found. `last_counted_at` is the Item's newest Count. An Item with no such fact has a Stock of zero, and a Stock row no fact justifies is removed.
+- switching stock tracking on or off changes no record (spec §5.1), and the facts say what did move Stock: `moved_stock` on each Line, and the Adjustment's own record. Cancelling an Adjustment therefore reverses it even if tracking was switched off meanwhile — the same rule as the units of a removed Line. Without that rule a cancellation recorded while tracking was off moved nothing and no fact recorded it, so no rebuild could reproduce the live number.
+
+Every operation reads the clock, so events sort by their instant; the facts of one batch share it, and their kind and rowid break the tie. The tests in `tests/rebuild.test.ts` and `tests/rebuild-property.test.ts` send these statements to a real D1 whose state random sequences of the operations built, and check that verify finds nothing, a hand-corrupted projection is detected, and the rebuild restores it.
 
 ## Signing in
 

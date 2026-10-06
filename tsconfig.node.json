@@ -9,6 +9,7 @@
     "scripts/**/*.ts",
     // Plain modules that the script and the browser tests import.
     "app/backend/command-line.ts",
+    "app/backend/rebuild.ts",
     "app/shared/secret.ts",
     "app/shared/day.ts",
     "app/shared/normalize-name.ts"

@@ -13,6 +13,10 @@
     "verify": "npm run typecheck && npm test",
     "db:migrate": "wrangler d1 migrations apply DB --config wrangler.jsonc --local",
     "db:migrate:production": "wrangler d1 migrations apply DB --config wrangler.jsonc --env production --remote",
+    "projections:verify": "node scripts/projections.ts verify",
+    "projections:verify:production": "node scripts/projections.ts verify --production",
+    "projections:rebuild": "node scripts/projections.ts rebuild",
+    "projections:rebuild:production": "node scripts/projections.ts rebuild --production",
     "deploy:production": "npm run build:production && wrangler deploy",
     "sign-in-code": "node scripts/sign-in-code.ts"
   },

@@ -477,14 +477,20 @@ export const recordSelection = Effect.fn("recordSelection")(function* (input: Ne
           // A Bill comes into existence with its first Line (§5.3): the insert
           // happens only if every chosen Item is still active. Its state is
           // derived from its totals (§5.6); with no Payment it is Open, unless
-          // it owes nothing, when it is Paid.
-          `INSERT INTO bills (id, day, opened_by, opened_at, customer_id, note, total, paid, state, revision)
-           SELECT ?, ?, ?, ?, ?, ?, ?, 0, CASE WHEN 0 >= ? THEN 'paid' ELSE 'open' END, 0
+          // it owes nothing, when it is Paid. `opened_customer_id` and
+          // `opened_note` are the facts of the Customer and note it was
+          // created for; `customer_id` and `note` are the current values the
+          // edits move, identical until the first edit, and what the rebuild
+          // of ticket 19 derives from (spec §7.1).
+          `INSERT INTO bills (id, day, opened_by, opened_at, opened_customer_id, opened_note, customer_id, note, total, paid, state, revision)
+           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, CASE WHEN 0 >= ? THEN 'paid' ELSE 'open' END, 0
            WHERE (${condition.sql})`,
           bill.id,
           day,
           user.id,
           at,
+          customerId,
+          note,
           customerId,
           note,
           delta,

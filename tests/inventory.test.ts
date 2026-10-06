@@ -1,7 +1,7 @@
 import { Cause, Effect, Option } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { retireItem } from "~/backend/catalog";
+import { getItem, retireItem, updateItem } from "~/backend/catalog";
 import {
   cancelAdjustment,
   listInventory,
@@ -118,6 +118,25 @@ describe("cancelAdjustment", () => {
           "Se cayó al piso",
           "Compra cancelada",
         ]);
+      }),
+    ));
+
+  it("reverses Stock from the Adjustment's own fact, even after the Item stopped being tracked", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const category = yield* seedCategory("Reversión sin seguimiento", ana);
+        const item = yield* seedItem({ name: "Cambió de seguimiento", categoryId: category.id, startingStock: 5, by: ana });
+        const { id } = yield* recordAdjustment({ itemId: item.id, reason: "waste", units: 2 }).pipe(as(ana));
+        const tracked = yield* getItem(item.id).pipe(as(ana));
+
+        // Switching tracking off touches no record (spec §5.1), but the
+        // Adjustment already moved Stock through its own fact, so cancelling
+        // it gives those units back — what the rebuild (ticket 19) computes.
+        yield* updateItem(item.id, { ...tracked, stockTracked: false }).pipe(as(ana));
+        yield* cancelAdjustment(id, "Captura equivocada").pipe(as(ana));
+
+        expect(yield* stockOf(item.id).pipe(as(ana))).toBe(5);
       }),
     ));
 
