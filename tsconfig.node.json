@@ -5,7 +5,11 @@
     "vitest.config.ts",
     "react-router.config.ts",
     "playwright.config.ts",
-    "e2e/**/*.ts"
+    "e2e/**/*.ts",
+    "scripts/**/*.ts",
+    // Plain modules that the script and the browser tests import.
+    "app/backend/command-line.ts",
+    "app/shared/secret.ts"
   ],
   "compilerOptions": {
     "composite": true,

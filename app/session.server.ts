@@ -3,6 +3,7 @@ import { createContext, type MiddlewareFunction, redirect, type RouterContextPro
 import type { CurrentUser } from "~/backend/current-user";
 import { run } from "~/backend/run.server";
 import { authenticate } from "~/backend/sign-in";
+import { SESSION_COOKIE } from "~/shared/secret";
 
 /**
  * The one place a request becomes a User (spec §3.5, §10.1).
@@ -29,11 +30,7 @@ export const SIGN_IN_PATH = "/entrar";
  */
 const PUBLIC_PATHS: ReadonlySet<string> = new Set([SIGN_IN_PATH, "/healthz"]);
 
-/**
- * `__Host-`: browsers accept it only with `Secure`, `Path=/` and no `Domain`,
- * so no other site or subdomain can plant it.
- */
-export const SESSION_COOKIE = "__Host-gamo-session";
+export { SESSION_COOKIE };
 
 const COOKIE_ATTRIBUTES = "Path=/; HttpOnly; Secure; SameSite=Lax";
 
@@ -60,6 +57,16 @@ export function sessionToken(request: Request): string | undefined {
   return undefined;
 }
 
+/**
+ * The path of the page a request is about. The browser's router asks for a
+ * page's data at the page's path plus `.data` (`/_.data` for the home page),
+ * and middleware sees that address as it was sent.
+ */
+function pagePath(request: Request): string {
+  const { pathname } = new URL(request.url);
+  return pathname.replace(/(\/_)?\.data$/, "") || "/";
+}
+
 const userContext = createContext<User | null>(null);
 
 export const sessionMiddleware: MiddlewareFunction<Response> = async ({ context, request }, next) => {
@@ -74,7 +81,7 @@ export const sessionMiddleware: MiddlewareFunction<Response> = async ({ context,
     : null;
   context.set(userContext, user);
 
-  if (!user && !PUBLIC_PATHS.has(new URL(request.url).pathname)) throw redirect(SIGN_IN_PATH);
+  if (!user && !PUBLIC_PATHS.has(pagePath(request))) throw redirect(SIGN_IN_PATH);
   return next();
 };
 

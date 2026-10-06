@@ -9,9 +9,10 @@ test("a signed-out visitor loads the Spanish shell on a phone", async ({ page, r
 
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "Gamo Cafe" })).toBeVisible();
+  // Nobody is signed in, so the app shows Entrar.
+  await expect(page.getByRole("heading", { name: "Entrar" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("lang", "es-MX");
-  await expect(page).toHaveTitle("Gamo Cafe");
+  await expect(page).toHaveTitle("Entrar · Gamo Cafe");
 
   // Installable: the manifest and its icons are served; no service worker.
   const manifestHref = await page.locator('link[rel="manifest"]').getAttribute("href");
@@ -27,7 +28,7 @@ test("a signed-out visitor loads the Spanish shell on a phone", async ({ page, r
   // The Worker reaches its migrated D1 through the Db service.
   const health = await request.get("/healthz");
   expect(health.status()).toBe(200);
-  expect(await health.json()).toMatchObject({ ok: true });
+  expect(await health.json()).toEqual({ ok: true });
 
   expect(errors).toEqual([]);
 });

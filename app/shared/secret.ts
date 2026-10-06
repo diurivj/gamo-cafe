@@ -6,6 +6,13 @@
  * Only `hashSecret(...)` of a code or a token is ever stored.
  */
 
+/**
+ * The cookie that holds the session token. `__Host-`: browsers accept it only
+ * with `Secure`, `Path=/` and no `Domain`, so no other site or subdomain can
+ * plant it.
+ */
+export const SESSION_COOKIE = "__Host-gamo-session";
+
 /** No I, L, O, 0 or 1: nothing that reads as something else when dictated. */
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const CODE_LENGTH = 8;

@@ -73,6 +73,20 @@ describe("Entrar", () => {
     expect(await response.text()).toContain("Ese código no es válido");
   });
 
+  // What the browser's router sends once the page's script has loaded.
+  it("is reachable by a signed-out visitor through the router's data requests too", async () => {
+    const { code } = await userWithCode("Dalia");
+
+    const shown = await appFetch("/entrar.data");
+    expect(shown.status).toBe(200);
+    expect(await shown.text()).not.toContain("redirect");
+
+    const entered = await appFetch("/entrar.data", { method: "POST", body: new URLSearchParams({ code }) });
+    expect(await entered.text()).toContain('"redirect","/"');
+    const home = await appFetch("/", { headers: { Cookie: cookieFrom(entered) } });
+    expect(await home.text()).toContain("Dalia");
+  });
+
   it("sends a phone that is already signed in home", async () => {
     const ana = await signedIn("admin");
 

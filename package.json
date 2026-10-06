@@ -13,7 +13,8 @@
     "verify": "npm run typecheck && npm test",
     "db:migrate": "wrangler d1 migrations apply DB --config wrangler.jsonc --local",
     "db:migrate:production": "wrangler d1 migrations apply DB --config wrangler.jsonc --env production --remote",
-    "deploy:production": "npm run build:production && wrangler deploy"
+    "deploy:production": "npm run build:production && wrangler deploy",
+    "sign-in-code": "node scripts/sign-in-code.ts"
   },
   "dependencies": {
     "@react-router/cloudflare": "^8.4.0",
