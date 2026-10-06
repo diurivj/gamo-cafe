@@ -253,7 +253,7 @@ The runner signs in with the code (or takes `--cookie`), makes each of the nine 
 
 ### Reading Cloudflare's figures
 
-**CPU time per request.** Cloudflare reports CPU time per invocation in Workers Logs: Workers & Pages → `gamo-cafe-proof` → **Observability**, over the run window in the results file. Each invocation row carries its CPU time; they appear in the same order as the runner's output, so the rows for one request are together. Read the median per request and record it: §10.7 wants a median under 10 ms for each. The GraphQL Analytics API's `workersInvocationsAdaptive { quantiles { cpuTimeP50 } }` gives the same quantiles per script over a window, without the per-URL split.
+**CPU time per request.** Cloudflare reports CPU time per invocation in Workers Logs: Workers & Pages → `gamo-cafe-proof` → **Observability**, over the run window in the results file. Each invocation row carries its CPU time; they appear in the same order as the runner's output, so the rows for one request are together. Read the median per request and record it: §10.7 wants a median under 10 ms for each. If Observability is empty — a Worker deployed before the setting defaulted on — add `"observability": { "enabled": true }` under `env.production` in `wrangler.jsonc`, redeploy, and run the proof again. The GraphQL Analytics API's `workersInvocationsAdaptive { quantiles { cpuTimeP50 } }` gives the same quantiles per script over a window, without the per-URL split.
 
 **Statements and rows read per request.** Cloudflare does not report these per request; the local budget test is the proof of both, and it measures the same requests through the same code. Cloudflare reports D1's rows read and written per database over time, which is what the busy Day check uses.
 
