@@ -76,7 +76,8 @@ describe("an Admin", () => {
       note: "Entrega de la semana",
     });
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/inventario");
     expect(await stock(ana, item.id)).toBe(4);
     const html = await (await ana.fetch("/inventario")).text();
     expect(html).toContain("Entrada +4");
@@ -94,7 +95,7 @@ describe("an Admin", () => {
 
     const response = await post(ana, { intent: "cancel-adjustment", adjustmentId: id, reason: "Se registró mal" });
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(302);
     expect(await stock(ana, item.id)).toBe(0);
     const html = await (await ana.fetch("/inventario")).text();
     expect(html).toContain("Cancelado: Se registró mal");
@@ -126,7 +127,7 @@ describe("an Admin", () => {
     await refuses({ intent: "cancel-adjustment", adjustmentId: "no-existe", reason: "porque sí" }, 404, "");
     await refuses({ intent: "borrar-todo" }, 400, "No entendimos esa acción.");
 
-    expect((await post(ana, { intent: "cancel-adjustment", adjustmentId: id, reason: "Primera" })).status).toBe(200);
+    expect((await post(ana, { intent: "cancel-adjustment", adjustmentId: id, reason: "Primera" })).status).toBe(302);
     await refuses({ intent: "cancel-adjustment", adjustmentId: id, reason: "Segunda" }, 400, "Este ajuste ya fue cancelado.");
 
     expect(await stock(ana, tracked.id)).toBe(0);

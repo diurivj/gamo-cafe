@@ -44,6 +44,23 @@ export function appFetch(path: string, init: RequestInit = {}): Promise<Response
   );
 }
 
+/**
+ * The page a recorded form's redirect lands on, as the browser asks for it:
+ * the redirect's `Location`, carrying the cookies the redirect set — which is
+ * how the message of `~/flash.server` reaches the page.
+ *
+ *     const page = await landing(beto, await beto.fetch(path, { method: "POST", body }));
+ *     expect(await page.text()).toContain("Abono de $20.00 registrado.");
+ */
+export function landing(who: SignedIn, redirected: Response): Promise<Response> {
+  const location = redirected.headers.get("Location");
+  if (redirected.status !== 302 || !location) {
+    throw new Error(`Expected a redirect, got ${redirected.status}.`);
+  }
+  const set = redirected.headers.getSetCookie().map((cookie) => cookie.split(";")[0]!);
+  return who.fetch(location, { headers: { Cookie: [who.cookie, ...set].join("; ") } });
+}
+
 export interface SignedIn {
   readonly user: User;
   /** The session token, as the cookie holds it. */
@@ -78,7 +95,8 @@ export async function signedIn(role: Role, name?: string): Promise<SignedIn> {
     cookie,
     fetch(path, init = {}) {
       const headers = new Headers(init.headers);
-      headers.set("Cookie", cookie);
+      // A test that sends more cookies than the session's passes them all.
+      if (!headers.has("Cookie")) headers.set("Cookie", cookie);
       return appFetch(path, { ...init, headers });
     },
   };

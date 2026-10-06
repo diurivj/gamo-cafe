@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { appFetch, signedIn, type SignedIn } from "./support/auth";
+import { appFetch, landing, signedIn, type SignedIn } from "./support/auth";
 
 // Usuarios through the whole Worker, on the real clock. The tests share one
 // D1, so names are unique per test. The last-Admin rule is in
@@ -44,11 +44,23 @@ describe("Usuarios, for an Admin", () => {
 
     const response = await post(ana, { intent: "add", name: "Beto Alta", role: "worker" });
 
-    expect(response.status).toBe(200);
-    const cookie = await signInWith(codeShownOn(await response.text()));
+    const cookie = await signInWith(codeShownOn(await (await landing(ana, response)).text()));
     const home = await appFetch("/", { headers: { Cookie: cookie! } });
     expect(home.status).toBe(200);
     expect(await home.text()).toContain("Beto Alta");
+  });
+
+  it("answers a new code with a redirect, and shows the code once", async () => {
+    const ana = await signedIn("admin", "Ana Una Vez");
+
+    const response = await post(ana, { intent: "add", name: "Beto Una Vez", role: "worker" });
+
+    expect(response.status).toBe(302);
+    // The code is not in the URL.
+    expect(response.headers.get("Location")).toBe("/usuarios");
+    expect(await (await landing(ana, response)).text()).toContain("Código de acceso para");
+    // A reload shows no code and issues none.
+    expect(await (await ana.fetch("/usuarios")).text()).not.toContain("Código de acceso para");
   });
 
   it("answers a name that is missing or taken in Spanish, and adds nobody", async () => {
@@ -69,7 +81,7 @@ describe("Usuarios, for an Admin", () => {
 
     const response = await post(ana, { intent: "new-code", userId: beto.user.id });
 
-    const cookie = await signInWith(codeShownOn(await response.text()));
+    const cookie = await signInWith(codeShownOn(await (await landing(ana, response)).text()));
     expect((await appFetch("/", { headers: { Cookie: cookie! } })).status).toBe(200);
     expect((await beto.fetch("/")).status).toBe(200);
   });
@@ -81,7 +93,7 @@ describe("Usuarios, for an Admin", () => {
 
     const response = await post(ana, { intent: "sign-out-everywhere", userId: beto.user.id });
 
-    expect(response.status).toBe(200);
+    expect(await (await landing(ana, response)).text()).toContain("Se cerró su sesión en todos los teléfonos.");
     const next = await beto.fetch("/");
     expect(next.status).toBe(302);
     expect(next.headers.get("Location")).toBe("/entrar");
@@ -95,8 +107,8 @@ describe("Usuarios, for an Admin", () => {
 
     const response = await post(ana, { intent: "deactivate", userId: beto.user.id });
 
-    expect(response.status).toBe(200);
-    const html = await response.text();
+    const html = await (await landing(ana, response)).text();
+    expect(html).toContain("Usuario desactivado.");
     expect(html).toContain("Beto Baja");
     expect(html).toContain("Desactivado");
     const next = await beto.fetch("/");
@@ -114,7 +126,7 @@ describe("Usuarios, for an Admin", () => {
     await post(ana, { intent: "reactivate", userId: beto.user.id });
 
     const issued = await post(ana, { intent: "new-code", userId: beto.user.id });
-    expect(await signInWith(codeShownOn(await issued.text()))).toBeDefined();
+    expect(await signInWith(codeShownOn(await (await landing(ana, issued)).text()))).toBeDefined();
     // The phone that was signed in before stays out.
     expect((await beto.fetch("/")).status).toBe(302);
   });

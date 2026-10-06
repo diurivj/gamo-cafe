@@ -5,7 +5,7 @@ import { getBill } from "~/backend/bills";
 import { retireItem } from "~/backend/catalog";
 import { Db } from "~/backend/db";
 
-import { as, signedIn, type SignedIn } from "./support/auth";
+import { as, landing, signedIn, type SignedIn } from "./support/auth";
 import { seedCategory, seedItem } from "./support/catalog";
 import { savedCustomer } from "./support/customers";
 import { runTest } from "./support/effect";
@@ -46,8 +46,8 @@ describe("Vender", () => {
       note: "Para la mesa 2",
     });
 
-    expect(response.status).toBe(200);
-    const html = await response.text();
+    expect(response.headers.get("Location")).toBe("/");
+    const html = await (await landing(beto, response)).text();
     expect(html).toContain("Se dejó abierta una cuenta por $37.00.");
     const bill = await runTest(getBill(billIdIn(html)).pipe(as(beto.user)));
     expect(bill).toMatchObject({ total: 3700, paid: 0, state: "open", note: "Para la mesa 2", customer: null });
@@ -68,13 +68,11 @@ describe("Vender", () => {
     };
 
     const first = await post(beto, fields);
-    const firstHtml = await first.text();
-    expect(first.status).toBe(200);
+    const firstHtml = await (await landing(beto, first)).text();
     expect(firstHtml).toContain("Se dejó abierta la cuenta de Familia del turno por $20.00.");
 
     const second = await post(beto, fields);
-    const secondHtml = await second.text();
-    expect(second.status).toBe(200);
+    const secondHtml = await (await landing(beto, second)).text();
     expect(secondHtml).toContain("Se dejó abierta la cuenta de Familia del turno por $40.00.");
 
     expect(billIdIn(secondHtml)).toBe(billIdIn(firstHtml));
@@ -132,8 +130,7 @@ describe("Vender", () => {
       amount: "",
     });
 
-    expect(response.status).toBe(200);
-    const html = await response.text();
+    const html = await (await landing(beto, response)).text();
     expect(html).toContain("Cuenta pagada: $37.00.");
     // A Worker may not open the Paid Bill (§4.1): read it as an Admin.
     const bill = await runTest(getBill(billIdIn(html)).pipe(as(ana.user)));
@@ -155,8 +152,7 @@ describe("Vender", () => {
       amount: "10.00",
     });
 
-    expect(response.status).toBe(200);
-    const html = await response.text();
+    const html = await (await landing(ana, response)).text();
     expect(html).toContain("Abono registrado. Debe $27.00.");
     const bill = await runTest(getBill(billIdIn(html)).pipe(as(ana.user)));
     expect(bill).toMatchObject({ total: 3700, paid: 1000, owed: 2700, state: "partial" });

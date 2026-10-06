@@ -62,7 +62,7 @@ export function sessionToken(request: Request): string | undefined {
  * page's data at the page's path plus `.data` (`/_.data` for the home page),
  * and middleware sees that address as it was sent.
  */
-function pagePath(request: Request): string {
+export function pagePath(request: Request): string {
   const { pathname } = new URL(request.url);
   return pathname.replace(/(\/_)?\.data$/, "") || "/";
 }

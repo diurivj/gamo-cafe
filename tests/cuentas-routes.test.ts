@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { getBill, recordSelection } from "~/backend/bills";
 import { Db } from "~/backend/db";
 
-import { as, signedIn, type SignedIn } from "./support/auth";
+import { as, landing, signedIn, type SignedIn } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { savedCustomer } from "./support/customers";
 import { runTest } from "./support/effect";
@@ -108,8 +108,8 @@ describe("Cuenta", () => {
       billId: bill.id,
     });
 
-    expect(response.status).toBe(200);
-    expect(await response.text()).toContain("Se agregaron los productos a la cuenta");
+    expect(response.headers.get("Location")).toBe(`/?billId=${bill.id}`);
+    expect(await (await landing(ana, response)).text()).toContain("Se agregaron los productos a la cuenta");
 
     const updated = await runTest(getBill(bill.id).pipe(as(beto.user)));
     expect(updated.total).toBe(3000);
@@ -194,8 +194,7 @@ describe("Cobrar on Cuenta", () => {
       amount: "5.00",
       revision: String(bill.revision),
     });
-    expect(partial.status).toBe(200);
-    expect(await partial.text()).toContain("Abono de $5.00 registrado. Debe $13.50.");
+    expect(await (await landing(beto, partial)).text()).toContain("Abono de $5.00 registrado. Debe $13.50.");
 
     const page = await (await beto.fetch(`/cuentas/${bill.id}`)).text();
     expect(page).toContain("Pago parcial");
@@ -214,8 +213,7 @@ describe("Cobrar on Cuenta", () => {
       amount: "",
       revision: String(fresh.revision),
     });
-    expect(paid.status).toBe(200);
-    expect(await paid.text()).toContain("Cuenta pagada: $18.50.");
+    expect(await (await landing(ana, paid)).text()).toContain("Cuenta pagada: $18.50.");
 
     const after = await runTest(getBill(bill.id).pipe(as(ana.user)));
     expect(after).toMatchObject({ paid: 1850, owed: 0, state: "paid" });

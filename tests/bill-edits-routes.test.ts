@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { getBill, recordSelection, takePayment } from "~/backend/bills";
 import { Db } from "~/backend/db";
 
-import { as, signedIn, type SignedIn } from "./support/auth";
+import { as, landing, signedIn, type SignedIn } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { savedCustomer } from "./support/customers";
 import { runTest } from "./support/effect";
@@ -57,8 +57,7 @@ describe("editing on Cuenta", () => {
       revision: String(bill.revision),
     });
 
-    expect(response.status).toBe(200);
-    const html = await response.text();
+    const html = await (await landing(beto, response)).text();
     expect(html).toContain("Familia Editable");
     expect(html).toContain("Paga los viernes");
     expect(html).toContain("Se guardaron los cambios");
@@ -105,7 +104,7 @@ describe("editing on Cuenta", () => {
       note: "Paga el viernes",
       revision,
     });
-    expect(allowed.status).toBe(200);
+    expect(allowed.status).toBe(302);
     expect(await runTest(getBill(bill.id).pipe(as(ana.user)))).toMatchObject({
       customer: { id: ruiz.id, name: "Familia Pago en Cuenta" },
       note: "Paga el viernes",
