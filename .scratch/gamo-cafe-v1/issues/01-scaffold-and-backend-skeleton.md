@@ -1,6 +1,6 @@
 # 01 — Scaffold the app and the Effect backend skeleton
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: none
 Spec: [`../spec.md`](../spec.md) §3.1, §3.2, §3.3, §3.4, §3.6, §7.1
 
@@ -30,3 +30,7 @@ An empty but deployable Gamo Cafe: a signed-out visitor can load a Spanish page 
 - [ ] Money helpers round-trip centavos to `es-MX` text with no floating-point arithmetic.
 - [ ] No import from an Effect module or export tagged unstable.
 - [ ] `npm run build` produces a Worker bundle; the Playwright smoke test loads the shell.
+
+## Comments
+
+- 2026-10-06: Implemented on `ticket/01-scaffold`, merged into `gamo-cafe-v1` at `63a88be`. Production scripts not executed (no account); production D1 id is a placeholder.
