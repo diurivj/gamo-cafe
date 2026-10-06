@@ -7,7 +7,7 @@ import type { Centavos } from "~/shared/money";
 import { normalizeName } from "~/shared/normalize-name";
 import { PAYMENT_METHODS, type PaymentMethod } from "~/shared/payment";
 
-import { CurrentUser } from "./current-user";
+import { CurrentUser, requireAdmin } from "./current-user";
 import { CustomerNotFound } from "./customers";
 import { Db, type Param, statement, type Condition, type Statement } from "./db";
 import {
@@ -935,6 +935,151 @@ export const listOpenBills = Effect.fn("listOpenBills")(function* (typed = "") {
     ...(prefix === "" ? [] : [prefix, prefix + LAST_CHARACTER]),
   );
   return rows.map(summary);
+});
+
+/** How many Bills one page of Cuentas holds (spec §6.2). */
+export const BILLS_PER_PAGE = 50;
+
+/**
+ * The last page Cuentas reads; a page beyond it is answered empty. An OFFSET
+ * still walks the index entries it skips, so this keeps a page's rows read a
+ * constant (spec §2.4) instead of letting a made-up page number walk the
+ * whole history. 200 pages are 10,000 Bills.
+ */
+export const MAX_BILL_PAGE = 200;
+
+/**
+ * Which Bills a page of Cuentas holds (spec §6.2): a Day, a state and a
+ * Customer, each optional and combined with the others. `settledOnly` is a
+ * Customer's past Bills: the ones that are no longer Open (spec §6.1).
+ */
+export interface BillFilter {
+  /** One Day, `YYYY-MM-DD` (spec §5.9). */
+  readonly day?: Day | null;
+  /** One of §5.6's states. */
+  readonly state?: BillState | null;
+  /** One Customer's Bills. */
+  readonly customerId?: string | null;
+  /** Only Bills that are no longer Open: Pagada or Cancelada. */
+  readonly settledOnly?: boolean;
+  /** 1-based; anything else asks for the first page. */
+  readonly page?: number;
+}
+
+/** One page of Bills, newest first. */
+export interface BillPage {
+  readonly bills: ReadonlyArray<BillSummary>;
+  /** The page number these Bills belong to, 1-based. */
+  readonly page: number;
+  /** Whether another page follows this one. */
+  readonly hasMore: boolean;
+}
+
+/** The page asked for, or the first one. */
+const pageNumber = (asked: number | undefined) =>
+  asked !== undefined && Number.isSafeInteger(asked) && asked >= 1 ? asked : 1;
+
+/**
+ * Every Bill with its state, newest first, one page of 50 at a time, filtered
+ * by Day, state or Customer (spec §6.2). An Admin only (spec §4.1, §4.2): a
+ * Worker never sees Paid or Voided Bills.
+ *
+ * The read is index-driven and bounded by the page, never by the history
+ * (spec §2.4, §7.4):
+ *
+ * - one Customer's Bills come from `bills_by_customer_day`, whose order
+ *   (`day`, `opened_at`) the reverse scan already provides;
+ * - everything else is one statement over one arm per state — at most four —
+ *   each `state` (and `day`, when asked) constraining `bills_by_state` or
+ *   `bills_by_day_state`, so every arm stops after its page's rows. The arms
+ *   are merged and ordered by `opened_at`, which is the newest-first order
+ *   across states.
+ *
+ * `hasMore` comes from reading one row past the page, so a full page says
+ * whether another follows without counting the history.
+ */
+export const listBills = Effect.fn("listBills")(function* (filter: BillFilter = {}) {
+  yield* requireAdmin;
+  const db = yield* Db;
+
+  const page = pageNumber(filter.page);
+  if (page > MAX_BILL_PAGE) return { bills: [], page, hasMore: false };
+  const offset = (page - 1) * BILLS_PER_PAGE;
+  const limit = BILLS_PER_PAGE + 1;
+  const day = filter.day || null;
+  const customerId = filter.customerId || null;
+  const states: ReadonlyArray<BillState> = filter.state
+    ? [filter.state]
+    : filter.settledOnly
+      ? ["paid", "voided"]
+      : BILL_STATES;
+
+  const paged = (rows: ReadonlyArray<typeof SummaryRow.Type>): BillPage => ({
+    bills: rows.slice(0, BILLS_PER_PAGE).map(summary),
+    page,
+    hasMore: rows.length > BILLS_PER_PAGE,
+  });
+
+  if (customerId !== null) {
+    const rows = yield* db.all(
+      SummaryRow,
+      `SELECT b.id, b.day, b.opened_by AS openedBy, b.opened_at AS openedAt,
+              b.customer_id AS customerId, c.name AS customerName, b.note,
+              b.total, b.paid, b.state, b.revision
+       FROM bills b LEFT JOIN customers c ON c.id = b.customer_id
+       WHERE b.customer_id = ?${day === null ? "" : " AND b.day = ?"}
+         AND b.state IN (${placeholders(states.length)})
+       ORDER BY b.day DESC, b.opened_at DESC, b.rowid DESC
+       LIMIT ? OFFSET ?`,
+      customerId,
+      ...(day === null ? [] : [day]),
+      ...states,
+      limit,
+      offset,
+    );
+    return paged(rows);
+  }
+
+  // One arm per state, each index-driven on its own; the outer statement
+  // merges them into the newest 50 (or 50 of the asked page).
+  const arm = `SELECT * FROM (
+      SELECT b.id AS id, b.day AS day, b.opened_by AS openedBy, b.opened_at AS openedAt,
+             b.customer_id AS customerId, b.note AS note, b.total AS total, b.paid AS paid,
+             b.state AS state, b.revision AS revision, b.rowid AS rowid
+      FROM bills b
+      WHERE b.state = ?${day === null ? "" : " AND b.day = ?"}
+      ORDER BY b.opened_at DESC, b.rowid DESC
+      LIMIT ?
+    )`;
+  const params: Param[] = [];
+  for (const state of states) {
+    params.push(state, ...(day === null ? [] : [day]), offset + limit);
+  }
+  const rows = yield* db.all(
+    SummaryRow,
+    `SELECT p.id, p.day, p.openedBy, p.openedAt, p.customerId,
+            c.name AS customerName, p.note, p.total, p.paid, p.state, p.revision
+     FROM (${states.map(() => arm).join(" UNION ALL ")}) AS p
+     LEFT JOIN customers c ON c.id = p.customerId
+     ORDER BY p.openedAt DESC, p.rowid DESC
+     LIMIT ? OFFSET ?`,
+    ...params,
+    limit,
+    offset,
+  );
+  return paged(rows);
+});
+
+/**
+ * A Customer's past Bills — Pagada or Cancelada — newest first, one page of 50
+ * (spec §6.1): what an Admin sees below the Customer's Open Bills. A Worker is
+ * refused, and their page does not even ask for it (spec §4.1, §4.2).
+ */
+export const listCustomerPastBills = Effect.fn("listCustomerPastBills")(function* (
+  customerId: string,
+  page = 1,
+) {
+  return yield* listBills({ customerId, settledOnly: true, page });
 });
 
 const LineRow = Schema.Struct({
