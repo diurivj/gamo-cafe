@@ -3,12 +3,23 @@ import { env } from "cloudflare:workers";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { getBill, listOpenBills, recordSelection } from "~/backend/bills";
+import {
+  BILLS_PER_PAGE,
+  type BillFilter,
+  type BillPage,
+  getBill,
+  listCustomerPastBills,
+  listBills,
+  listOpenBills,
+  recordSelection,
+} from "~/backend/bills";
+import type { CurrentUser } from "~/backend/current-user";
 import { Db } from "~/backend/db";
 
 import { as, seedUser } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { seedCustomer } from "./support/customers";
+import { countingD1 } from "./support/d1";
 import { advanceClock, runTest, setClock } from "./support/effect";
 
 // Cuentas abiertas and Cuenta (spec §5.3, §6.1, §7.4, §4.1, §4.2). The lists
@@ -167,73 +178,20 @@ describe("getBill's permission gate", () => {
     ));
 });
 
-/**
- * The D1 binding with counts of what the operation asked of it. `prepare`
- * counts a statement; `all`, `run` and `batch` add the rows D1 reports
- * reading. The same shape as the statement counter in tests/bills.test.ts,
- * plus the row budget.
- */
-function countingD1(d1: D1Database) {
-  const counter = { statements: 0, rowsRead: 0 };
-  const unwrap = new WeakMap<object, D1PreparedStatement>();
-
-  const measured = (statement: D1PreparedStatement): D1PreparedStatement => {
-    const wrapper = new Proxy(statement, {
-      get(target, property, receiver) {
-        if (property === "all") {
-          return async () => {
-            const result = await target.all();
-            counter.rowsRead += result.meta.rows_read;
-            return result;
-          };
-        }
-        if (property === "run") {
-          return async () => {
-            const result = await target.run();
-            counter.rowsRead += result.meta.rows_read;
-            return result;
-          };
-        }
-        if (property === "bind") {
-          return (...params: ReadonlyArray<string | number | null>) => measured(target.bind(...params));
-        }
-        const value = Reflect.get(target, property, receiver);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    });
-    unwrap.set(wrapper, statement);
-    return wrapper;
-  };
-
-  return {
-    counter,
-    d1: new Proxy(d1, {
-      get(target, property, receiver) {
-        if (property === "prepare") {
-          return (sql: string) => {
-            counter.statements += 1;
-            return measured(target.prepare(sql));
-          };
-        }
-        if (property === "batch") {
-          return async (statements: ReadonlyArray<D1PreparedStatement>) => {
-            const results = await target.batch(statements.map((statement) => unwrap.get(statement) ?? statement));
-            for (const result of results) counter.rowsRead += result.meta.rows_read;
-            return results;
-          };
-        }
-        const value = Reflect.get(target, property, receiver);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    }) as D1Database,
-  };
-}
-
 /** Runs `listOpenBills` with a D1 that counts what it does. */
 async function listed(typed = "") {
   const { counter, d1 } = countingD1(env.DB);
   const bills = await Effect.runPromise(listOpenBills(typed).pipe(Effect.provide(Db.layer(d1))));
   return { ...counter, bills };
+}
+
+/** Runs `listBills` with a D1 that counts what it does, as the Admin. */
+async function pageOf(user: CurrentUser["Service"], filter: BillFilter = {}) {
+  const { counter, d1 } = countingD1(env.DB);
+  const page = await Effect.runPromise(
+    listBills(filter).pipe(as(user), Effect.provide(Db.layer(d1))),
+  );
+  return { ...counter, ...page };
 }
 
 describe("Cuentas abiertas reads", () => {
@@ -296,6 +254,275 @@ describe("Cuentas abiertas reads", () => {
         expect(measured.bills).toHaveLength(200);
         // Rows read are the Open Bills' own rows, not the history's.
         expect(measured.rowsRead).toBeLessThan(200 * 5);
+      }),
+    ));
+});
+
+// Cuentas (spec §6.2): every Bill with its state, filtered by Day, state or
+// Customer, 50 per page. The read is Admin only (§4.1), index-driven and
+// bounded by the page (§2.4, §7.4).
+describe("listBills (Cuentas)", () => {
+  it("lists every Bill, whatever its state, newest first", () =>
+    runTest(
+      Effect.gen(function* () {
+        yield* setClock("2026-10-05T12:00:00");
+        const ana = yield* seedUser("admin");
+        const item = yield* seedItem({ name: "Todas las cuentas", price: 1000, by: ana });
+        const ruiz = yield* seedCustomer("Familia de todas", { by: ana });
+
+        const abierta = yield* recordSelection({ items: [{ itemId: item.id, quantity: 1 }] }).pipe(as(ana));
+        yield* advanceClock("1 minute");
+        const parcial = yield* recordSelection({
+          items: [{ itemId: item.id, quantity: 1 }],
+          customerId: ruiz.id,
+        }).pipe(as(ana));
+        yield* markBill(parcial.id, "partial", 400);
+        yield* advanceClock("1 minute");
+        const pagada = yield* recordSelection({ items: [{ itemId: item.id, quantity: 1 }] }).pipe(as(ana));
+        yield* markBill(pagada.id, "paid", 1000);
+        yield* advanceClock("1 minute");
+        const cancelada = yield* recordSelection({ items: [{ itemId: item.id, quantity: 1 }] }).pipe(as(ana));
+        yield* markBill(cancelada.id, "voided");
+
+        const page = yield* listBills().pipe(as(ana));
+
+        expect(page.bills.map((bill) => [bill.id, bill.state])).toEqual([
+          [cancelada.id, "voided"],
+          [pagada.id, "paid"],
+          [parcial.id, "partial"],
+          [abierta.id, "open"],
+        ]);
+        expect(page).toMatchObject({ page: 1, hasMore: false });
+        expect(page.bills[2]).toMatchObject({
+          day: "2026-10-05",
+          customer: { id: ruiz.id, name: "Familia de todas" },
+          total: 1000,
+          paid: 400,
+          owed: 600,
+        });
+      }),
+    ));
+
+  it("filters by Day, state and Customer alone and combined", () =>
+    runTest(
+      Effect.gen(function* () {
+        yield* setClock("2026-10-05T10:00:00");
+        const ana = yield* seedUser("admin");
+        const item = yield* seedItem({ name: "Filtrable", price: 1000, by: ana });
+        const ruiz = yield* seedCustomer("Familia filtrable", { by: ana });
+        const pena = yield* seedCustomer("Peña filtrable", { by: ana });
+
+        const lunesRuiz = yield* recordSelection({
+          items: [{ itemId: item.id, quantity: 1 }],
+          customerId: ruiz.id,
+        }).pipe(as(ana));
+        yield* advanceClock("1 hour");
+        const lunesPena = yield* recordSelection({
+          items: [{ itemId: item.id, quantity: 1 }],
+          customerId: pena.id,
+        }).pipe(as(ana));
+        yield* markBill(lunesPena.id, "paid", 1000);
+        yield* advanceClock("1 day");
+        const martesRuiz = yield* recordSelection({
+          items: [{ itemId: item.id, quantity: 1 }],
+          customerId: ruiz.id,
+        }).pipe(as(ana));
+        yield* markBill(martesRuiz.id, "paid", 1000);
+        yield* advanceClock("1 day");
+        const miercolesSinCliente = yield* recordSelection({ items: [{ itemId: item.id, quantity: 1 }] }).pipe(
+          as(ana),
+        );
+        yield* markBill(miercolesSinCliente.id, "voided");
+
+        const ids = (page: BillPage) => page.bills.map((bill) => bill.id);
+
+        expect(ids(yield* listBills({ day: "2026-10-05" }).pipe(as(ana)))).toEqual([lunesPena.id, lunesRuiz.id]);
+        expect(ids(yield* listBills({ state: "paid" }).pipe(as(ana)))).toEqual([martesRuiz.id, lunesPena.id]);
+        expect(ids(yield* listBills({ customerId: ruiz.id }).pipe(as(ana)))).toEqual([martesRuiz.id, lunesRuiz.id]);
+        expect(ids(yield* listBills({ day: "2026-10-05", state: "paid" }).pipe(as(ana)))).toEqual([lunesPena.id]);
+        expect(ids(yield* listBills({ day: "2026-10-05", customerId: ruiz.id }).pipe(as(ana)))).toEqual([
+          lunesRuiz.id,
+        ]);
+        expect(ids(yield* listBills({ state: "paid", customerId: ruiz.id }).pipe(as(ana)))).toEqual([martesRuiz.id]);
+        expect(
+          ids(yield* listBills({ day: "2026-10-05", state: "paid", customerId: pena.id }).pipe(as(ana))),
+        ).toEqual([lunesPena.id]);
+        expect(
+          (yield* listBills({ day: "2026-10-05", state: "paid", customerId: ruiz.id }).pipe(as(ana))).bills,
+        ).toEqual([]);
+        expect((yield* listBills({ day: "2026-10-04" }).pipe(as(ana))).bills).toEqual([]);
+      }),
+    ));
+
+  it("pages 50 Bills at a time, saying whether another page follows", () =>
+    runTest(
+      Effect.gen(function* () {
+        yield* setClock("2026-10-05T12:00:00");
+        const ana = yield* seedUser("admin");
+        const db = yield* Db;
+        yield* db.run(
+          `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 51)
+           INSERT INTO bills (id, day, opened_by, opened_at, customer_id, total, paid, state, revision)
+           SELECT 'pagina-' || x, '2026-10-05', ?, 1000 + x, NULL, 100, 0, 'open', 0 FROM n`,
+          ana.id,
+        );
+
+        const first = yield* listBills().pipe(as(ana));
+        expect(first).toMatchObject({ page: 1, hasMore: true });
+        expect(first.bills).toHaveLength(50);
+        expect(first.bills[0]!.id).toBe("pagina-51");
+
+        const second = yield* listBills({ page: 2 }).pipe(as(ana));
+        expect(second).toMatchObject({ page: 2, hasMore: false });
+        expect(second.bills.map((bill) => bill.id)).toEqual(["pagina-1"]);
+
+        const beyond = yield* listBills({ page: 3 }).pipe(as(ana));
+        expect(beyond.bills).toEqual([]);
+        expect(beyond.hasMore).toBe(false);
+      }),
+    ));
+
+  it("reads a page of its own rows in one statement, whatever the history holds", () =>
+    runTest(
+      Effect.gen(function* () {
+        yield* setClock("2026-10-05T12:00:00");
+        const ana = yield* seedUser("admin");
+        const db = yield* Db;
+        const item = yield* seedItem({ name: "Presupuesto de la página", price: 1000, by: ana });
+        const ruiz = yield* seedCustomer("Familia del presupuesto de la página", { by: ana });
+        for (let n = 0; n < 3; n++) {
+          yield* recordSelection({ items: [{ itemId: item.id, quantity: 1 }] }).pipe(as(ana));
+        }
+        const deRuiz = yield* recordSelection({
+          items: [{ itemId: item.id, quantity: 1 }],
+          customerId: ruiz.id,
+        }).pipe(as(ana));
+
+        // A Day and state page, and a Customer's page: each reads what it shows.
+        const dayState = yield* Effect.promise(() => pageOf(ana, { day: "2026-10-05", state: "open" }));
+        expect(dayState.statements).toBe(1);
+        expect(dayState.bills).toHaveLength(4);
+        expect(dayState.rowsRead).toBeLessThan(25);
+        const customer = yield* Effect.promise(() => pageOf(ana, { customerId: ruiz.id }));
+        expect(customer.statements).toBe(1);
+        expect(customer.bills.map((bill) => bill.id)).toEqual([deRuiz.id]);
+        expect(customer.rowsRead).toBeLessThan(25);
+
+        // 400 older Paid Bills: the filtered pages read none of them.
+        yield* db.run(
+          `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 400)
+           INSERT INTO bills (id, day, opened_by, opened_at, customer_id, total, paid, state, revision)
+           SELECT 'historica-' || x, '2026-10-04', ?, 500 + x, NULL, 100, 100, 'paid', 0 FROM n`,
+          ana.id,
+        );
+
+        const dayStateAfter = yield* Effect.promise(() => pageOf(ana, { day: "2026-10-05", state: "open" }));
+        expect(dayStateAfter.bills.map((bill) => bill.id)).toEqual(dayState.bills.map((bill) => bill.id));
+        expect(dayStateAfter.rowsRead).toBeLessThanOrEqual(dayState.rowsRead + 4);
+        const customerAfter = yield* Effect.promise(() => pageOf(ana, { customerId: ruiz.id }));
+        expect(customerAfter.bills.map((bill) => bill.id)).toEqual(customer.bills.map((bill) => bill.id));
+        expect(customerAfter.rowsRead).toBeLessThanOrEqual(customer.rowsRead + 4);
+
+        // Every state at once is still one statement, bounded by the page: its
+        // rows are the 4 newest Bills first, then the newest Paid ones to fill
+        // the page.
+        const every = yield* Effect.promise(() => pageOf(ana));
+        expect(every.statements).toBe(1);
+        expect(every.bills).toHaveLength(50);
+        expect(every.bills.slice(0, 4).map((bill) => bill.id)).toEqual(dayState.bills.map((bill) => bill.id));
+        expect(every.rowsRead).toBeLessThan(BILLS_PER_PAGE * 4 * 3);
+
+        // 400 more Bills: the same page reads no more than it did before.
+        yield* db.run(
+          `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 400)
+           INSERT INTO bills (id, day, opened_by, opened_at, customer_id, total, paid, state, revision)
+           SELECT 'historica-b-' || x, '2026-10-03', ?, 100 + x, NULL, 100, 100, 'paid', 0 FROM n`,
+          ana.id,
+        );
+
+        const twice = yield* Effect.promise(() => pageOf(ana));
+        expect(twice.bills.map((bill) => bill.id)).toEqual(every.bills.map((bill) => bill.id));
+        expect(twice.rowsRead).toBeLessThanOrEqual(every.rowsRead + 4);
+
+        // A page far past the end reads nothing at all, not the history.
+        const far = yield* Effect.promise(() => pageOf(ana, { page: 999 }));
+        expect(far).toMatchObject({ statements: 0, rowsRead: 0, bills: [], hasMore: false });
+      }),
+    ));
+
+  it("refuses a Worker", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const beto = yield* seedUser("worker");
+        const item = yield* seedItem({ name: "Solo del admin de todas", price: 1000, by: ana });
+        yield* recordSelection({ items: [{ itemId: item.id, quantity: 1 }] }).pipe(as(beto));
+
+        expect((yield* Effect.flip(listBills().pipe(as(beto))))._tag).toBe("AdminOnly");
+        expect((yield* Effect.flip(listCustomerPastBills("cualquiera").pipe(as(beto))))._tag).toBe("AdminOnly");
+      }),
+    ));
+});
+
+describe("listCustomerPastBills", () => {
+  it("gives an Admin a Customer's Pagadas and Canceladas, newest first, 50 per page, and leaves the Open ones out", () =>
+    runTest(
+      Effect.gen(function* () {
+        yield* setClock("2026-10-03T12:00:00");
+        const ana = yield* seedUser("admin");
+        const db = yield* Db;
+        const item = yield* seedItem({ name: "Pasada", price: 1000, by: ana });
+        const ruiz = yield* seedCustomer("Familia pasada", { by: ana });
+        const otra = yield* seedCustomer("Familia ajena", { by: ana });
+
+        const abierta = yield* recordSelection({
+          items: [{ itemId: item.id, quantity: 1 }],
+          customerId: ruiz.id,
+        }).pipe(as(ana));
+        yield* advanceClock("1 day");
+        const pagada = yield* recordSelection({
+          items: [{ itemId: item.id, quantity: 1 }],
+          customerId: ruiz.id,
+        }).pipe(as(ana));
+        yield* markBill(pagada.id, "paid", 1000);
+        yield* advanceClock("1 day");
+        const cancelada = yield* recordSelection({
+          items: [{ itemId: item.id, quantity: 1 }],
+          customerId: ruiz.id,
+        }).pipe(as(ana));
+        yield* markBill(cancelada.id, "voided");
+        yield* advanceClock("1 day");
+        const ajena = yield* recordSelection({
+          items: [{ itemId: item.id, quantity: 1 }],
+          customerId: otra.id,
+        }).pipe(as(ana));
+        yield* markBill(ajena.id, "paid", 1000);
+
+        const past = yield* listCustomerPastBills(ruiz.id).pipe(as(ana));
+        expect(past.bills.map((bill) => [bill.id, bill.state])).toEqual([
+          [cancelada.id, "voided"],
+          [pagada.id, "paid"],
+        ]);
+        expect(past).toMatchObject({ page: 1, hasMore: false });
+        expect(past.bills.map((bill) => bill.id)).not.toContain(abierta.id);
+        expect(past.bills.map((bill) => bill.id)).not.toContain(ajena.id);
+
+        // 55 more Pagadas: the page holds 50 and the second page the rest.
+        yield* db.run(
+          `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 55)
+           INSERT INTO bills (id, day, opened_by, opened_at, customer_id, total, paid, state, revision)
+           SELECT 'pasada-' || x, '2026-10-02', ?, 10 + x, ?, 100, 100, 'paid', 0 FROM n`,
+          ana.id,
+          ruiz.id,
+        );
+
+        const first = yield* listCustomerPastBills(ruiz.id).pipe(as(ana));
+        expect(first).toMatchObject({ page: 1, hasMore: true });
+        expect(first.bills).toHaveLength(50);
+        expect(first.bills[0]!.id).toBe(cancelada.id);
+        const second = yield* listCustomerPastBills(ruiz.id, 2).pipe(as(ana));
+        expect(second).toMatchObject({ page: 2, hasMore: false });
+        expect(second.bills).toHaveLength(7);
       }),
     ));
 });

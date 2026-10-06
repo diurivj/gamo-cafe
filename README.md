@@ -37,14 +37,15 @@ app/
     inventory.ts   Inventario: Stock and Minimums, recording and cancelling Adjustments
     counts.ts      Conteo: what the entry and review steps show, recording a Count, and the Diferencias read
     command-line.ts  the SQL that scripts/sign-in-code.ts sends to D1
+    rebuild.ts     the SQL that scripts/projections.ts sends to D1: recompute every projection from the facts
     time.ts        now, today (the only source of "now")
     run.server.ts  run(): the one way a loader or action runs a program
     health.ts      the reference operation
     customers.ts   Customers: addCustomer, searchCustomers, getCustomer, editCustomer, retireCustomer, restoreCustomer
-    bills.ts       Bills, Lines and Payments: recordSelection, takePayment and takeCustomerPayment (one batch each), getBill (the §4.1 gate), listOpenBills, listCustomerOpenBills, listCustomerHandovers
+    bills.ts       Bills, Lines and Payments: recordSelection, takePayment and takeCustomerPayment (one batch each), getBill (the §4.1 gate), listOpenBills, listBills and listCustomerPastBills (paged), listCustomerOpenBills, listCustomerHandovers
     corrections.ts the corrections of Cuenta: removeLine, removePayment, voidBill (one batch each)
     payments.ts    the statements a Payment writes (paymentStatements and handoverStatements) and its errors
-    rebuild.ts   the SQL that scripts/projections.ts sends to D1: recompute every projection from the facts
+    day.ts         the figures of a Day: a User's own records (Mi día) and every User's over a range (Día reuses it)
   shared/      Plain functions, no Effect. Safe in the browser.
     money.ts       centavos, formatMoney, parsePesos, changeFor
     bill-state.ts  a Bill's states, their Spanish words, isOpenBill
@@ -55,6 +56,7 @@ app/
     secret.ts      sign-in codes, session tokens, their hash, the cookie name
     normalize-name.ts  normalizeName: a name with case and accents ignored
     units.ts       parseUnits (a typed whole number of units)
+    page.ts        pageFrom and pageUrl: a list's page in the URL
     discrepancy.ts discrepancyText: Faltante, Sobrante, or Sin diferencia
   components/  React components used by more than one screen
     customer-picker.tsx  CustomerPicker, the form field that chooses a Customer
@@ -227,6 +229,28 @@ All of it is recorded or none of it: the batch is two multi-row statements (`han
 Removing a Line or a Payment and voiding a Bill are spec §5.7, in `~/backend/corrections.ts`. Each is one batch: the fact (`line_removals`, `payment_removals`, `bill_voids`), the Bill's projections, and Stock. Only the fact's `INSERT ... SELECT` carries the rules (the Bill's revision included); the other statements join the fact by its id, so a refused correction writes nothing at all. The operation classifies a refusal again from the rows, and `correctionMessages` in `~/shared/correction-messages.ts` holds the Spanish for each tag.
 
 A Worker may remove a Line while the Bill has no Payment, which is `paid = 0`; with a Payment only an Admin may, with a reason. Removing a Payment lowers `paid`, so "has a Payment" stays meaningful for ticket 10, and a Bill whose total would fall below `paid` refuses the removal. Stock comes back from the Line's own `moved_stock` fact, not from the Item's flag today, once per Line: a Line already removed is not returned again when its Bill is Voided, and rebuilding Stock from the facts (ticket 19) uses the same rule. A Voided Bill keeps its Lines, Payments and totals on record and refuses every later correction.
+
+## Cuentas: every Bill, one page at a time
+
+**Cuentas** (`app/routes/cuentas.tsx`) is the Admin screen listing every Bill
+with its state, filtered by Day, state or Customer; a Customer's page shows
+their past Bills — Pagada or Cancelada — to an Admin. Both reads are
+`listBills` in `~/backend/bills.ts`; `listCustomerPastBills` is the same read
+with `settledOnly`. They are Admin only twice over: the routes refuse a Worker
+with `requireAdminUser` before reading anything, and the operations refuse one
+again with `requireAdmin`.
+
+Paging is 50 rows plus one more, and that extra row is `hasMore`: a page never
+counts the history to learn whether another follows. `pageFrom` in
+`~/shared/page.ts` reads the page from the URL. The read is one statement. A
+Customer's Bills come from `bills_by_customer_day`, whose reverse scan already
+provides `day DESC, opened_at DESC`. Everything else is one arm per state
+(`bills_by_state`, or `bills_by_day_state` when a Day is asked), each arm
+limited to the page, merged and ordered by `opened_at`; a page therefore reads
+at most about 4 × 50 rows whatever the history holds, and a page past
+`MAX_BILL_PAGE` is answered without reading anything (spec §2.4, §7.4).
+`tests/cuentas.test.ts` holds the row-budget test, using the counting D1 from
+`tests/support/d1.ts`.
 
 ## Writing a test
 

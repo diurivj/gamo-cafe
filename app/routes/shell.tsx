@@ -17,16 +17,16 @@ const everyUser: ReadonlyArray<Section> = [
   { label: "Vender", to: "/" },
   { label: "Cuentas abiertas", to: "/cuentas-abiertas" },
   { label: "Clientes", to: "/clientes" },
-  { label: "Mi día" },
+  { label: "Mi día", to: "/mi-dia" },
 ];
 
 const adminOnly: ReadonlyArray<Section> = [
   { label: "Día" },
-  { label: "Cuentas" },
+  { label: "Cuentas", to: "/cuentas" },
   { label: "Por cobrar" },
   { label: "Inventario", to: "/inventario" },
   { label: "Diferencias", to: "/diferencias" },
-  { label: "Historial" },
+  { label: "Historial", to: "/historial" },
   { label: "Productos", to: "/productos" },
   { label: "Usuarios", to: "/usuarios" },
 ];
