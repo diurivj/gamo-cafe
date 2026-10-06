@@ -48,13 +48,18 @@ export function sessionCookie(token: string): string {
 /** The `Set-Cookie` value that makes this phone forget its session. */
 export const clearedSessionCookie = `${SESSION_COOKIE}=; Max-Age=0; ${COOKIE_ATTRIBUTES}`;
 
-/** The session token this request carries, if any. */
-export function sessionToken(request: Request): string | undefined {
+/** The value of one cookie of this request, as it was sent; `undefined` when it has none. */
+export function requestCookie(request: Request, cookie: string): string | undefined {
   for (const pair of (request.headers.get("Cookie") ?? "").split(";")) {
     const [name, ...value] = pair.trim().split("=");
-    if (name === SESSION_COOKIE) return value.join("=") || undefined;
+    if (name === cookie) return value.join("=") || undefined;
   }
   return undefined;
+}
+
+/** The session token this request carries, if any. */
+export function sessionToken(request: Request): string | undefined {
+  return requestCookie(request, SESSION_COOKIE);
 }
 
 /**

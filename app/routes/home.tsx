@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { data, Form, Link, useNavigation } from "react-router";
+import { data, Form, Link, useNavigation, useOutletContext } from "react-router";
 import { Effect, Result, Schema } from "effect";
 
 import {
@@ -17,7 +17,6 @@ import {
   recordSelection,
   type TargetConflict,
 } from "~/backend/bills";
-import { activeItemsByCategory } from "~/backend/catalog";
 import { CurrentUser } from "~/backend/current-user";
 import { type PaymentExceedsOwed, type PaymentNotPositive } from "~/backend/payments";
 import { run } from "~/backend/run.server";
@@ -30,22 +29,23 @@ import { PAYMENT_METHODS, type PaymentMethod } from "~/shared/payment";
 import { paymentMessages } from "~/shared/payment-messages";
 
 import type { Route } from "./+types/home";
+import type { SellItems } from "./sell-items";
 
 // Vender (spec §6.1): the Items as large buttons by Category, a selection the
 // browser holds until it is recorded, a Customer or a note, **Dejar abierta**
 // and **Cobrar** (ticket 08), which records the selection and a Payment in one
 // batch. With `?billId=`, Cuenta's **Agregar productos** turns it into the
-// same screen targeting one Open Bill (ticket 07).
+// same screen targeting one Open Bill (ticket 07). The Items come from the
+// layout around it, `./sell-items`, which a sale does not load again.
 
 export const meta: Route.MetaFunction = () => [{ title: "Vender · Gamo Cafe" }];
 
 export async function loader({ context, request }: Route.LoaderArgs) {
   const user = requireUser(context);
-  const categories = await run(context, activeItemsByCategory);
   const billId = new URL(request.url).searchParams.get("billId") ?? "";
   // What the selection that redirected here recorded (spec §3.4).
   const flash = takeFlash(context);
-  if (billId === "") return { categories, target: null, flash };
+  if (billId === "") return { target: null, flash };
 
   const bill = await run(
     context,
@@ -61,7 +61,7 @@ export async function loader({ context, request }: Route.LoaderArgs) {
   );
   // The screen shows the target's figures, not its Lines or Payments.
   const { lines: _lines, payments: _payments, ...target } = bill;
-  return { categories, target, flash };
+  return { target, flash };
 }
 
 /** The selection as the browser sends it, in the `selection` form field. */
@@ -190,7 +190,8 @@ const paidMessage = (bill: BillSummary) =>
     : `Abono registrado. Debe ${formatMoney(bill.owed)}.`;
 
 export default function Home({ loaderData, actionData }: Route.ComponentProps) {
-  const { categories, target, flash } = loaderData;
+  const { target, flash } = loaderData;
+  const { categories } = useOutletContext<SellItems>();
   const busy = useNavigation().state !== "idle";
   const [quantities, setQuantities] = useState<Readonly<Record<string, number>>>({});
   // A new key remounts the form after a recorded selection, so the picker and
