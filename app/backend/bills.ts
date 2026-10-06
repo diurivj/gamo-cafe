@@ -135,6 +135,20 @@ export interface BillSummary {
   readonly revision: number;
 }
 
+/**
+ * A correction as Cuenta shows it: who made it, when and why. A removed Line
+ * or Payment carries one (ticket 11); so does a Voided Bill. The record it
+ * corrects is never touched (spec §2.1, ADR 0002).
+ */
+export interface Correction {
+  /** The User who removed or voided. */
+  readonly by: string;
+  readonly byName: string;
+  readonly at: Instant;
+  /** The reason, required for an Admin's correction; null for a removal from a Bill with no Payment. */
+  readonly reason: string | null;
+}
+
 export interface BillLine {
   readonly id: string;
   readonly itemId: string;
@@ -147,6 +161,8 @@ export interface BillLine {
   readonly byName: string;
   readonly at: Instant;
   readonly day: Day;
+  /** Its removal, or null while the Line counts (spec §5.7). */
+  readonly removal: Correction | null;
 }
 
 export interface BillPayment {
@@ -159,11 +175,15 @@ export interface BillPayment {
   readonly byName: string;
   readonly at: Instant;
   readonly day: Day;
+  /** Its removal, or null while the Payment counts (spec §5.7). */
+  readonly removal: Correction | null;
 }
 
 export type Bill = BillSummary & {
   readonly lines: ReadonlyArray<BillLine>;
   readonly payments: ReadonlyArray<BillPayment>;
+  /** The void, when an Admin voided it; a Voided Bill counts toward nothing (spec §5.7). */
+  readonly voided: Correction | null;
 };
 
 const placeholders = (count: number) => Array.from({ length: count }, () => "?").join(", ");
@@ -561,6 +581,10 @@ const LineRow = Schema.Struct({
   byName: Schema.String,
   at: Schema.Int,
   day: Schema.String,
+  removalBy: Schema.NullOr(Schema.String),
+  removalByName: Schema.NullOr(Schema.String),
+  removalAt: Schema.NullOr(Schema.Int),
+  removalReason: Schema.NullOr(Schema.String),
 });
 
 const PaymentRow = Schema.Struct({
@@ -571,11 +595,34 @@ const PaymentRow = Schema.Struct({
   byName: Schema.String,
   at: Schema.Int,
   day: Schema.String,
+  removalBy: Schema.NullOr(Schema.String),
+  removalByName: Schema.NullOr(Schema.String),
+  removalAt: Schema.NullOr(Schema.Int),
+  removalReason: Schema.NullOr(Schema.String),
 });
+
+const VoidRow = Schema.Struct({
+  by: Schema.String,
+  byName: Schema.String,
+  at: Schema.Int,
+  reason: Schema.String,
+});
+
+/** A removal's own fields as a `Correction`, or none when the record counts. */
+function correction(
+  by: string | null,
+  byName: string | null,
+  at: number | null,
+  reason: string | null,
+): Correction | null {
+  return by === null || byName === null || at === null ? null : { by, byName, at, reason };
+}
 
 /**
  * One Bill with its Lines and Payments, oldest first, each with its author
- * and moment. The read Cuenta (ticket 07) builds on.
+ * and moment, its removals (ticket 11) and its void, when there is one.
+ * Removed Lines and Payments are still listed, marked with who removed them,
+ * when and why (spec §6.1); the projections exclude them.
  *
  * The §4.1 gate lives here: a Worker requesting a Paid or Voided Bill is
  * refused, and `Mi día` (ticket 14) is the only view that shows them their own
@@ -586,27 +633,51 @@ export const getBill = Effect.fn("getBill")(function* (billId: string) {
   const user = yield* CurrentUser;
   const bill = yield* summaryOf(billId);
   if (!isOpenBill(bill.state) && user.role !== "admin") return yield* new BillNotVisible({ billId });
-  const lines = yield* db.all(
+  const rows = yield* db.all(
     LineRow,
     `SELECT l.id, l.item_id AS itemId, i.name AS itemName, l.quantity,
             l.unit_price AS unitPrice, l.added_by AS "by", u.name AS byName,
-            l.added_at AS at, l.day
+            l.added_at AS at, l.day,
+            r.removed_by AS removalBy, ru.name AS removalByName,
+            r.removed_at AS removalAt, r.reason AS removalReason
      FROM lines l
      JOIN items i ON i.id = l.item_id
      JOIN users u ON u.id = l.added_by
+     LEFT JOIN line_removals r ON r.line_id = l.id
+     LEFT JOIN users ru ON ru.id = r.removed_by
      WHERE l.bill_id = ?
      ORDER BY l.added_at, l.rowid`,
     billId,
   );
-  const payments = yield* db.all(
+  const lines = rows.map(({ removalBy, removalByName, removalAt, removalReason, ...line }) => ({
+    ...line,
+    removal: correction(removalBy, removalByName, removalAt, removalReason),
+  }));
+  const paymentRows = yield* db.all(
     PaymentRow,
     `SELECT p.id, p.amount, p.method, p.received_by AS "by", u.name AS byName,
-            p.received_at AS at, p.day
+            p.received_at AS at, p.day,
+            r.removed_by AS removalBy, ru.name AS removalByName,
+            r.removed_at AS removalAt, r.reason AS removalReason
      FROM payments p
      JOIN users u ON u.id = p.received_by
+     LEFT JOIN payment_removals r ON r.payment_id = p.id
+     LEFT JOIN users ru ON ru.id = r.removed_by
      WHERE p.bill_id = ?
      ORDER BY p.received_at, p.rowid`,
     billId,
   );
-  return { ...bill, lines, payments };
+  const payments = paymentRows.map(({ removalBy, removalByName, removalAt, removalReason, ...payment }) => ({
+    ...payment,
+    removal: correction(removalBy, removalByName, removalAt, removalReason),
+  }));
+  const voided = yield* db.first(
+    VoidRow,
+    `SELECT v.voided_by AS "by", u.name AS byName, v.voided_at AS at, v.reason
+     FROM bill_voids v
+     JOIN users u ON u.id = v.voided_by
+     WHERE v.bill_id = ?`,
+    billId,
+  );
+  return { ...bill, lines, payments, voided: voided ?? null };
 });

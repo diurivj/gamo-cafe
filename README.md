@@ -40,6 +40,7 @@ app/
     health.ts      the reference operation
     customers.ts   Customers: addCustomer, searchCustomers, getCustomer, editCustomer, retireCustomer, restoreCustomer
     bills.ts       Bills, Lines and Payments: recordSelection and takePayment (one batch each), getBill (the §4.1 gate), listOpenBills
+    corrections.ts the corrections of Cuenta: removeLine, removePayment, voidBill (one batch each)
     payments.ts    the two statements a Payment writes (paymentStatements) and its errors
   shared/      Plain functions, no Effect. Safe in the browser.
     money.ts       centavos, formatMoney, parsePesos, changeFor
@@ -200,6 +201,12 @@ A Payment is always recorded in the same batch as what moves the Bill's `paid` p
 A D1 batch cannot branch, so the rules are SQL conditions: `paid + amount <= total` on both statements, and `revision = ? AND state IN ('open', 'partial') AND total - paid >= ?` when the batch is a lone `takePayment`. `paymentStatements(payment, when)` takes the `Condition` the rest of the batch shares, so a refused operation writes neither the Payment nor the projection. Two phones paying the same Bill in full at once therefore record exactly one Payment; the other gets `BillChanged`. When the first statement's `changes` is 0, `takePayment` reads the Bill again to answer the exact rule (`BillChanged`, `BillIsVoided` or `PaymentExceedsOwed`); the routes turn those into `~/shared/payment-messages.ts`.
 
 `takePayment` returns `{ id, amount, bill }`. A Worker who pays a Bill in full is redirected to Cuentas abiertas instead of staying on the page, because a Worker may not open a Paid Bill (§4.1). The amount handed over for cash is never submitted or stored: `PaymentFields` from `~/components/payment-fields` shows `changeFor(handedOver, amount)` while it is typed.
+
+## Correcting a Bill
+
+Removing a Line or a Payment and voiding a Bill are spec §5.7, in `~/backend/corrections.ts`. Each is one batch: the fact (`line_removals`, `payment_removals`, `bill_voids`), the Bill's projections, and Stock. Only the fact's `INSERT ... SELECT` carries the rules (the Bill's revision included); the other statements join the fact by its id, so a refused correction writes nothing at all. The operation classifies a refusal again from the rows, and `correctionMessages` in `~/shared/correction-messages.ts` holds the Spanish for each tag.
+
+A Worker may remove a Line while the Bill has no Payment, which is `paid = 0`; with a Payment only an Admin may, with a reason. Removing a Payment lowers `paid`, so "has a Payment" stays meaningful for ticket 10, and a Bill whose total would fall below `paid` refuses the removal. Stock comes back from the Line's own `moved_stock` fact, not from the Item's flag today, once per Line: a Line already removed is not returned again when its Bill is Voided, and rebuilding Stock from the facts (ticket 19) uses the same rule. A Voided Bill keeps its Lines, Payments and totals on record and refuses every later correction.
 
 ## Writing a test
 

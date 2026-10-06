@@ -2,13 +2,28 @@ import { Effect, Result, Schema } from "effect";
 import { data, Form, Link, redirect, useNavigation } from "react-router";
 
 import { type BillNotFound, getBill, takePayment } from "~/backend/bills";
-import { CurrentUser } from "~/backend/current-user";
+import {
+  type LineNotFound,
+  type PaymentNotFound,
+  type ReasonRequired,
+  type TotalBelowPayments,
+  removeLine,
+  removePayment,
+  voidBill,
+} from "~/backend/corrections";
+import { AdminOnly, CurrentUser } from "~/backend/current-user";
 import { BillChanged, BillIsVoided, PaymentExceedsOwed, PaymentNotPositive } from "~/backend/payments";
 import { run } from "~/backend/run.server";
 import { PaymentFields } from "~/components/payment-fields";
 import { requireUser } from "~/session.server";
 import { billStateLabel, isOpenBill } from "~/shared/bill-state";
-import { formatDay, formatTime } from "~/shared/day";
+import {
+  CORRECTION_INTENTS,
+  type CorrectionIntent,
+  correctionDone,
+  correctionMessages,
+} from "~/shared/correction-messages";
+import { dayOf, formatDay, formatTime, type Instant } from "~/shared/day";
 import { newId } from "~/shared/id";
 import { type Centavos, formatMoney, parsePesos } from "~/shared/money";
 import { PAYMENT_METHODS, paymentMethodLabel } from "~/shared/payment";
@@ -19,8 +34,10 @@ import type { Route } from "./+types/bill";
 // Cuenta (spec §6.1): one Bill with its Lines, who added each and when, its
 // Payments with who, when and method, its state and what it owes. **Agregar
 // productos** opens Vender targeting this Bill, so any User can add Lines to
-// any Open Bill, and **Cobrar** takes a Payment (ticket 08). Customer and note
-// edits (10) and corrections (11) join here later.
+// any Open Bill, and **Cobrar** takes a Payment (ticket 08). An Admin's
+// corrections — removing a Line or a Payment, voiding the Bill — and a
+// Worker's removal of a Line from a Bill with no Payment join here (ticket
+// 11, spec §5.7); Customer and note edits (10) join here later.
 
 export const meta: Route.MetaFunction = () => [{ title: "Cuenta · Gamo Cafe" }];
 
@@ -38,7 +55,12 @@ export async function loader({ context, params }: Route.LoaderArgs) {
       }
     },
   );
-  return { bill, canAddItems: isOpenBill(bill.state), canPay: isOpenBill(bill.state) && bill.owed > 0 };
+  return {
+    bill,
+    canAddItems: isOpenBill(bill.state),
+    canPay: isOpenBill(bill.state) && bill.owed > 0,
+    isAdmin: user.role === "admin",
+  };
 }
 
 type PaymentError = BillNotFound | BillChanged | BillIsVoided | PaymentExceedsOwed | PaymentNotPositive;
@@ -59,10 +81,102 @@ function answerPaymentError(error: PaymentError): { readonly error: string } {
   }
 }
 
+type CorrectionError =
+  | BillNotFound
+  | BillChanged
+  | BillIsVoided
+  | AdminOnly
+  | LineNotFound
+  | PaymentNotFound
+  | ReasonRequired
+  | TotalBelowPayments;
+
+/** What each rule violation of a correction answers, in Spanish (spec §5.7). */
+function answerCorrectionError(error: CorrectionError): { readonly error: string } {
+  switch (error._tag) {
+    case "BillNotFound":
+      throw new Response(null, { status: 404 });
+    case "AdminOnly":
+      throw new Response(null, { status: 403 });
+    case "BillChanged":
+      return { error: correctionMessages.BillChanged };
+    case "BillIsVoided":
+      return { error: correctionMessages.BillIsVoided };
+    case "LineNotFound":
+      return { error: correctionMessages.LineNotFound };
+    case "PaymentNotFound":
+      return { error: correctionMessages.PaymentNotFound };
+    case "ReasonRequired":
+      return { error: correctionMessages.ReasonRequired };
+    case "TotalBelowPayments":
+      return { error: correctionMessages.TotalBelowPayments };
+  }
+}
+
+/**
+ * Runs one correction (spec §5.7, §7.3.3): the operation for the submitted
+ * intent, the Bill's revision and the reason as the form sent them. The
+ * server enforces the permissions, not the screen: a Worker posting an
+ * Admin-only correction is answered 403.
+ */
+async function answerCorrection(
+  context: Route.ActionArgs["context"],
+  user: ReturnType<typeof requireUser>,
+  billId: string,
+  intent: CorrectionIntent,
+  form: FormData,
+): Promise<{ readonly done: string; readonly message: string } | { readonly error: string }> {
+  const revision = Number(String(form.get("revision") ?? ""));
+  if (!Number.isSafeInteger(revision)) {
+    return { error: "Recarga la página e intenta de nuevo." };
+  }
+  const reason = String(form.get("reason") ?? "").trim() || null;
+
+  const program = Effect.gen(function* () {
+    switch (intent) {
+      case "quitar-linea":
+        return yield* removeLine({
+          billId,
+          lineId: String(form.get("lineId") ?? ""),
+          reason,
+          expectedRevision: revision,
+        });
+      case "quitar-pago":
+        return yield* removePayment({
+          billId,
+          paymentId: String(form.get("paymentId") ?? ""),
+          reason,
+          expectedRevision: revision,
+        });
+      case "cancelar-cuenta":
+        return yield* voidBill({ billId, reason, expectedRevision: revision });
+    }
+  });
+
+  const result = await run(
+    context,
+    program.pipe(Effect.provideService(CurrentUser, user)),
+    answerCorrectionError,
+  );
+  if ("error" in result) return result;
+  // A Worker whose removal leaves the Bill Paid no longer opens it (§4.1),
+  // so they are sent to the list, where it is gone, as after a full Payment.
+  if ("leftOpen" in result && !result.leftOpen && user.role !== "admin") throw redirect("/cuentas-abiertas");
+  return { done: newId(), message: correctionDone[intent] };
+}
+
 export async function action({ context, params, request }: Route.ActionArgs) {
   const user = requireUser(context);
   const form = await request.formData();
-  if (String(form.get("intent") ?? "") !== "pagar") {
+  const intent = String(form.get("intent") ?? "");
+
+  if ((CORRECTION_INTENTS as ReadonlyArray<string>).includes(intent)) {
+    const answered = await answerCorrection(context, user, params.billId, intent as CorrectionIntent, form);
+    if ("error" in answered) return data(answered, { status: 400 });
+    return answered;
+  }
+
+  if (intent !== "pagar") {
     return data({ error: "No entendimos esa acción. Recarga la página e intenta de nuevo." }, { status: 400 });
   }
 
@@ -104,10 +218,31 @@ export async function action({ context, params, request }: Route.ActionArgs) {
 const primaryButton =
   "block rounded-2xl bg-stone-900 px-4 py-4 text-center text-lg font-semibold text-white active:bg-stone-700 disabled:opacity-60";
 
+const quietButton =
+  "rounded-xl border border-red-300 px-3 py-2 font-medium text-red-700 active:bg-red-50 disabled:opacity-60";
+
+/** Who corrected something and when: the time today, else with the day. */
+const correctedAt = (billDay: string, at: Instant) => {
+  const day = dayOf(at);
+  return day === billDay ? formatTime(at) : `${formatTime(at)} · ${formatDay(day)}`;
+};
+
+/** The reason a submitted form carried, when it had one. */
+const reasonField = (
+  <label className="flex flex-col text-sm">
+    Motivo
+    <input name="reason" required className="rounded-lg border border-stone-300 px-2 py-1" />
+  </label>
+);
+
 export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
-  const { bill, canAddItems, canPay } = loaderData;
+  const { bill, canAddItems, canPay, isAdmin } = loaderData;
   const busy = useNavigation().state !== "idle";
-  const paidNow = actionData && "done" in actionData ? actionData : undefined;
+  const paidNow = actionData && "done" in actionData && "amount" in actionData ? actionData : undefined;
+  const corrected = actionData && "done" in actionData && "message" in actionData ? actionData : undefined;
+  // A Voided Bill accepts no further corrections (spec §5.7); a Paid Bill does,
+  // which is what §8.5 is about.
+  const canCorrect = bill.state !== "voided";
 
   return (
     <>
@@ -118,6 +253,12 @@ export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
         <h1 className="text-3xl font-semibold tracking-tight">Cuenta</h1>
         <span className="rounded-full bg-stone-100 px-3 py-1 text-sm font-medium">{billStateLabel[bill.state]}</span>
       </div>
+
+      {bill.voided ? (
+        <p role="alert" className="mt-4 rounded-xl bg-red-50 p-3 text-red-800">
+          {`Cancelada por ${bill.voided.byName} · ${correctedAt(bill.day, bill.voided.at)} · Motivo: ${bill.voided.reason}`}
+        </p>
+      ) : null}
 
       <p className="mt-2 text-lg">
         {bill.customer ? (
@@ -163,15 +304,46 @@ export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
             {bill.lines.map((line) => (
               <li key={line.id} className="py-3">
                 <div className="flex items-start justify-between gap-3">
-                  <span className="min-w-0 font-medium">{`${line.quantity} × ${line.itemName}`}</span>
-                  <span className="shrink-0 tabular-nums">{formatMoney(line.unitPrice * line.quantity)}</span>
+                  <span className={`min-w-0 font-medium ${line.removal ? "text-stone-500 line-through" : ""}`}>
+                    {`${line.quantity} × ${line.itemName}`}
+                  </span>
+                  <span className={`shrink-0 tabular-nums ${line.removal ? "text-stone-500 line-through" : ""}`}>
+                    {formatMoney(line.unitPrice * line.quantity)}
+                  </span>
                 </div>
-                <p className="text-sm text-stone-600">{`${formatMoney(line.unitPrice)} c/u`}</p>
-                <p className="text-stone-600">
+                <p className={`text-sm ${line.removal ? "text-stone-500" : "text-stone-600"}`}>
+                  {`${formatMoney(line.unitPrice)} c/u`}
+                </p>
+                <p className={line.removal ? "text-stone-500" : "text-stone-600"}>
                   {line.day === bill.day
                     ? `${line.byName} · ${formatTime(line.at)}`
                     : `${line.byName} · ${formatDay(line.day)} ${formatTime(line.at)}`}
                 </p>
+                {line.removal ? (
+                  <p className="text-red-700">
+                    {`Quitado por ${line.removal.byName} · ${correctedAt(bill.day, line.removal.at)}${
+                      line.removal.reason ? ` · ${line.removal.reason}` : ""
+                    }`}
+                  </p>
+                ) : canCorrect && (bill.paid === 0 || (isAdmin && line.quantity * line.unitPrice <= bill.owed)) ? (
+                  <Form key={bill.revision} method="post" className="mt-2 flex flex-wrap items-end gap-2">
+                    <input type="hidden" name="revision" value={bill.revision} />
+                    <input type="hidden" name="lineId" value={line.id} />
+                    {/* The reason is required once the Bill has a Payment,
+                        which is what `paid > 0` says (spec §5.7). */}
+                    {isAdmin && bill.paid > 0 ? reasonField : null}
+                    <button
+                      type="submit"
+                      name="intent"
+                      value="quitar-linea"
+                      disabled={busy}
+                      aria-label={`Quitar ${line.quantity} × ${line.itemName}`}
+                      className={quietButton}
+                    >
+                      Quitar
+                    </button>
+                  </Form>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -192,23 +364,80 @@ export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
             {bill.payments.map((payment) => (
               <li key={payment.id} className="py-3">
                 <div className="flex items-start justify-between gap-3">
-                  <span className="font-medium">{paymentMethodLabel[payment.method]}</span>
-                  <span className="shrink-0 tabular-nums">{formatMoney(payment.amount)}</span>
+                  <span className={`font-medium ${payment.removal ? "text-stone-500 line-through" : ""}`}>
+                    {paymentMethodLabel[payment.method]}
+                  </span>
+                  <span className={`shrink-0 tabular-nums ${payment.removal ? "text-stone-500 line-through" : ""}`}>
+                    {formatMoney(payment.amount)}
+                  </span>
                 </div>
-                <p className="text-stone-600">
+                <p className={payment.removal ? "text-stone-500" : "text-stone-600"}>
                   {payment.day === bill.day
                     ? `${payment.byName} · ${formatTime(payment.at)}`
                     : `${payment.byName} · ${formatDay(payment.day)} ${formatTime(payment.at)}`}
                 </p>
+                {payment.removal ? (
+                  <p className="text-red-700">
+                    {`Quitado por ${payment.removal.byName} · ${correctedAt(bill.day, payment.removal.at)} · ${
+                      payment.removal.reason ?? ""
+                    }`}
+                  </p>
+                ) : canCorrect && isAdmin ? (
+                  <Form key={bill.revision} method="post" className="mt-2 flex flex-wrap items-end gap-2">
+                    <input type="hidden" name="revision" value={bill.revision} />
+                    <input type="hidden" name="paymentId" value={payment.id} />
+                    {reasonField}
+                    <button
+                      type="submit"
+                      name="intent"
+                      value="quitar-pago"
+                      disabled={busy}
+                      aria-label={`Quitar pago de ${formatMoney(payment.amount)}`}
+                      className={quietButton}
+                    >
+                      Quitar pago
+                    </button>
+                  </Form>
+                ) : null}
               </li>
             ))}
           </ul>
         )}
       </section>
 
+      {canCorrect && isAdmin ? (
+        <section
+          aria-labelledby="cancelar-cuenta"
+          className="mt-6 flex flex-col gap-3 rounded-2xl border border-red-200 bg-red-50 p-4"
+        >
+          <h2 id="cancelar-cuenta" className="text-xl font-semibold">
+            Cancelar cuenta
+          </h2>
+          <p className="text-stone-700">No se puede deshacer. Los productos regresan a existencias.</p>
+          <Form key={bill.revision} method="post" className="flex flex-wrap items-end gap-2">
+            <input type="hidden" name="revision" value={bill.revision} />
+            {reasonField}
+            <button
+              type="submit"
+              name="intent"
+              value="cancelar-cuenta"
+              disabled={busy}
+              className="rounded-xl border border-red-300 bg-white px-3 py-2 font-medium text-red-700 active:bg-red-100 disabled:opacity-60"
+            >
+              Cancelar cuenta
+            </button>
+          </Form>
+        </section>
+      ) : null}
+
       {actionData && "error" in actionData ? (
         <p role="alert" className="mt-6 rounded-xl bg-red-50 p-3 text-red-700">
           {actionData.error}
+        </p>
+      ) : null}
+      {corrected ? (
+        <p role="status" className="mt-6 rounded-xl bg-green-50 p-3">
+          {corrected.message}
         </p>
       ) : null}
       {paidNow ? (

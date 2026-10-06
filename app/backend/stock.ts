@@ -40,6 +40,50 @@ export function changeStock(itemId: string, units: number, when?: Condition): St
 
 export type AdjustmentReason = "restock" | "waste" | "internal_use";
 
+/**
+ * Puts a removed Line's units back, for the batch that records its removal:
+ * one statement, keyed by the `line_removals` row the same batch writes, so
+ * nothing moves when the removal was refused.
+ *
+ * It reads the Line's own `moved_stock` fact and not the Item's flag today: a
+ * Line that moved Stock when it was added gives its units back even if
+ * tracking was switched off since (spec §5.1, ticket 04's trap). That is what
+ * rebuilding Stock from the facts does too (ticket 19): a removed Line stops
+ * counting, whether or not its Item is tracked now.
+ */
+export function lineRemovalStock(removalId: string): Statement {
+  return statement(
+    `INSERT INTO stock_levels (item_id, units)
+     SELECT l.item_id, l.quantity
+     FROM lines l JOIN line_removals r ON r.line_id = l.id
+     WHERE r.id = ? AND l.moved_stock = 1
+     ON CONFLICT (item_id) DO UPDATE SET units = units + excluded.units`,
+    removalId,
+  );
+}
+
+/**
+ * Puts back the units of every Line of a Voided Bill that still counts, for
+ * the batch that records the void: one multi-row statement, keyed by the
+ * `bill_voids` row the same batch writes, so nothing moves when the void was
+ * refused. Lines that were already removed are left out — their units came
+ * back with their own removal and must not return twice (spec §5.7) — and so
+ * are Lines that never moved Stock (spec §5.8).
+ */
+export function billVoidStock(voidId: string): Statement {
+  return statement(
+    `INSERT INTO stock_levels (item_id, units)
+     SELECT l.item_id, SUM(l.quantity)
+     FROM lines l
+     JOIN bill_voids v ON v.bill_id = l.bill_id
+     LEFT JOIN line_removals r ON r.line_id = l.id
+     WHERE v.id = ? AND r.id IS NULL AND l.moved_stock = 1
+     GROUP BY l.item_id
+     ON CONFLICT (item_id) DO UPDATE SET units = units + excluded.units`,
+    voidId,
+  );
+}
+
 export interface NewAdjustment {
   readonly id: string;
   readonly itemId: string;

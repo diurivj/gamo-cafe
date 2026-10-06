@@ -59,6 +59,7 @@ describe("recording a selection", () => {
               byName: "Ana",
               at,
               day: "2026-10-05",
+              removal: null,
             },
             {
               id: expect.any(String),
@@ -70,9 +71,11 @@ describe("recording a selection", () => {
               byName: "Ana",
               at,
               day: "2026-10-05",
+              removal: null,
             },
           ],
           payments: [],
+          voided: null,
         });
       }),
     ));
