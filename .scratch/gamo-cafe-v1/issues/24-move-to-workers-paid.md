@@ -1,6 +1,6 @@
 # 24 — Move the account to Workers Paid and take the proof deployment down
 
-Status: ready-for-human
+Status: resolved
 Blocked by: —
 Spec: [`../spec.md`](../spec.md) §2.4, §3.6, §9 (1); ADR 0007
 
@@ -16,7 +16,7 @@ Only the developer can change the plan and the billing of their Cloudflare accou
 
 ## Acceptance criteria
 
-- [ ] The account is on Workers Paid (done 2026-10-06, per the developer) and has a budget alert.
+- [x] The account is on Workers Paid (done 2026-10-06, per the developer) and has a budget alert.
 - [x] `gamo-cafe-proof` no longer exists as a Worker or as a database.
 - [x] `gamo-cafe-db` exists and its id is recorded under `## Answer`.
 - [x] The owner has agreed to spec §11, assumption 3.
@@ -28,6 +28,7 @@ Only the developer can change the plan and the billing of their Cloudflare accou
 - 2026-10-06: The developer deleted the `gamo-cafe-proof` Worker and database.
 - 2026-10-06: `gamo-cafe-db` created and its id put in `wrangler.jsonc`. No migrations applied yet. The budget alert and the owner's agreement remain, both the developer's.
 - 2026-10-06: The owner agreed to spec §11, assumption 3, per the developer. Only the budget alert remains; the developer is creating it.
+- 2026-10-06: The developer created the budget alert. All criteria met.
 
 ## Answer
 
