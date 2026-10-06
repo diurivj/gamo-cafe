@@ -17,3 +17,7 @@ If Effect is the reason a screen fails the CPU criterion, the exit rule in §3.2
 - [ ] The figures are recorded in this file under `## Answer`.
 - [ ] Every §10.7 bullet holds, or the failing request is ticketed.
 - [ ] The disposable deployment is torn down.
+
+## Comments
+
+- 2026-10-06: The kit is ready on `gamo-cafe-v1` at `22c5e69`: the runbook is README's "The free-plan proof", the runner is `npm run proof` (with `--busy-day`), and the seed, its shape checks and the local budgets are green. The only things left are the account, the disposable deployment and the figures, per the runbook and acceptance criteria above; record them under `## Answer` and set `Status: resolved` when done.
