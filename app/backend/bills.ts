@@ -9,7 +9,7 @@ import { PAYMENT_METHODS, type PaymentMethod } from "~/shared/payment";
 
 import { CurrentUser } from "./current-user";
 import { CustomerNotFound } from "./customers";
-import { Db, statement, type Condition, type Statement } from "./db";
+import { Db, type Param, statement, type Condition, type Statement } from "./db";
 import {
   BillChanged,
   BillIsVoided,
@@ -39,7 +39,9 @@ import { now } from "./time";
  * adding to the same Bill both succeed. `takePayment` (spec §7.3.2) records a
  * Payment on one Bill, conditionally on the revision the page showed.
  * `takeCustomerPayment` (ticket 09) spreads one amount over a Customer's Open
- * Bills, oldest first, all of them or none (spec §5.5, §7.3.2).
+ * Bills, oldest first, all of them or none (spec §5.5, §7.3.2). `editBill`
+ * (spec §7.3.4, ticket 10) sets the Bill's Customer or note, one `bill_edits`
+ * fact per field that changed.
  */
 
 const BillStateSchema = Schema.Literals(BILL_STATES);
@@ -525,6 +527,147 @@ export const recordSelection = Effect.fn("recordSelection")(function* (input: Ne
   }
 
   return yield* summaryOf(bill.id);
+});
+
+const EditableBillRow = Schema.Struct({
+  customerId: Schema.NullOr(Schema.String),
+  note: Schema.NullOr(Schema.String),
+  paid: Schema.Int,
+  state: BillStateSchema,
+  revision: Schema.Int,
+});
+
+/**
+ * A Worker tried to change a Bill that has a Payment, which only an Admin may
+ * do (spec §4.1). "Has a Payment" is read from the Bill's `paid` projection,
+ * so a Payment ticket 11 removes stops counting.
+ */
+export class BillHasPayment extends Data.TaggedError("BillHasPayment")<{ readonly billId: string }> {}
+
+/** One of the two fields an edit can change. */
+export type BillEditField = "customer" | "note";
+
+/** What an edit of a Bill's Customer or note carries: the values to store. */
+export interface BillEditInput {
+  readonly billId: string;
+  /** The Customer to link; null leaves the Bill with none. */
+  readonly customerId: string | null;
+  /** Up to 80 characters (spec §5.3); null or empty means no note. */
+  readonly note: string | null;
+  /**
+   * The revision of the Bill as the User's page showed it. A submission that
+   * carries another one is stale and changes nothing (spec §7.3).
+   */
+  readonly expectedRevision: number;
+}
+
+/**
+ * Sets or changes a Bill's Customer or note (spec §7.3.4), in one batch: a
+ * `bill_edits` fact for each field that actually changed, with its previous
+ * and new value, and the Bill's projections (`customer_id`, `note`,
+ * `revision`).
+ *
+ * Any User may while the Bill has no Payment; an Admin may afterwards
+ * (spec §4.1). "Has a Payment" is the projection `paid`, so a Payment that
+ * ticket 11 removes stops counting. A retired Customer cannot be chosen
+ * (spec §5.2); one already linked stays linked when only the note changes.
+ *
+ * A D1 batch cannot branch, so the revision, the Voided state, the role's
+ * right to edit now and the chosen Customer still being active all live in
+ * the SQL every statement of the batch shares. When it refuses, nothing at
+ * all is written and the Bill is read again to answer the exact rule.
+ */
+export const editBill = Effect.fn("editBill")(function* (input: BillEditInput) {
+  const db = yield* Db;
+  const user = yield* CurrentUser;
+  const billId = input.billId;
+
+  const bill = yield* db.first(
+    EditableBillRow,
+    "SELECT customer_id AS customerId, note, paid, state, revision FROM bills WHERE id = ?",
+    billId,
+  );
+  if (!bill) return yield* new BillNotFound({ billId });
+  if (bill.revision !== input.expectedRevision) return yield* new BillChanged({ billId });
+  if (bill.state === "voided") return yield* new BillIsVoided({ billId });
+  if (user.role !== "admin" && bill.paid > 0) return yield* new BillHasPayment({ billId });
+
+  const customerId = input.customerId || null;
+  const note = tidyNote(input.note) || null;
+  if (note !== null && note.length > NOTE_LIMIT) return yield* new NoteTooLong();
+
+  // Only what changed becomes a fact: each change is a History entry, and a
+  // submission that changes nothing is answered as it stands.
+  const edits: Array<{ field: BillEditField; previous: string | null; next: string | null }> = [];
+  if (customerId !== bill.customerId) {
+    edits.push({ field: "customer", previous: bill.customerId, next: customerId });
+  }
+  if (note !== bill.note) edits.push({ field: "note", previous: bill.note, next: note });
+
+  const choosingCustomer = customerId !== null && customerId !== bill.customerId;
+  if (choosingCustomer) {
+    const chosen = yield* db.first(
+      IdRow,
+      "SELECT id FROM customers WHERE id = ? AND retired_at IS NULL",
+      customerId,
+    );
+    if (!chosen) return yield* new CustomerUnavailable({ customerId });
+  }
+  if (edits.length === 0) return { revision: bill.revision };
+
+  const at = yield* now;
+  const conditions = [
+    "EXISTS (SELECT 1 FROM bills WHERE id = ? AND revision = ? AND state <> 'voided' AND (paid = 0 OR ? = 1))",
+  ];
+  const conditionParams: Param[] = [billId, input.expectedRevision, user.role === "admin" ? 1 : 0];
+  if (choosingCustomer) {
+    conditions.push("EXISTS (SELECT 1 FROM customers WHERE id = ? AND retired_at IS NULL)");
+    conditionParams.push(customerId);
+  }
+  const condition: Condition = { sql: conditions.join(" AND "), params: conditionParams };
+
+  const statements: Statement[] = edits.map(({ field, previous, next }) =>
+    statement(
+      `INSERT INTO bill_edits (id, bill_id, field, previous_value, new_value, edited_by, edited_at)
+       SELECT ?, ?, ?, ?, ?, ?, ?
+       WHERE (${condition.sql})`,
+      newId(),
+      billId,
+      field,
+      previous,
+      next,
+      user.id,
+      at,
+      ...condition.params,
+    ),
+  );
+  statements.push(
+    statement(
+      `UPDATE bills SET customer_id = ?, note = ?, revision = revision + 1
+       WHERE id = ? AND (${condition.sql})`,
+      customerId,
+      note,
+      billId,
+      ...condition.params,
+    ),
+  );
+
+  const [first] = yield* db.batch(statements);
+  if (first!.changes === 0) {
+    // The condition refused it: learn which rule it was, from the Bill as it
+    // is now, as `takePayment` does.
+    const after = yield* db.first(
+      EditableBillRow,
+      "SELECT customer_id AS customerId, note, paid, state, revision FROM bills WHERE id = ?",
+      billId,
+    );
+    if (!after) return yield* new BillNotFound({ billId });
+    if (after.revision !== input.expectedRevision) return yield* new BillChanged({ billId });
+    if (after.state === "voided") return yield* new BillIsVoided({ billId });
+    if (user.role !== "admin" && after.paid > 0) return yield* new BillHasPayment({ billId });
+    return yield* new CustomerUnavailable({ customerId: customerId! });
+  }
+  return { revision: bill.revision + 1 };
 });
 
 const PaymentBillRow = Schema.Struct({

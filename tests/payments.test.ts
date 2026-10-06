@@ -246,7 +246,10 @@ describe("two phones paying the same Bill at once", () => {
     const responses = await Promise.all([pay(ana), pay(beto)]);
     const bodies = await Promise.all(responses.map((response) => response.text()));
 
-    expect(responses.map((response) => response.status).sort()).toEqual([200, 400]);
+    // Whichever request lands first records the Payment and the other is
+    // refused. The winner is Ana (200) or Beto: a Worker who paid the Bill in
+    // full is sent to Cuentas abiertas, because they may not open a Paid Bill.
+    expect([[200, 400], [302, 400]]).toContainEqual(responses.map((response) => response.status).sort());
     expect(bodies.filter((body) => body.includes("La cuenta cambió"))).toHaveLength(1);
 
     const after = await runTest(getBill(seeded.bill.id).pipe(as(seeded.ana)));
