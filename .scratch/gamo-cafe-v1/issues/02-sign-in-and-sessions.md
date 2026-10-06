@@ -1,6 +1,6 @@
 # 02 — Sign in with a one-time code, and sessions
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 01
 Spec: [`../spec.md`](../spec.md) §3.5, §4, §6.1 (Entrar), §7.2, §7.3 (7), §8.8, §10.1 · ADR 0004
 
@@ -24,3 +24,7 @@ A User with a code issued from the command line opens **Entrar**, types the code
 - [ ] Session expiry and extension are tested with a test clock.
 - [ ] A cross-origin POST is rejected.
 - [ ] Codes and tokens never appear in D1 in clear.
+
+## Comments
+
+- 2026-10-06: Implemented on `ticket/02-sign-in`, merged into `gamo-cafe-v1` at `8f2dc66`. Deactivation and sign-out-everywhere operations are left to ticket 03; `addUser` and `issueSignInCode` need `requireAdmin` there. The `--production` path of the sign-in-code script was not run.
