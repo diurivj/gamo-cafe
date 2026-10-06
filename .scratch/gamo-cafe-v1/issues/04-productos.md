@@ -1,6 +1,6 @@
 # 04 — Productos: Items and Categories
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 02
 Spec: [`../spec.md`](../spec.md) §5.1, §5.8 (starting Stock), §6.2 (Productos), §7.2, §2.1
 
@@ -20,3 +20,8 @@ On **Productos**, an Admin manages Categories (name, position, retire/restore) a
 - [ ] Duplicate active names (case and accent variants) are refused with a Spanish message; a retired Item's name can be reused.
 - [ ] Retiring and restoring an Item keeps its records; retiring a Category with active Items is refused.
 - [ ] A Worker calling any Productos loader or action is refused.
+
+## Comments
+
+- 2026-10-06: Implemented on `ticket/04-productos`, merged into `gamo-cafe-v1` at `2d15ddb`. Notes at `/Users/diurivj/coding/gamo-cafe-notes/04-notes.md`. The merge with ticket 05 moved `tidyName` into `catalog.ts`; `normalize-name.ts` holds only `normalizeName`.
+- Ticket 12: an Item with no `stock_levels` row has Stock zero, so Inventario must `LEFT JOIN` and `COALESCE(units, 0)`. Ticket 11 and 19: `changeStock` tests `stock_tracked` when the statement runs, so the rebuild has to apply the same rule. Migration changes to `categories`, `items`, `adjustments` or `stock_levels` must update the direct writes in `e2e/fixtures.ts`.
