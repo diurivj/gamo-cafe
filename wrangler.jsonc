@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Top level is the local environment; `env.production` is the only other one.
+  "name": "gamo-cafe-local",
+  "compatibility_date": "2026-10-01",
+  "main": "./workers/app.ts",
+  "vars": {
+    "APP_ENV": "local"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "gamo-cafe-db-local",
+      // Never reaches Cloudflare: it only names the local SQLite file.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "./migrations"
+    }
+  ],
+  "env": {
+    "production": {
+      "name": "gamo-cafe",
+      "workers_dev": true,
+      "vars": {
+        "APP_ENV": "production"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "gamo-cafe-db",
+          // Placeholder. Replace with the id printed by
+          // `wrangler d1 create gamo-cafe-db` in Gamo's Cloudflare account.
+          "database_id": "REPLACE_WITH_PRODUCTION_D1_DATABASE_ID",
+          "migrations_dir": "./migrations"
+        }
+      ]
+    }
+  }
+}

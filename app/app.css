@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+}
+
+/* Phone first: no accidental sideways scroll, no grey flash on tap. */
+html {
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+}

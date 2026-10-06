@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "vite.config.ts",
+    "vitest.config.ts",
+    "react-router.config.ts",
+    "playwright.config.ts",
+    "e2e/**/*.ts"
+  ],
+  "compilerOptions": {
+    "composite": true,
+    "strict": true,
+    "types": ["node"],
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true
+  }
+}
