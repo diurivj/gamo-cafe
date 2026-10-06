@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { type Duration, Effect, Layer } from "effect";
-// Not from "effect/testing": that index also re-exports unstable modules.
+// The module itself, not the testing index, which re-exports unstable modules.
 import * as TestClock from "effect/testing/TestClock";
 
 import { Db } from "~/backend/db";

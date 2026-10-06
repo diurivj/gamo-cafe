@@ -11,8 +11,8 @@
     "test:watch": "vitest",
     "test:e2e": "npm run build && playwright test",
     "verify": "npm run typecheck && npm test",
-    "db:migrate": "wrangler d1 migrations apply DB --local",
-    "db:migrate:production": "wrangler d1 migrations apply DB --env production --remote",
+    "db:migrate": "wrangler d1 migrations apply DB --config wrangler.jsonc --local",
+    "db:migrate:production": "wrangler d1 migrations apply DB --config wrangler.jsonc --env production --remote",
     "deploy:production": "npm run build:production && wrangler deploy"
   },
   "dependencies": {
