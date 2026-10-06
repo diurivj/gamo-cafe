@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { data, Form, Link, useNavigation } from "react-router";
+import { type FormEvent, useEffect, useRef, useState } from "react";
+import { data, Form, Link, useFetcher, useRevalidator, useSubmit } from "react-router";
 import { Effect, Result, Schema } from "effect";
 
 import {
@@ -21,11 +21,12 @@ import { activeItemsByCategory } from "~/backend/catalog";
 import { CurrentUser } from "~/backend/current-user";
 import { type PaymentExceedsOwed, type PaymentNotPositive } from "~/backend/payments";
 import { run } from "~/backend/run.server";
-import { CustomerPicker } from "~/components/customer-picker";
+import { CustomerPicker, type PickedCustomer } from "~/components/customer-picker";
 import { PaymentFields } from "~/components/payment-fields";
 import { redirectWithFlash, takeFlash } from "~/flash.server";
 import { requireUser } from "~/session.server";
-import { formatMoney, parsePesos } from "~/shared/money";
+import { newId } from "~/shared/id";
+import { type Centavos, formatMoney, parsePesos } from "~/shared/money";
 import { PAYMENT_METHODS, type PaymentMethod } from "~/shared/payment";
 import { paymentMessages } from "~/shared/payment-messages";
 
@@ -159,7 +160,7 @@ export async function action({ context, request }: Route.ActionArgs) {
   if ("error" in result) return data(result, { status: 400 });
   // Recorded: a redirect back to the screen, so a reload or the back button
   // records nothing again (spec §3.4). The message and the Bill's id travel
-  // with it; the page empties the selection when it sees them.
+  // with it. The page emptied the selection when the sale was sent.
   const message =
     intent === "cobrar" ? paidMessage(result) : selection.billId ? addedMessage(result) : recordedMessage(result);
   return redirectWithFlash(selection.billId ? `/?billId=${encodeURIComponent(selection.billId)}` : "/", {
@@ -189,26 +190,91 @@ const paidMessage = (bill: BillSummary) =>
     ? `Cuenta pagada: ${formatMoney(bill.total)}.`
     : `Abono registrado. Debe ${formatMoney(bill.owed)}.`;
 
+type Quantities = Readonly<Record<string, number>>;
+
+/** What the form held besides the selection when it was sent. */
+interface FormFields {
+  readonly customer: PickedCustomer | null;
+  readonly note: string;
+  readonly method: PaymentMethod;
+  readonly amount: string;
+}
+
+/** A sale the browser has sent and the server has not answered yet. */
+interface SentSale extends FormFields {
+  /** The key of the fetcher that carries it. */
+  readonly key: string;
+  readonly quantities: Quantities;
+  readonly total: Centavos;
+}
+
+/** How a sale that was sent ended. */
+type SaleAnswer =
+  | { readonly refusal: string }
+  /** Recorded. `landed` says whether the router followed the redirect back to this page. */
+  | { readonly refusal: null; readonly landed: boolean };
+
+/** One sale on its way. It says so, and tells the screen how it ended. */
+function SaleBeingRecorded({
+  sale,
+  onAnswer,
+}: {
+  sale: SentSale;
+  onAnswer: (sale: SentSale, answer: SaleAnswer) => void;
+}) {
+  const fetcher = useFetcher<typeof action>({ key: sale.key });
+  const sent = useRef(false);
+  // A fetcher whose redirect the router follows is "loading" while the page
+  // it lands on loads.
+  const landed = useRef(false);
+  const answered = useRef(false);
+  useEffect(() => {
+    if (fetcher.state !== "idle") {
+      sent.current = true;
+      if (fetcher.state === "loading") landed.current = true;
+      return;
+    }
+    if (!sent.current || answered.current) return;
+    answered.current = true;
+    onAnswer(
+      sale,
+      fetcher.data && "error" in fetcher.data
+        ? { refusal: fetcher.data.error }
+        : { refusal: null, landed: landed.current },
+    );
+  }, [fetcher.state]);
+
+  return <li>{`Registrando venta de ${formatMoney(sale.total)}…`}</li>;
+}
+
 export default function Home({ loaderData, actionData }: Route.ComponentProps) {
   const { categories, target, flash } = loaderData;
-  const busy = useNavigation().state !== "idle";
-  const [quantities, setQuantities] = useState<Readonly<Record<string, number>>>({});
-  // A new key remounts the form after a recorded selection, so the picker and
-  // the note start over; the key holds after a refusal, which keeps them.
-  const [formKey, setFormKey] = useState("nueva");
-
-  // New for every recorded selection, whether this page was already open or
-  // the redirect loaded it.
-  const recorded = flash?.id;
-  useEffect(() => {
-    if (!recorded) return;
-    setQuantities({});
-    setFormKey(recorded);
-  }, [recorded]);
+  const submit = useSubmit();
+  const revalidator = useRevalidator();
+  // The last thing a recorded sale said. A later load of this page brings no
+  // flash, and must not take the message away while the User is still here.
+  const [said, setSaid] = useState(flash);
+  if (flash && flash.id !== said?.id) setSaid(flash);
+  const [quantities, setQuantities] = useState<Quantities>({});
+  // Every sale sent starts the form over under a new key, so the picker, the
+  // note and the Payment are empty for the next one. A refused sale starts it
+  // over once more, with what it held.
+  const [form, setForm] = useState<{ readonly key: string; readonly fields: FormFields | null }>({
+    key: "nueva",
+    fields: null,
+  });
+  const [customer, setCustomer] = useState<PickedCustomer | null>(null);
+  const [sent, setSent] = useState<ReadonlyArray<SentSale>>([]);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  // What is selected now, for an answer that arrives later.
+  const selectedNow = useRef(quantities);
+  selectedNow.current = quantities;
 
   const items = categories.flatMap((category) => category.items);
   const selected = items.filter((item) => (quantities[item.id] ?? 0) > 0);
   const total = selected.reduce((sum, item) => sum + item.price * quantities[item.id]!, 0);
+  // Without JavaScript the refusal comes back as the page's action data.
+  const error = refusal ?? (actionData && "error" in actionData ? actionData.error : null);
 
   function change(itemId: string, by: number) {
     setQuantities((current) => {
@@ -221,6 +287,58 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
   }
 
   const selection = JSON.stringify(selected.map((item) => ({ itemId: item.id, quantity: quantities[item.id] })));
+  const formAction = target ? `/?index&billId=${target.id}` : "/?index";
+
+  // A tap on Dejar abierta or Cobrar is acknowledged at once (spec §3.4): the
+  // sale travels in a fetcher of its own, the selection empties and the next
+  // one can start while the server records this one. The screen says what was
+  // recorded only when the redirect brings the message.
+  function send(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const fields = new FormData(event.currentTarget, (event.nativeEvent as SubmitEvent).submitter);
+    const key = newId();
+    void submit(fields, { method: "post", action: formAction, navigate: false, fetcherKey: key });
+    setSent((sales) => [
+      ...sales,
+      {
+        key,
+        quantities,
+        total,
+        customer,
+        note: String(fields.get("note") ?? ""),
+        method: fields.get("method") === "transfer" ? "transfer" : "cash",
+        amount: String(fields.get("amount") ?? ""),
+      },
+    ]);
+    setQuantities({});
+    setCustomer(null);
+    setRefusal(null);
+    setForm({ key, fields: null });
+  }
+
+  function answered(sale: SentSale, answer: SaleAnswer) {
+    setSent((sales) => sales.filter((other) => other.key !== sale.key));
+    if (answer.refusal === null) {
+      // The router follows the redirect of a recorded sale, and that load
+      // brings its message. It does not follow one that answers after a later
+      // navigation began (an earlier sale's redirect, say): then the message
+      // is still waiting in its cookie, and this load fetches it.
+      if (!answer.landed) void revalidator.revalidate();
+      return;
+    }
+    // Refused: the selection comes back with the message. If another one was
+    // started meanwhile, the units join it and its form is left as it is.
+    setRefusal(answer.refusal);
+    const startedAnother = Object.keys(selectedNow.current).length > 0;
+    setQuantities((current) => {
+      const next = { ...current };
+      for (const [itemId, quantity] of Object.entries(sale.quantities)) next[itemId] = (next[itemId] ?? 0) + quantity;
+      return next;
+    });
+    if (startedAnother) return;
+    setCustomer(sale.customer);
+    setForm({ key: `${sale.key}:devuelta`, fields: sale });
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -251,8 +369,9 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
           same page the loader rendered. */}
       <Form
         method="post"
-        action={target ? `/?index&billId=${target.id}` : "?index"}
-        key={formKey}
+        action={formAction}
+        key={form.key}
+        onSubmit={send}
         className="flex flex-col gap-6"
       >
         <input type="hidden" name="selection" value={selection} />
@@ -336,24 +455,43 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
 
           {/* A Bill's Customer and note are set on Cuenta (ticket 10); when
               adding to one, the picker and the note stay out of the way. */}
-          {target ? null : <CustomerPicker name="customerId" />}
+          {target ? null : (
+            <CustomerPicker name="customerId" defaultValue={form.fields?.customer} onChange={setCustomer} />
+          )}
 
           {target ? null : (
             <label className="flex flex-col gap-1">
               <span className="font-medium">Nota (opcional)</span>
-              <input name="note" maxLength={80} autoComplete="off" className={field} />
+              <input
+                name="note"
+                maxLength={80}
+                defaultValue={form.fields?.note}
+                autoComplete="off"
+                className={field}
+              />
               <span className="text-sm text-stone-600">Quién se lo lleva o cualquier detalle. Hasta 80 caracteres.</span>
             </label>
           )}
 
-          {actionData && "error" in actionData ? (
+          {sent.length > 0 ? (
+            <ul
+              aria-label="Ventas que se están registrando"
+              aria-live="polite"
+              className="flex flex-col gap-1 rounded-xl bg-stone-100 p-3 text-stone-700"
+            >
+              {sent.map((sale) => (
+                <SaleBeingRecorded key={sale.key} sale={sale} onAnswer={answered} />
+              ))}
+            </ul>
+          ) : null}
+          {error ? (
             <p role="alert" className="rounded-xl bg-red-50 p-3 text-red-700">
-              {actionData.error}
+              {error}
             </p>
           ) : null}
-          {flash?.message ? (
-            <p role="status" data-bill-id={flash.billId} className="rounded-xl bg-green-50 p-3">
-              {flash.message}
+          {said?.message ? (
+            <p role="status" data-bill-id={said.billId} className="rounded-xl bg-green-50 p-3">
+              {said.message}
             </p>
           ) : null}
 
@@ -361,7 +499,7 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
             type="submit"
             name="intent"
             value="dejar-abierta"
-            disabled={busy || items.length === 0}
+            disabled={items.length === 0}
             className={primaryButton}
           >
             {target ? "Agregar a la cuenta" : "Dejar abierta"}
@@ -379,13 +517,15 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
           </h2>
           <PaymentFields
             defaultAmount={total}
+            initialAmount={form.fields?.amount}
+            initialMethod={form.fields?.method}
             amountHint="Déjalo vacío para cobrar todo el total; también puedes cobrar menos."
           />
           <button
             type="submit"
             name="intent"
             value="cobrar"
-            disabled={busy || items.length === 0}
+            disabled={items.length === 0}
             className={primaryButton}
           >
             Cobrar

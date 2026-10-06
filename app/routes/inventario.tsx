@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Form, Link, useNavigation } from "react-router";
+import { Form, Link } from "react-router";
 
 import type { ItemNotFound } from "~/backend/catalog";
 import type { AdminOnly } from "~/backend/current-user";
@@ -22,6 +22,7 @@ import { redirectWithFlash, takeFlash } from "~/flash.server";
 import { ADJUSTMENT_REASONS, adjustmentReasonLabel, adjustmentSign } from "~/shared/adjustment";
 import { formatDay } from "~/shared/day";
 import { parseUnits } from "~/shared/units";
+import { SubmitButton } from "~/components/submit-button";
 
 import type { Route } from "./+types/inventario";
 
@@ -118,7 +119,6 @@ function Refused({ message }: { message: string | undefined }) {
 
 export default function Inventario({ loaderData, actionData }: Route.ComponentProps) {
   const { lines, adjustments, flash } = loaderData;
-  const busy = useNavigation().state !== "idle";
   const errorOn = (form: string) =>
     actionData && "error" in actionData && actionData.form === form ? actionData.error : undefined;
   // A form that was just recorded starts over, empty.
@@ -184,9 +184,9 @@ export default function Inventario({ loaderData, actionData }: Route.ComponentPr
             <input name="note" autoComplete="off" className={field} />
           </label>
           <Refused message={errorOn("record-adjustment:")} />
-          <button type="submit" disabled={busy} className={primaryButton}>
+          <SubmitButton className={primaryButton}>
             Registrar ajuste
-          </button>
+          </SubmitButton>
         </Form>
       </section>
 
@@ -254,9 +254,9 @@ export default function Inventario({ loaderData, actionData }: Route.ComponentPr
                       <input name="reason" required maxLength={80} autoComplete="off" className={field} />
                     </label>
                     <Refused message={errorOn(`cancel-adjustment:${adjustment.id}`)} />
-                    <button type="submit" disabled={busy} className={button}>
+                    <SubmitButton className={button}>
                       Cancelar ajuste
-                    </button>
+                    </SubmitButton>
                   </Form>
                 )}
               </li>

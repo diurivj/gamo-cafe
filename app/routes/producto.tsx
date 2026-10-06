@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Form, Link, redirect, useNavigation } from "react-router";
+import { Form, Link, redirect } from "react-router";
 
 import { getItem, listCatalog, restoreItem, retireItem, updateItem } from "~/backend/catalog";
 import { CurrentUser } from "~/backend/current-user";
@@ -16,6 +16,7 @@ import {
   text,
 } from "~/catalog-forms.server";
 import { ItemFields } from "~/components/item-fields";
+import { SubmitButton } from "~/components/submit-button";
 
 import type { Route } from "./+types/producto";
 
@@ -87,7 +88,6 @@ const primaryButton = "rounded-xl bg-stone-900 px-4 py-3 font-semibold text-whit
 
 export default function Producto({ loaderData, actionData }: Route.ComponentProps) {
   const { item, categories } = loaderData;
-  const busy = useNavigation().state !== "idle";
   const errorOn = (form: string) =>
     actionData && "error" in actionData && actionData.form === form ? actionData.error : undefined;
   const saveError = errorOn("update-item");
@@ -111,9 +111,9 @@ export default function Producto({ loaderData, actionData }: Route.ComponentProp
             {saveError}
           </p>
         ) : null}
-        <button type="submit" disabled={busy} className={primaryButton}>
+        <SubmitButton className={primaryButton}>
           Guardar
-        </button>
+        </SubmitButton>
       </Form>
 
       <Form method="post" className="flex flex-col gap-3 border-t border-stone-200 pt-6">
@@ -128,9 +128,9 @@ export default function Producto({ loaderData, actionData }: Route.ComponentProp
             {stateError}
           </p>
         ) : null}
-        <button type="submit" disabled={busy} className={button}>
+        <SubmitButton className={button}>
           {item.retired ? "Restaurar producto" : "Retirar producto"}
-        </button>
+        </SubmitButton>
       </Form>
     </div>
   );

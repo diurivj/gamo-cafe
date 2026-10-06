@@ -1,8 +1,9 @@
-import { data, Form, redirect, useNavigation } from "react-router";
+import { data, Form, redirect } from "react-router";
 
 import { run } from "~/backend/run.server";
 import { useSignInCode } from "~/backend/sign-in";
 import { optionalUser, sessionCookie } from "~/session.server";
+import { SubmitButton } from "~/components/submit-button";
 
 import type { Route } from "./+types/sign-in";
 
@@ -32,7 +33,6 @@ export async function action({ context, request }: Route.ActionArgs) {
 }
 
 export default function SignIn({ actionData }: Route.ComponentProps) {
-  const sending = useNavigation().state !== "idle";
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-6">
@@ -66,13 +66,12 @@ export default function SignIn({ actionData }: Route.ComponentProps) {
             Pídele tu código a un administrador. Sirve una sola vez y dura 10 minutos.
           </p>
         )}
-        <button
-          type="submit"
-          disabled={sending}
+        <SubmitButton
+          pendingLabel="Entrando…"
           className="rounded-xl bg-stone-900 px-4 py-4 text-lg font-semibold text-white disabled:opacity-60"
         >
-          {sending ? "Entrando…" : "Entrar"}
-        </button>
+          Entrar
+        </SubmitButton>
       </Form>
     </main>
   );

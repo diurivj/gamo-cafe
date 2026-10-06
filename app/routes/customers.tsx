@@ -7,6 +7,7 @@ import { run } from "~/backend/run.server";
 import { requireUser } from "~/session.server";
 import { customerNameMessages } from "~/shared/customer-messages";
 import { normalizeName } from "~/shared/normalize-name";
+import { SubmitButton } from "~/components/submit-button";
 
 import type { Route } from "./+types/customers";
 
@@ -54,7 +55,6 @@ export default function Customers({ loaderData, actionData }: Route.ComponentPro
   const { typed, customers, more, canAdd } = loaderData;
   const submit = useSubmit();
   const navigation = useNavigation();
-  const adding = navigation.state !== "idle" && navigation.formMethod === "POST";
   // The matches are a round trip away; say so at once, so no tap looks lost.
   const searching = navigation.state !== "idle" && navigation.formMethod === "GET";
 
@@ -128,13 +128,12 @@ export default function Customers({ loaderData, actionData }: Route.ComponentPro
             Nota para «{typed}» (opcional)
           </label>
           <input id="note" name="note" autoComplete="off" maxLength={200} className={field} />
-          <button
-            type="submit"
-            disabled={adding}
+          <SubmitButton
+            pendingLabel="Agregando…"
             className="rounded-xl bg-stone-900 px-4 py-4 text-lg font-semibold text-white disabled:opacity-60"
           >
-            {adding ? "Agregando…" : `Agregar «${typed}»`}
-          </button>
+            {`Agregar «${typed}»`}
+          </SubmitButton>
         </Form>
       ) : null}
     </>

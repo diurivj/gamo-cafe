@@ -1,5 +1,5 @@
 import { Result, Schema } from "effect";
-import { createContext, type MiddlewareFunction, redirect, type RouterContextProvider } from "react-router";
+import { createContext, type MiddlewareFunction, replace, type RouterContextProvider } from "react-router";
 
 import { pagePath } from "~/session.server";
 import { newId } from "~/shared/id";
@@ -66,10 +66,14 @@ const Carried = Schema.fromJsonString(
 /**
  * The answer of an action that recorded something: a redirect to `to`, a path
  * of the app, carrying `flash` for the page at that path.
+ *
+ * The router replaces the current history entry with it. A `<Form>` that
+ * posts to its own page does that anyway; a fetcher's redirect would add an
+ * entry for the page the User is already on, one for every sale on Vender.
  */
 export function redirectWithFlash(to: string, flash: Flash): Response {
   const carried = { ...flash, id: newId(), to: new URL(to, "https://app.invalid").pathname };
-  return redirect(to, {
+  return replace(to, {
     headers: {
       "Set-Cookie": `${FLASH_COOKIE}=${encodeURIComponent(JSON.stringify(carried))}; Max-Age=${MAX_AGE}; ${COOKIE_ATTRIBUTES}`,
     },

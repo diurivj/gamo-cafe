@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Form, Link, redirect, useNavigation } from "react-router";
+import { Form, Link, redirect } from "react-router";
 
 import type { ItemNotFound } from "~/backend/catalog";
 import {
@@ -16,6 +16,7 @@ import type { ItemNotStockTracked } from "~/backend/inventory";
 import { run } from "~/backend/run.server";
 import { type Refusal, refuseRead, refused, requireAdminUser, text } from "~/catalog-forms.server";
 import { CountLineItem } from "~/components/count-line";
+import { SubmitButton } from "~/components/submit-button";
 import { parseUnits } from "~/shared/units";
 
 import type { Route } from "./+types/conteo";
@@ -114,7 +115,6 @@ function Refused({ message }: { message: string | undefined }) {
 
 export default function Conteo({ loaderData, actionData }: Route.ComponentProps) {
   const { lines } = loaderData;
-  const busy = useNavigation().state !== "idle";
   const review = actionData && "review" in actionData ? actionData.review : undefined;
   const errorOn = (form: string) =>
     actionData && "error" in actionData && actionData.form === form ? actionData.error : undefined;
@@ -143,9 +143,9 @@ export default function Conteo({ loaderData, actionData }: Route.ComponentProps)
               <input key={line.itemId} type="hidden" name={`units.${line.itemId}`} value={line.found} />
             ))}
             <Refused message={errorOn("confirm")} />
-            <button type="submit" disabled={busy} className={primaryButton}>
+            <SubmitButton className={primaryButton}>
               Confirmar conteo
-            </button>
+            </SubmitButton>
           </Form>
           <Link to="/inventario/conteo" className="mt-4 inline-block font-medium underline">
             Volver a contar
@@ -186,9 +186,9 @@ export default function Conteo({ loaderData, actionData }: Route.ComponentProps)
                 <input name="note" autoComplete="off" className={field} />
               </label>
               <Refused message={errorOn("review")} />
-              <button type="submit" disabled={busy} className={primaryButton}>
+              <SubmitButton className={primaryButton}>
                 Revisar conteo
-              </button>
+              </SubmitButton>
             </Form>
           )}
         </section>
