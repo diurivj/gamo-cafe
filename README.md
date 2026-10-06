@@ -29,6 +29,8 @@ app/
     db.ts          Db service over the D1 binding, DbError, statement()
     current-user.ts  CurrentUser service, requireAdmin and the AdminOnly error
     sign-in.ts     codes and sessions: addUser, issueSignInCode, useSignInCode, authenticate, signOut
+    catalog.ts     Items and Categories; activeItemsByCategory is the read for the Sell screen
+    stock.ts       the statements that move Stock (changeStock, adjustmentStatements), stockOf
     command-line.ts  the SQL that scripts/sign-in-code.ts sends to D1
     time.ts        now, today (the only source of "now")
     run.server.ts  run(): the one way a loader or action runs a program
@@ -38,7 +40,11 @@ app/
     day.ts         Instant, Day, dayOf, formatDay, formatTime
     id.ts          newId
     secret.ts      sign-in codes, session tokens, their hash, the cookie name
+    name.ts        tidyName, normalizeName (names compared ignoring case and accents)
+    units.ts       parseUnits (a typed whole number of units)
+  components/  Small React components shared by screens
   session.server.ts  the session middleware, requireUser, the cookie
+  catalog-forms.server.ts  what the Productos routes share: the Admin gate, form parsing, error messages
   routes/      Route modules; resources/ holds routes without UI
     shell.tsx      the signed-in layout and its navigation; screens go inside it
   routes.ts    Route table
@@ -55,6 +61,8 @@ e2e/             Playwright
 - **Time**: an instant is epoch milliseconds; a Day is `YYYY-MM-DD` in `America/Mexico_City`, computed when a record is written and stored with it. Backend code gets them only from `now` and `today` in `~/backend/time`, never from `Date`.
 - **Ids** are opaque strings from `newId()`.
 - **Facts** are inserted once and never updated or deleted. **Projections** are written only in the same `db.batch` as the fact that changes them (spec §7.1).
+- **Stock** is the projection `stock_levels`, and only `~/backend/stock` writes it. An operation that moves Stock puts `changeStock(itemId, units)` (relative, negative to lower) in the same batch as its fact; an Adjustment is `adjustmentStatements({...})`. Both do nothing to an Item that is not stock-tracked. An Item with no row has a Stock of zero.
+- **Names** of Items are stored with `tidyName` and compared with `normalizeName` (`~/shared/name`), kept in a `normalized_name` column.
 - **Rows** read from D1 are decoded with an Effect `Schema`: `db.first` and `db.all` take the schema as their first argument.
 - **Effect**: import only from `"effect"`. Everything under a subpath (`effect/sql`, `effect/http`, …) and some `Schema` exports are unstable (ADR 0006); `tests/effect-stability.test.ts` fails if one is used. No Effect in browser code: `app/shared/` and components must not import it.
 - **Migrations** are named after the ticket that adds them: `NNNN_<slug>.sql`, where `NNNN` is the zero-padded ticket number (`0007_bills.sql`; a second one from the same ticket is `0007b_...`). Create the file by hand. Tables are `STRICT`.
@@ -188,5 +196,6 @@ it("does not show Inventario to a Worker", async () => {
 - A typed failure rejects the test. To assert on one, turn it into a value with `Effect.flip` or `Effect.exit`.
 - Test through operations and routes, not by reaching into tables.
 - `tests/support/auth.ts` has the Users: `seedUser(role, name?)` adds one inside a `runTest` program and `as(user)` runs an operation as them. For the whole Worker, `signedIn(role, name?)` gives a new User with a session and a `fetch(path, init?)` that sends its cookie; `appFetch(path, init?)` is the same request signed out. Both leave redirects unfollowed and set the app's `Origin` on non-GET requests.
+- `tests/support/catalog.ts` has the catalog: `seedCategory(name?, by?)` and `seedItem({ name?, price?, categoryId?, stockTracked?, minimum?, startingStock?, by? })`, both through the real operations, with a default for everything. `by` is the Admin who adds it; without it a new Admin is added.
 - The Worker reads the real clock, so a test that goes through it cannot move time. Rules about time are tested on operations with `runTest`.
-- Browser tests live in `e2e/*.spec.ts` and import `test` and `expect` from `./fixtures`, which serves the built Worker over local HTTPS and gives every test an empty migrated D1. Its `signInAs(role, name?)` fixture adds a User and signs the test's browser in without going through Entrar; `addUser` and `issueCode` are there for tests about signing in.
+- Browser tests live in `e2e/*.spec.ts` and import `test` and `expect` from `./fixtures`, which serves the built Worker over local HTTPS and gives every test an empty migrated D1. Its `signInAs(role, name?)` fixture adds a User and signs the test's browser in without going through Entrar; `addUser` and `issueCode` are there for tests about signing in. `addCategory(name?)` and `addItem({ name?, price?, category?, stockTracked?, minimum?, stock? })` seed the catalog by writing rows directly.

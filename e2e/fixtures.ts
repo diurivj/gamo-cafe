@@ -4,6 +4,8 @@ import { test as base, expect } from "@playwright/test";
 import { createTestHarness, type TestHarness } from "wrangler";
 
 import { codeForUser } from "../app/backend/command-line.ts";
+import { dayOf } from "../app/shared/day.ts";
+import { normalizeName } from "../app/shared/name.ts";
 import { hashSecret, newSessionToken, SESSION_COOKIE } from "../app/shared/secret.ts";
 
 export type Role = "admin" | "worker";
@@ -12,6 +14,33 @@ export interface SeededUser {
   readonly id: string;
   readonly name: string;
   readonly role: Role;
+}
+
+export interface SeededCategory {
+  readonly id: string;
+  readonly name: string;
+}
+
+export interface SeededItem {
+  readonly id: string;
+  readonly name: string;
+  /** Centavos. */
+  readonly price: number;
+  readonly category: SeededCategory;
+}
+
+export interface NewSeededItem {
+  /** Defaults to a name no other seeded Item has. */
+  readonly name?: string;
+  /** Centavos. Defaults to 1000, which is $10.00. */
+  readonly price?: number;
+  /** Defaults to a new Category of its own. */
+  readonly category?: SeededCategory;
+  /** Defaults to true. */
+  readonly stockTracked?: boolean;
+  readonly minimum?: number;
+  /** Starting Stock, recorded as a Restock by this Admin, as Productos does. */
+  readonly stock?: { readonly units: number; readonly by: SeededUser };
 }
 
 type TestFixtures = {
@@ -29,6 +58,16 @@ type TestFixtures = {
   signInAs: (role: Role, name?: string) => Promise<SeededUser>;
   /** A fresh sign-in code for a User, as an Admin or the command line issues it. */
   issueCode: (user: SeededUser) => Promise<string>;
+  /**
+   * Adds a Category after the ones already there:
+   * `const bebidas = await addCategory("Bebidas")`.
+   */
+  addCategory: (name?: string) => Promise<SeededCategory>;
+  /**
+   * Adds an active Item: `await addItem({ name: "Agua", price: 1850, category: bebidas })`.
+   * Every field has a default. Its name must not be an active Item's already.
+   */
+  addItem: (item?: NewSeededItem) => Promise<SeededItem>;
 };
 
 type WorkerFixtures = {
@@ -140,6 +179,46 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       const { code, statements } = await codeForUser(user.id, Date.now());
       for (const sql of statements) await DB.prepare(sql).run();
       return code;
+    });
+  },
+
+  addCategory: async ({ server }, use) => {
+    let serial = 0;
+    await use(async (name = `Categoría ${++serial}`) => {
+      const DB = await database(server);
+      const category = { id: crypto.randomUUID(), name };
+      await DB.prepare(
+        "INSERT INTO categories (id, name, position) SELECT ?, ?, COALESCE(MAX(position), 0) + 1 FROM categories",
+      )
+        .bind(category.id, category.name)
+        .run();
+      return category;
+    });
+  },
+
+  addItem: async ({ server, addCategory }, use) => {
+    let serial = 0;
+    await use(async (item = {}) => {
+      const DB = await database(server);
+      const { name = `Producto ${++serial}`, price = 1000, stockTracked = true, minimum = null, stock } = item;
+      const category = item.category ?? (await addCategory());
+      const id = crypto.randomUUID();
+      await DB.prepare(
+        "INSERT INTO items (id, name, normalized_name, price, category_id, stock_tracked, minimum) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+        .bind(id, name, normalizeName(name), price, category.id, stockTracked ? 1 : 0, minimum)
+        .run();
+      if (stock && stockTracked) {
+        // The fact and its projection, as app/backend/stock.ts writes them.
+        const at = Date.now();
+        await DB.prepare(
+          "INSERT INTO adjustments (id, item_id, reason, units, recorded_by, recorded_at, day) VALUES (?, ?, 'restock', ?, ?, ?, ?)",
+        )
+          .bind(crypto.randomUUID(), id, stock.units, stock.by.id, at, dayOf(at))
+          .run();
+        await DB.prepare("INSERT INTO stock_levels (item_id, units) VALUES (?, ?)").bind(id, stock.units).run();
+      }
+      return { id, name, price, category };
     });
   },
 });
