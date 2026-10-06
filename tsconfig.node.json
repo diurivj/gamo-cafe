@@ -12,6 +12,7 @@
     "app/backend/rebuild.ts",
     "app/backend/seed.ts",
     "app/shared/secret.ts",
+    "app/shared/sha256.ts",
     "app/shared/day.ts",
     "app/shared/normalize-name.ts"
   ],

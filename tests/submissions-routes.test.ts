@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { getBill, listCustomerHandovers, listCustomerOpenBills, recordSelection } from "~/backend/bills";
+import { getBill, listCustomerHandovers, listCustomerOpenBills, listOpenBills, recordSelection } from "~/backend/bills";
 import { listCounts } from "~/backend/counts";
 import { listRecentAdjustments } from "~/backend/inventory";
 import { stockOf } from "~/backend/stock";
+import { paymentMessages } from "~/shared/payment-messages";
 
 import { as, landing, signedIn, type SignedIn } from "./support/auth";
 import { seedItem } from "./support/catalog";
@@ -33,6 +34,154 @@ async function answer(who: SignedIn, response: Response) {
 }
 
 const billIdIn = (html: string) => /data-bill-id="([^"]+)"/.exec(html)![1]!;
+
+describe("a used key with changed content", () => {
+  it("records the changed sale a restored Vender document sends, not the earlier answer", async () => {
+    const beto = await signedIn("worker", "Beto");
+    const ana = await signedIn("admin", "Ana");
+    const cafe = await runTest(seedItem({ price: 2500, startingStock: 10, by: ana.user }));
+    const key = keyIn(await (await beto.fetch("/")).text());
+    const sale = {
+      intent: "dejar-abierta",
+      selection: JSON.stringify([{ itemId: cafe.id, quantity: 2 }]),
+      note: "primera",
+      submissionKey: key,
+    };
+
+    const first = await answer(beto, await post(beto, "/?index", sale));
+    // The browser's Back shows the recorded document again: it still carries
+    // its used key, and what it sends now is another selection.
+    const changed = await answer(
+      beto,
+      await post(beto, "/?index", {
+        ...sale,
+        selection: JSON.stringify([{ itemId: cafe.id, quantity: 3 }]),
+        note: "segunda",
+      }),
+    );
+
+    expect(first.message).toBe("Se dejó abierta una cuenta por $50.00.");
+    expect(changed.message).toBe("Se dejó abierta una cuenta por $75.00.");
+    expect(billIdIn(changed.html)).not.toBe(billIdIn(first.html));
+    expect(await runTest(stockOf(cafe.id).pipe(as(ana.user)))).toBe(5);
+    expect((await runTest(listOpenBills().pipe(as(ana.user)))).bills).toHaveLength(2);
+
+    // The unchanged form sent twice is still one sale, answered alike.
+    const repeat = await answer(beto, await post(beto, "/?index", sale));
+    expect(repeat.message).toBe(first.message);
+    expect(billIdIn(repeat.html)).toBe(billIdIn(first.html));
+    expect(await runTest(stockOf(cafe.id).pipe(as(ana.user)))).toBe(5);
+  });
+
+  it("refuses a changed Cuenta Payment visibly, and answers the unchanged form alike", async () => {
+    const ana = await signedIn("admin", "Ana");
+    const cafe = await runTest(seedItem({ price: 2500, by: ana.user }));
+    const bill = await runTest(recordSelection({ items: [{ itemId: cafe.id, quantity: 4 }] }).pipe(as(ana.user)));
+    const path = `/cuentas/${bill.id}`;
+    const payment = {
+      intent: "pagar",
+      amount: "30.00",
+      method: "cash",
+      revision: String(bill.revision),
+      submissionKey: keyIn(await (await ana.fetch(path)).text()),
+    };
+
+    const first = await answer(ana, await post(ana, path, payment));
+    expect(first.message).toBe("Abono de $30.00 registrado. Debe $70.00.");
+
+    // The restored document, with another amount: the first Payment moved the
+    // Bill, so this is refused visibly, not answered as the first.
+    const changed = await post(ana, path, { ...payment, amount: "20.00" });
+    expect(changed.status).toBe(400);
+    expect(await changed.text()).toContain(paymentMessages.BillChanged);
+    expect((await runTest(getBill(bill.id).pipe(as(ana.user)))).payments).toHaveLength(1);
+
+    const repeat = await answer(ana, await post(ana, path, payment));
+    expect(repeat.message).toBe(first.message);
+    expect((await runTest(getBill(bill.id).pipe(as(ana.user)))).payments).toHaveLength(1);
+  });
+
+  it("refuses a changed Abonar visibly, and answers the unchanged form alike", async () => {
+    const ana = await signedIn("admin", "Ana");
+    const cafe = await runTest(seedItem({ price: 2500, by: ana.user }));
+    const lupita = await savedCustomer("Lupita key cambiada", { by: ana.user });
+    const bill = await runTest(
+      recordSelection({ items: [{ itemId: cafe.id, quantity: 4 }], customerId: lupita.id }).pipe(as(ana.user)),
+    );
+    const path = `/clientes/${lupita.id}`;
+    const handover = {
+      intent: "abonar",
+      method: "cash",
+      amount: "40.00",
+      bill: `${bill.id}:${bill.revision}`,
+      submissionKey: keyIn(await (await ana.fetch(path)).text()),
+    };
+
+    const first = await answer(ana, await post(ana, path, handover));
+    expect(first.message).toBe("Abono de $40.00 registrado.");
+
+    const changed = await post(ana, path, { ...handover, amount: "30.00" });
+    expect(changed.status).toBe(400);
+    expect(await changed.text()).toContain("Las cuentas del cliente cambiaron");
+    expect(await runTest(listCustomerHandovers(lupita.id).pipe(as(ana.user)))).toHaveLength(1);
+
+    const repeat = await answer(ana, await post(ana, path, handover));
+    expect(repeat.message).toBe(first.message);
+    expect(await runTest(listCustomerHandovers(lupita.id).pipe(as(ana.user)))).toHaveLength(1);
+  });
+
+  it("records a changed Adjustment sent under a used key, and answers the first content alike", async () => {
+    const ana = await signedIn("admin", "Ana");
+    const cafe = await runTest(seedItem({ by: ana.user }));
+    const restock = {
+      intent: "record-adjustment",
+      itemId: cafe.id,
+      reason: "restock",
+      units: "12",
+      submissionKey: keyIn(await (await ana.fetch("/inventario")).text()),
+    };
+
+    const first = await post(ana, "/inventario", restock);
+    const changed = await post(ana, "/inventario", { ...restock, units: "5" });
+
+    expect([first.status, changed.status]).toEqual([302, 302]);
+    expect(await runTest(stockOf(cafe.id).pipe(as(ana.user)))).toBe(17);
+    const recorded = (await runTest(listRecentAdjustments().pipe(as(ana.user)))).filter(
+      (row) => row.itemId === cafe.id,
+    );
+    expect(recorded.map((row) => row.units).sort((a, b) => a - b)).toEqual([5, 12]);
+
+    const repeat = await post(ana, "/inventario", restock);
+    expect(repeat.status).toBe(302);
+    expect(await runTest(stockOf(cafe.id).pipe(as(ana.user)))).toBe(17);
+  });
+
+  it("records a changed Count sent under a used key, and answers the first content alike", async () => {
+    const ana = await signedIn("admin", "Ana");
+    const cafe = await runTest(seedItem({ startingStock: 10, by: ana.user }));
+    const counted = { [`units.${cafe.id}`]: "7", note: "" };
+    // The review step renders the form that confirms, with its key.
+    const review = await post(ana, "/inventario/conteo", { intent: "review", ...counted });
+    const confirm = { intent: "confirm", ...counted, submissionKey: keyIn(await review.text()) };
+
+    const first = await post(ana, "/inventario/conteo", confirm);
+    const changed = await post(ana, "/inventario/conteo", {
+      ...confirm,
+      [`units.${cafe.id}`]: "9",
+    });
+
+    expect([first.status, changed.status]).toEqual([302, 302]);
+    const counts = (await runTest(listCounts().pipe(as(ana.user)))).counts.filter((count) =>
+      count.lines.some((line) => line.itemId === cafe.id),
+    );
+    expect(counts).toHaveLength(2);
+    expect(await runTest(stockOf(cafe.id).pipe(as(ana.user)))).toBe(9);
+
+    const repeat = await post(ana, "/inventario/conteo", confirm);
+    expect(repeat.status).toBe(302);
+    expect(await runTest(stockOf(cafe.id).pipe(as(ana.user)))).toBe(9);
+  });
+});
 
 describe("Vender", () => {
   it("records a Cobrar sent twice once, answers both alike, and gives the next form a new key", async () => {

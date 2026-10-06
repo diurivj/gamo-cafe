@@ -391,13 +391,25 @@ export const recordSelection = Effect.fn("recordSelection")(function* (input: Ne
   const db = yield* Db;
   const user = yield* CurrentUser;
 
-  const submission = submissionOf("selection", user.id, input.submissionKey);
-  const earlier = yield* recordedAnswer(SummaryRow, submission);
-  if (earlier) return summary(earlier);
-
   const customerId = input.customerId || null;
   const billId = input.billId || null;
   const note = trimToNull(input.note);
+
+  // The key identifies the rendered form and what it carried: one Line per
+  // distinct Item, with the Customer, the note, the target Bill and the
+  // Payment of Cobrar. A form sent from a restored document with the same key
+  // but a changed selection is not answered as a repeat (spec §3.4,
+  // `./submissions`).
+  const chosen = mergeSelection(input.items);
+  const submission = yield* submissionOf("selection", user.id, input.submissionKey, [
+    chosen.map((item) => [item.itemId, item.quantity]),
+    customerId,
+    note,
+    billId,
+    input.payment ? [input.payment.method, input.payment.amount ?? null] : null,
+  ]);
+  const earlier = yield* recordedAnswer(SummaryRow, submission);
+  if (earlier) return summary(earlier);
 
   if (input.items.length === 0) return yield* new EmptySelection();
   for (const { itemId, quantity } of input.items) {
@@ -410,7 +422,6 @@ export const recordSelection = Effect.fn("recordSelection")(function* (input: Ne
   // cannot disagree.
   const at = yield* now;
   const day = dayOf(at);
-  const chosen = mergeSelection(input.items);
 
   // Where the Lines go: a given Open Bill, the Customer's Open Bill of today,
   // or a new Bill.
@@ -820,7 +831,12 @@ export const takePayment = Effect.fn("takePayment")(function* (input: NewPayment
   const user = yield* CurrentUser;
   const billId = input.billId;
 
-  const submission = submissionOf("payment", user.id, input.submissionKey);
+  const submission = yield* submissionOf("payment", user.id, input.submissionKey, [
+    billId,
+    input.expectedRevision,
+    input.amount ?? null,
+    input.method,
+  ]);
   const earlier = yield* recordedAnswer(PaymentAnswer, submission);
   if (earlier) return earlier;
 
@@ -945,7 +961,12 @@ export const takeCustomerPayment = Effect.fn("takeCustomerPayment")(function* (
   const db = yield* Db;
   const user = yield* CurrentUser;
 
-  const submission = submissionOf("handover", user.id, input.submissionKey);
+  const submission = yield* submissionOf("handover", user.id, input.submissionKey, [
+    input.customerId,
+    input.amount ?? null,
+    input.method,
+    input.expectedRevisions.map((bill) => [bill.billId, bill.revision]),
+  ]);
   const earlier = yield* recordedAnswer(HandoverAnswer, submission);
   if (earlier) return earlier;
 

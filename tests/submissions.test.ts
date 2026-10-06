@@ -11,6 +11,7 @@ import {
 } from "~/backend/bills";
 import { retireItem } from "~/backend/catalog";
 import { listCounts, recordCount } from "~/backend/counts";
+import { Db } from "~/backend/db";
 import { listRecentAdjustments, recordAdjustment } from "~/backend/inventory";
 import { stockOf } from "~/backend/stock";
 import { newId } from "~/shared/id";
@@ -22,7 +23,8 @@ import { advanceClock, runTest, setClock } from "./support/effect";
 
 // One submission per rendered form (spec §3.4): a form that creates a Bill, a
 // Payment, an Adjustment or a Count carries a key, and the operation records
-// one submission per key. The routes are tested in submissions-routes.test.ts.
+// one submission per key and content. The routes are tested in
+// submissions-routes.test.ts.
 
 describe("recordSelection with a submission key", () => {
   it("records a sale sent twice once, and answers the second as the first", () =>
@@ -92,6 +94,41 @@ describe("recordSelection with a submission key", () => {
 
         expect(new Set([first.id, next.id, betos.id]).size).toBe(3);
         expect(yield* stockOf(cafe.id).pipe(as(ana))).toBe(7);
+      }),
+    ));
+
+  it("records a changed form sent under a used key, and still answers the first content as its repeat", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const cafe = yield* seedItem({ price: 2500, startingStock: 10, by: ana });
+        const key = newId();
+
+        const first = yield* recordSelection({
+          items: [{ itemId: cafe.id, quantity: 2 }],
+          note: "primera",
+          submissionKey: key,
+        }).pipe(as(ana));
+        // A document restored by the browser's Back still carries the used key;
+        // what it sends now is a different selection, and a different form.
+        const changed = yield* recordSelection({
+          items: [{ itemId: cafe.id, quantity: 3 }],
+          note: "segunda",
+          submissionKey: key,
+        }).pipe(as(ana));
+
+        expect(changed.id).not.toBe(first.id);
+        expect(changed).toMatchObject({ total: 7500, note: "segunda" });
+        expect(yield* stockOf(cafe.id).pipe(as(ana))).toBe(5);
+
+        // The content the key first recorded is still its repeat.
+        const repeat = yield* recordSelection({
+          items: [{ itemId: cafe.id, quantity: 2 }],
+          note: "primera",
+          submissionKey: key,
+        }).pipe(as(ana));
+        expect(repeat).toEqual(first);
+        expect(yield* stockOf(cafe.id).pipe(as(ana))).toBe(5);
       }),
     ));
 
@@ -173,9 +210,69 @@ describe("takePayment with a submission key", () => {
         expect((yield* getBill(bill.id).pipe(as(ana))).payments).toHaveLength(1);
       }),
     ));
+  it("refuses a changed Payment sent under a used key visibly, not as its repeat", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const cafe = yield* seedItem({ price: 2500, by: ana });
+        const bill = yield* recordSelection({ items: [{ itemId: cafe.id, quantity: 4 }] }).pipe(as(ana));
+        const payment = {
+          billId: bill.id,
+          amount: 3000,
+          method: "cash" as const,
+          expectedRevision: bill.revision,
+          submissionKey: newId(),
+        };
+
+        const first = yield* takePayment(payment).pipe(as(ana));
+        expect(first).toMatchObject({ amount: 3000, paid: false });
+
+        // The same restored document, with another amount: the Payment it
+        // would record no longer matches the Bill's revision, and says so —
+        // it is not answered with the first Payment's words.
+        const changed = yield* Effect.flip(takePayment({ ...payment, amount: 2000 }).pipe(as(ana)));
+        expect(changed._tag).toBe("BillChanged");
+        expect((yield* getBill(bill.id).pipe(as(ana))).payments).toHaveLength(1);
+
+        // The content the key recorded is still its repeat, revision and all.
+        expect(yield* takePayment(payment).pipe(as(ana))).toEqual(first);
+        expect((yield* getBill(bill.id).pipe(as(ana))).payments).toHaveLength(1);
+      }),
+    ));
 });
 
 describe("takeCustomerPayment with a submission key", () => {
+  it("refuses a changed Abonar sent under a used key visibly, not as its repeat", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const cafe = yield* seedItem({ price: 2500, by: ana });
+        const lupita = yield* seedCustomer("Lupita Abona Cambiado", { by: ana });
+        yield* recordSelection({ items: [{ itemId: cafe.id, quantity: 2 }], customerId: lupita.id }).pipe(as(ana));
+        const shown = yield* listCustomerOpenBills(lupita.id).pipe(as(ana));
+        const handover = {
+          customerId: lupita.id,
+          amount: 3000,
+          method: "cash" as const,
+          expectedRevisions: shown.map((bill) => ({ billId: bill.id, revision: bill.revision })),
+          submissionKey: newId(),
+        };
+
+        const first = yield* takeCustomerPayment(handover).pipe(as(ana));
+        expect(first.amount).toBe(3000);
+
+        // The restored document, with another amount: the Bills moved with the
+        // first Abonar, so the changed one is refused visibly, not answered
+        // with the first Abonar's words.
+        const changed = yield* Effect.flip(takeCustomerPayment({ ...handover, amount: 2000 }).pipe(as(ana)));
+        expect(changed._tag).toBe("CustomerBillsChanged");
+        expect(yield* listCustomerHandovers(lupita.id).pipe(as(ana))).toHaveLength(1);
+
+        expect(yield* takeCustomerPayment(handover).pipe(as(ana))).toEqual(first);
+        expect(yield* listCustomerHandovers(lupita.id).pipe(as(ana))).toHaveLength(1);
+      }),
+    ));
+
   it("records an Abonar sent twice once, alone or at the same moment, and answers both alike", () =>
     runTest(
       Effect.gen(function* () {
@@ -238,6 +335,27 @@ describe("recordAdjustment with a submission key", () => {
         expect(yield* stockOf(cafe.id).pipe(as(ana))).toBe(24);
       }),
     ));
+
+  it("records a changed Adjustment sent under a used key, and still answers the first content as its repeat", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const cafe = yield* seedItem({ by: ana });
+        const key = newId();
+        const restock = { itemId: cafe.id, reason: "restock" as const, units: 12, submissionKey: key };
+
+        const first = yield* recordAdjustment(restock).pipe(as(ana));
+        const changed = yield* recordAdjustment({ ...restock, units: 5 }).pipe(as(ana));
+
+        expect(changed.id).not.toBe(first.id);
+        expect(yield* stockOf(cafe.id).pipe(as(ana))).toBe(17);
+        const recorded = (yield* listRecentAdjustments().pipe(as(ana))).filter((row) => row.itemId === cafe.id);
+        expect(recorded.map((row) => row.units).sort((a, b) => a - b)).toEqual([5, 12]);
+
+        expect(yield* recordAdjustment(restock).pipe(as(ana))).toEqual(first);
+        expect(yield* stockOf(cafe.id).pipe(as(ana))).toBe(17);
+      }),
+    ));
 });
 
 describe("recordCount with a submission key", () => {
@@ -262,6 +380,63 @@ describe("recordCount with a submission key", () => {
         );
         expect(counts).toMatchObject([{ id: first.id, lines: [{ expected: 10, found: 7, difference: -3 }] }]);
         expect(yield* stockOf(cafe.id).pipe(as(ana))).toBe(7);
+      }),
+    ));
+
+  it("records a changed Count sent under a used key, and still answers the first content as its repeat", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const cafe = yield* seedItem({ startingStock: 10, by: ana });
+        const key = newId();
+        const count = { lines: [{ itemId: cafe.id, found: 7 }], note: "Cierre", submissionKey: key };
+
+        const first = yield* recordCount(count).pipe(as(ana));
+        const changed = yield* recordCount({ ...count, lines: [{ itemId: cafe.id, found: 9 }] }).pipe(as(ana));
+
+        expect(changed.id).not.toBe(first.id);
+        const counts = (yield* listCounts().pipe(as(ana))).counts.filter((recorded) =>
+          recorded.lines.some((line) => line.itemId === cafe.id),
+        );
+        // The changed Count expected the 7 the first one left.
+        expect(counts.map((recorded) => recorded.id).sort()).toEqual([first.id, changed.id].sort());
+        expect(counts.find((recorded) => recorded.id === changed.id)).toMatchObject({
+          lines: [{ expected: 7, found: 9, difference: 2 }],
+        });
+        expect(yield* stockOf(cafe.id).pipe(as(ana))).toBe(9);
+
+        expect(yield* recordCount(count).pipe(as(ana))).toEqual(first);
+        expect(yield* stockOf(cafe.id).pipe(as(ana))).toBe(9);
+      }),
+    ));
+});
+
+describe("a submission recorded before the digest existed", () => {
+  it("does not answer a form with its key: the form is recorded as new", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const cafe = yield* seedItem({ price: 2500, startingStock: 10, by: ana });
+        const key = newId();
+        // A row the migration of ticket 32 copies with an empty digest, which
+        // no real digest can be (every SHA-256 is 64 hex characters). It is
+        // planted by reaching into the table on purpose: no operation can
+        // make a pre-migration row.
+        const db = yield* Db;
+        yield* db.run(
+          `INSERT INTO submissions (submitted_by, form, key, digest, result, recorded_at)
+           VALUES (?, 'selection', ?, '', '{}', 0)`,
+          ana.id,
+          key,
+        );
+
+        const recorded = yield* recordSelection({
+          items: [{ itemId: cafe.id, quantity: 1 }],
+          submissionKey: key,
+        }).pipe(as(ana));
+
+        expect(recorded.total).toBe(2500);
+        expect(yield* stockOf(cafe.id).pipe(as(ana))).toBe(9);
       }),
     ));
 });

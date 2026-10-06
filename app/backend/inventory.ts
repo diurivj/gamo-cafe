@@ -112,7 +112,12 @@ export const recordAdjustment = Effect.fn("recordAdjustment")(function* (input: 
   if (!Number.isSafeInteger(input.units) || input.units < 1) return yield* new InvalidAdjustmentUnits();
   const note = trimToNull(input.note);
 
-  const submission = submissionOf("adjustment", admin.id, input.submissionKey);
+  const submission = yield* submissionOf("adjustment", admin.id, input.submissionKey, [
+    input.itemId,
+    input.reason,
+    input.units,
+    note,
+  ]);
   const earlier = yield* recordedAnswer(AdjustmentAnswer, submission);
   if (earlier) return earlier;
 

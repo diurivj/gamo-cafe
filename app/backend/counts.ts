@@ -185,7 +185,10 @@ export const recordCount = Effect.fn("recordCount")(function* (input: NewCountIn
   const lines = yield* tidyCounted(input.lines);
   const note = trimToNull(input.note);
 
-  const submission = submissionOf("count", admin.id, input.submissionKey);
+  const submission = yield* submissionOf("count", admin.id, input.submissionKey, [
+    lines.map((line) => [line.itemId, line.found]),
+    note,
+  ]);
   const earlier = yield* recordedAnswer(CountAnswer, submission);
   if (earlier) return earlier;
 

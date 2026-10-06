@@ -1,10 +1,12 @@
 /**
  * Sign-in codes and session tokens (spec §3.5), made and hashed with Web
- * Crypto. Plain functions with no imports, so the Worker, the command-line
- * script and the browser tests all make and hash them the same way.
+ * Crypto. Plain functions, so the Worker, the command-line script and the
+ * browser tests all make and hash them the same way.
  *
  * Only `hashSecret(...)` of a code or a token is ever stored.
  */
+
+import { sha256Hex } from "./sha256";
 
 /**
  * The cookie that holds the session token. `__Host-`: browsers accept it only
@@ -54,6 +56,5 @@ export function newSessionToken(): string {
 
 /** The SHA-256 of a code or a token, in hex: what the database stores. */
 export async function hashSecret(secret: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return sha256Hex(secret);
 }

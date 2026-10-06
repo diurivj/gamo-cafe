@@ -58,6 +58,7 @@ app/
     payment-messages.ts  what a Payment's rule violations say on screen
     day.ts         Instant, Day, dayOf, formatDay, formatTime
     id.ts          newId
+    sha256.ts      the SHA-256 of a string, in hex
     secret.ts      sign-in codes, session tokens, their hash, the cookie name
     normalize-name.ts  normalizeName: a name with case and accents ignored
     units.ts       parseUnits (a typed whole number of units)
@@ -181,7 +182,7 @@ export async function action({ context, params, request }: Route.ActionArgs) {
   - **A harmless, reversible change** (retiring a Customer, a User's role or active state): its result, at once. The form is a `<fetcher.Form>` with `<SubmitButton fetcher={fetcher}>`, and the page renders what `fetcher.formData` asks for in place of what the loader gave; when the server refuses, `fetcher.data.error` is shown and the form data is gone, so the page is back to what the server has (`UserRow` in `app/routes/users.tsx`). The words that say it was recorded still come with the redirect.
   - **Vender** is its own case (`app/routes/home.tsx`): each sale travels in a fetcher of its own, the selection empties at the tap and the sale is listed as being recorded, so the next one can start. Its two buttons are the app's only hand-written submit buttons for that reason: `<SubmitButton>` would disable them until the answer, and a sale already being recorded must not stop the next one from starting. A refused sale puts its selection back.
   No client-side store: the pending state is the router's (`useNavigation`, fetchers).
-- A form that creates a Bill, a Payment, an Adjustment or a Count carries a key, so a double tap or a retry on a bad connection records nothing twice (spec §3.4). The loader of the page makes it (`submissionKey: newId()`), the form sends it in a hidden `submissionKey` field, and the action hands it to the operation, which records one submission per key and answers a repeat with what the first one answered, so the action builds the same redirect and the same message. The loader runs again after every recorded form, which is what gives the next form a new key: a route that skips that revalidation would send the old key again, and the next sale would be taken for a repeat. Vender sends the next sale before that loader has run, so it makes the key of every form after the first in the browser (`form.key` in `app/routes/home.tsx`). Conteo's confirming form is rendered by the review action, which makes its key. See [One submission per form](#one-submission-per-form).
+- A form that creates a Bill, a Payment, an Adjustment or a Count carries a key, so a double tap or a retry on a bad connection records nothing twice (spec §3.4). The loader of the page makes it (`submissionKey: newId()`), the form sends it in a hidden `submissionKey` field, and the action hands it to the operation, which records one submission per key and content and answers a repeat with what the first one answered, so the action builds the same redirect and the same message. A changed form sent with a used key (a document the browser restored) is not a repeat: it is recorded, or refused by a rule visibly. The loader runs again after every recorded form, which is what gives the next form a new key: a route that skips that revalidation would send the old key again, and the next sale would be taken for a repeat. Vender sends the next sale before that loader has run, so it makes the key of every form after the first in the browser (`form.key` in `app/routes/home.tsx`). Conteo's confirming form is rendered by the review action, which makes its key. See [One submission per form](#one-submission-per-form).
 - After a recorded form the browser's router runs every loader of the page again, and that is what a loader about Bills, Payments or Stock needs: leave it alone. Two loaders are about neither and export `shouldRevalidate` to be kept instead (spec §3.4). The shell's (`app/routes/shell.tsx`) runs again only after a form on Usuarios; when an Admin changes a User's role from another phone, `shellMiddleware` (`~/shell.server`) answers that User's next navigation with a reload of the page. Vender's Items are the loader of a layout around it (`app/routes/sell-items.tsx`), read when Vender is opened and after a refused form, not after a recorded one. A loader that takes a flash must not be skipped, or its message stays on screen. Nothing is cached anywhere else: `workers/app.ts` answers everything with `Cache-Control: no-store`, and `tests/reuse.test.ts` holds that and the D1 statements a sale costs.
 - The third argument receives every typed error except `DbError` and returns what the route answers with, or throws a `redirect(...)`. It is required exactly when the program has such errors, and a `switch` on `error._tag` with no `default` makes the compiler report a missing case.
 - `DbError` is logged and becomes a 500 for the error boundary. A bug in the program is rethrown.
@@ -269,10 +270,12 @@ A D1 batch cannot branch, so the rules are SQL conditions: `paid + amount <= tot
 
 ## One submission per form
 
-`~/backend/submissions.ts` is how an operation records one submission per key. Five operations use it: `recordSelection`, `takePayment`, `takeCustomerPayment`, `recordAdjustment` and `recordCount`, each with an optional `submissionKey` in its input.
+`~/backend/submissions.ts` is how an operation records one submission per key and content. Five operations use it: `recordSelection`, `takePayment`, `takeCustomerPayment`, `recordAdjustment` and `recordCount`, each with an optional `submissionKey` in its input.
 
 ```ts
-const submission = submissionOf("payment", user.id, input.submissionKey);
+const submission = yield* submissionOf("payment", user.id, input.submissionKey, [
+  input.billId, input.expectedRevision, input.amount ?? null, input.method,
+]);
 const earlier = yield* recordedAnswer(PaymentAnswer, submission);
 if (earlier) return earlier; // a repeat: answered as the first, before any rule is checked
 
@@ -287,7 +290,9 @@ if (recorded.changes === 0) {
 }
 ```
 
-The key is a row of `submissions`, written last in the batch of what the form records, with the operation's answer as JSON. Every other statement of the batch carries `notYetRecorded`, and the table's primary key (User, kind of form, key) is the rule underneath. The repeat is looked for first because the first submission moved what the rules read: a second `takePayment` would otherwise be told the Bill changed. A refused operation writes no key, so the corrected form can be sent again. An input without a key gets one of its own and is recorded like any other. A `submissions` row is a fact about the submission, not a projection: the rebuild neither reads nor writes it.
+The key is a row of `submissions`, written last in the batch of what the form records, with the operation's answer as JSON and the digest of what the form carried (`sha256Hex` of the operation's fields, canonicalized in a fixed order — the fourth argument of `submissionOf`). Every other statement of the batch carries `notYetRecorded`, and the table's primary key (User, kind of form, key, digest) is the rule underneath. The repeat is looked for first because the first submission moved what the rules read: a second `takePayment` would otherwise be told the Bill changed. A refused operation writes no key, so the corrected form can be sent again. An input without a key gets one of its own and is recorded like any other. A `submissions` row is a fact about the submission, not a projection: the rebuild neither reads nor writes it.
+
+The digest is what keeps the key from answering a form it never saw. A document the browser restored (Chrome's bfcache holds a `no-store` page) still carries the key it was rendered with, and what is sent from it may be a changed form: the same key with different content finds no stored answer and is recorded, or refused by a rule visibly (a changed Payment against a moved Bill says the Bill changed). The same key with the same content — a double tap, a retry — is still the repeat. Rows written before migration `0032_submission_digest.sql` have an empty digest and match no content, so a form sent with one of those keys is recorded as if its key were new.
 
 ## Abonar across a Customer's Bills
 
