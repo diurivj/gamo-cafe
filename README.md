@@ -16,6 +16,8 @@ React Router 8 (framework mode) on Cloudflare Workers, D1 with hand-written SQL,
 | `npm run verify` | `typecheck` and `test`. Run before every commit. |
 | `npm run db:migrate` | Applies `migrations/` to the local D1. |
 | `npm run db:migrate:production` | Applies `migrations/` to the production D1. |
+| `npm run projections:verify` | Reports every projection that disagrees with the facts. Exits 1 when there are differences. `:production` acts on the production D1. |
+| `npm run projections:rebuild` | Rewrites every projection from the facts. `:production` acts on the production D1. |
 | `npm run deploy:production` | Builds for production and deploys with Wrangler. |
 | `npm run sign-in-code -- --new-admin "Nombre"` | Creates an Admin in the local D1 and prints a one-time sign-in code. `--user "Nombre"` issues a code for an existing User; `--production` acts on the production D1. |
 
@@ -35,11 +37,12 @@ app/
     inventory.ts   Inventario: Stock and Minimums, recording and cancelling Adjustments
     counts.ts      Conteo: what the entry and review steps show, recording a Count, and the Diferencias read
     command-line.ts  the SQL that scripts/sign-in-code.ts sends to D1
+    rebuild.ts     the SQL that scripts/projections.ts sends to D1: recompute every projection from the facts
     time.ts        now, today (the only source of "now")
     run.server.ts  run(): the one way a loader or action runs a program
     health.ts      the reference operation
     customers.ts   Customers: addCustomer, searchCustomers, getCustomer, editCustomer, retireCustomer, restoreCustomer
-    bills.ts       Bills, Lines and Payments: recordSelection, takePayment and takeCustomerPayment (one batch each), getBill (the §4.1 gate), listOpenBills, listCustomerOpenBills, listCustomerHandovers
+    bills.ts       Bills, Lines and Payments: recordSelection, takePayment and takeCustomerPayment (one batch each), getBill (the §4.1 gate), listOpenBills, listBills and listCustomerPastBills (paged), listCustomerOpenBills, listCustomerHandovers
     corrections.ts the corrections of Cuenta: removeLine, removePayment, voidBill (one batch each)
     payments.ts    the statements a Payment writes (paymentStatements and handoverStatements) and its errors
     day.ts         the figures of a Day: a User's own records (Mi día), every User's over a range and the Items sold (Día reuses them)
@@ -53,6 +56,7 @@ app/
     secret.ts      sign-in codes, session tokens, their hash, the cookie name
     normalize-name.ts  normalizeName: a name with case and accents ignored
     units.ts       parseUnits (a typed whole number of units)
+    page.ts        pageFrom and pageUrl: a list's page in the URL
     discrepancy.ts discrepancyText: Faltante, Sobrante, or Sin diferencia
   components/  React components used by more than one screen
     customer-picker.tsx  CustomerPicker, the form field that chooses a Customer
@@ -76,7 +80,7 @@ e2e/             Playwright
 - **Money** is integer centavos. Add and subtract with integer `+` and `-`; turn it into text with `formatMoney` and read typed text with `parsePesos`. Never divide or multiply an amount by 100.
 - **Time**: an instant is epoch milliseconds; a Day is `YYYY-MM-DD` in `America/Mexico_City`, computed when a record is written and stored with it. Backend code gets them only from `now` and `today` in `~/backend/time`, never from `Date`.
 - **Ids** are opaque strings from `newId()`.
-- **Facts** are inserted once and never updated or deleted. **Projections** are written only in the same `db.batch` as the fact that changes them (spec §7.1).
+- **Facts** are inserted once and never updated or deleted. **Projections** are written only in the same `db.batch` as the fact that changes them (spec §7.1). The command below recomputes them all from the facts at any time.
 - **Stock** is the projection `stock_levels`, and only `~/backend/stock` writes it. An operation that moves Stock puts `changeStock(itemId, units)` (relative, negative to lower) in the same batch as its fact; an Adjustment is `adjustmentStatements({...})`. Both do nothing to an Item that is not stock-tracked. An Item with no row has a Stock of zero.
 - **Names** of Items are stored with `tidyName` and compared with `normalizeName` (`~/shared/name`), kept in a `normalized_name` column.
 - **Rows** read from D1 are decoded with an Effect `Schema`: `db.first` and `db.all` take the schema as their first argument.
@@ -162,6 +166,16 @@ export async function action({ context, params, request }: Route.ActionArgs) {
 - A route answered without a session is an exception to spec §10.1. There are two, `/entrar` and `/healthz`. Another one has to be added to `PUBLIC_PATHS` in `app/session.server.ts` and, with its reason, to the exemptions in `tests/route-guard.test.ts`, which requests every route of the app signed out.
 - A non-GET request must carry the app's own `Origin`, or the Worker answers 403 before any route runs. Browsers do this by themselves; a script or a test has to set the header.
 
+## Rebuilding the projections
+
+`npm run projections:verify` recomputes every projection from the facts and reports each difference; `npm run projections:rebuild` rewrites them. Add `:production` to act on the production D1 (take an export first, as before any production migration). Every column either is a fact or comes back:
+
+- a Bill's `total` is its unremoved Lines, `paid` its unremoved Payments, and its `state` follows from those two or from its void. Its current Customer and note are the last `bill_edits` fact of each field; a field never edited is what the Bill was created for — the facts `opened_customer_id` and `opened_note`, which `recordSelection` writes (migration `0019_bills_created_for.sql`). `revision` is a counter, not derived, and is left alone.
+- an Item's Stock replays the facts in time order: its Lines that moved Stock (`lines.moved_stock`) down, their removals and their Bills' voids up (once per Line), Adjustments by their signed units, cancelled Adjustments reversed, and Counts as resets to the units found. `last_counted_at` is the Item's newest Count. An Item with no such fact has a Stock of zero, and a Stock row no fact justifies is removed.
+- switching stock tracking on or off changes no record (spec §5.1), and the facts say what did move Stock: `moved_stock` on each Line, and the Adjustment's own record. Cancelling an Adjustment therefore reverses it even if tracking was switched off meanwhile — the same rule as the units of a removed Line. Without that rule a cancellation recorded while tracking was off moved nothing and no fact recorded it, so no rebuild could reproduce the live number.
+
+Every operation reads the clock, so events sort by their instant; the facts of one batch share it, and their kind and rowid break the tie. The tests in `tests/rebuild.test.ts` and `tests/rebuild-property.test.ts` send these statements to a real D1 whose state random sequences of the operations built, and check that verify finds nothing, a hand-corrupted projection is detected, and the rebuild restores it.
+
 ## Signing in
 
 There are no passwords (ADR 0004). A User types a one-time code on **Entrar**: 8 characters, valid once, for 10 minutes. That phone then holds a session cookie, which lasts until 60 days pass without use.
@@ -215,6 +229,28 @@ All of it is recorded or none of it: the batch is two multi-row statements (`han
 Removing a Line or a Payment and voiding a Bill are spec §5.7, in `~/backend/corrections.ts`. Each is one batch: the fact (`line_removals`, `payment_removals`, `bill_voids`), the Bill's projections, and Stock. Only the fact's `INSERT ... SELECT` carries the rules (the Bill's revision included); the other statements join the fact by its id, so a refused correction writes nothing at all. The operation classifies a refusal again from the rows, and `correctionMessages` in `~/shared/correction-messages.ts` holds the Spanish for each tag.
 
 A Worker may remove a Line while the Bill has no Payment, which is `paid = 0`; with a Payment only an Admin may, with a reason. Removing a Payment lowers `paid`, so "has a Payment" stays meaningful for ticket 10, and a Bill whose total would fall below `paid` refuses the removal. Stock comes back from the Line's own `moved_stock` fact, not from the Item's flag today, once per Line: a Line already removed is not returned again when its Bill is Voided, and rebuilding Stock from the facts (ticket 19) uses the same rule. A Voided Bill keeps its Lines, Payments and totals on record and refuses every later correction.
+
+## Cuentas: every Bill, one page at a time
+
+**Cuentas** (`app/routes/cuentas.tsx`) is the Admin screen listing every Bill
+with its state, filtered by Day, state or Customer; a Customer's page shows
+their past Bills — Pagada or Cancelada — to an Admin. Both reads are
+`listBills` in `~/backend/bills.ts`; `listCustomerPastBills` is the same read
+with `settledOnly`. They are Admin only twice over: the routes refuse a Worker
+with `requireAdminUser` before reading anything, and the operations refuse one
+again with `requireAdmin`.
+
+Paging is 50 rows plus one more, and that extra row is `hasMore`: a page never
+counts the history to learn whether another follows. `pageFrom` in
+`~/shared/page.ts` reads the page from the URL. The read is one statement. A
+Customer's Bills come from `bills_by_customer_day`, whose reverse scan already
+provides `day DESC, opened_at DESC`. Everything else is one arm per state
+(`bills_by_state`, or `bills_by_day_state` when a Day is asked), each arm
+limited to the page, merged and ordered by `opened_at`; a page therefore reads
+at most about 4 × 50 rows whatever the history holds, and a page past
+`MAX_BILL_PAGE` is answered without reading anything (spec §2.4, §7.4).
+`tests/cuentas.test.ts` holds the row-budget test, using the counting D1 from
+`tests/support/d1.ts`.
 
 ## Writing a test
 

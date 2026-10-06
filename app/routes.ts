@@ -12,6 +12,7 @@ export default [
   layout("routes/shell.tsx", [
     index("routes/home.tsx"),
     route("cuentas-abiertas", "routes/open-bills.tsx"),
+    route("cuentas", "routes/cuentas.tsx"),
     route("cuentas/:billId", "routes/bill.tsx"),
     route("clientes", "routes/customers.tsx"),
     route("clientes/:customerId", "routes/customer.tsx"),
