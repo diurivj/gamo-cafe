@@ -5,7 +5,7 @@ import { getBill, takePayment } from "~/backend/bills";
 import { retireCustomer } from "~/backend/customers";
 import { Db } from "~/backend/db";
 
-import { as, signedIn, type SignedIn } from "./support/auth";
+import { as, landing, signedIn, type SignedIn } from "./support/auth";
 import { savedCustomer } from "./support/customers";
 import { runTest } from "./support/effect";
 
@@ -93,8 +93,7 @@ describe("the Customer page", () => {
       bills: [hiddenBill("evento-vieja", 0), hiddenBill("evento-nueva", 0)],
     });
 
-    expect(response.status).toBe(200);
-    expect(await response.text()).toContain("Abono de $60.00 registrado.");
+    expect(await (await landing(beto, response)).text()).toContain("Abono de $60.00 registrado.");
 
     const after = await runTest(getBill("evento-vieja").pipe(as(ana.user)));
     const other = await runTest(getBill("evento-nueva").pipe(as(ana.user)));
@@ -154,8 +153,7 @@ describe("the Customer page", () => {
 
     const response = await abonar(ana, ruiz.id, { amount: "20.00", bills: [hiddenBill("retirada-vieja", 0)] });
 
-    expect(response.status).toBe(200);
-    expect(await response.text()).toContain("Abono de $20.00 registrado.");
+    expect(await (await landing(ana, response)).text()).toContain("Abono de $20.00 registrado.");
     const html = await (await ana.fetch(`/clientes/${ruiz.id}`)).text();
     expect(html).toContain("Retirado");
     expect(html).toContain("Sus cuentas abiertas se cobran igual.");

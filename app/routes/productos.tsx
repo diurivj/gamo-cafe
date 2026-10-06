@@ -26,7 +26,7 @@ import {
   text,
 } from "~/catalog-forms.server";
 import { ItemFields } from "~/components/item-fields";
-import { newId } from "~/shared/id";
+import { redirectWithFlash, takeFlash } from "~/flash.server";
 import { formatMoney } from "~/shared/money";
 
 import type { Route } from "./+types/productos";
@@ -36,7 +36,7 @@ export const meta: Route.MetaFunction = () => [{ title: "Productos · Gamo Cafe"
 export async function loader({ context }: Route.LoaderArgs) {
   const admin = requireAdminUser(context);
   const categories = await run(context, listCatalog.pipe(Effect.provideService(CurrentUser, admin)), refuseRead);
-  return { categories };
+  return { categories, flash: takeFlash(context) };
 }
 
 /** The operation a submitted form asks for, or why the form cannot be read. */
@@ -76,11 +76,13 @@ export async function action({ context, request }: Route.ActionArgs) {
 
   const result = await run(
     context,
-    // `done` is new on every success: the page uses it to empty the form.
-    asked.pipe(Effect.as({ done: newId() }), Effect.provideService(CurrentUser, admin)),
+    asked.pipe(Effect.as({ done: true } as const), Effect.provideService(CurrentUser, admin)),
     answerCatalogError,
   );
-  return "error" in result ? refused(result, formKey) : { ...result, form: formKey };
+  if ("error" in result) return refused(result, formKey);
+  // Recorded: a redirect back to the page, so a reload or the back button
+  // records nothing again (spec §3.4). It names the form, which starts over.
+  return redirectWithFlash("/productos", { form: formKey });
 }
 
 const button = "rounded-xl border border-stone-300 bg-white px-4 py-3 font-medium disabled:opacity-60";
@@ -96,7 +98,7 @@ function Refused({ message }: { message: string | undefined }) {
 }
 
 export default function Productos({ loaderData, actionData }: Route.ComponentProps) {
-  const { categories } = loaderData;
+  const { categories, flash } = loaderData;
   const busy = useNavigation().state !== "idle";
 
   const active = categories.filter((category) => !category.retired);
@@ -104,8 +106,7 @@ export default function Productos({ loaderData, actionData }: Route.ComponentPro
   const errorOn = (form: string) =>
     actionData && "error" in actionData && actionData.form === form ? actionData.error : undefined;
   // A form that was just recorded starts over, empty.
-  const fresh = (form: string) =>
-    actionData && "done" in actionData && actionData.form === form ? actionData.done : form;
+  const fresh = (form: string) => (flash?.form === form ? flash.id : form);
 
   return (
     <div className="flex flex-col gap-8">

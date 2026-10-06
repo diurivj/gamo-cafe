@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { signedIn, type SignedIn } from "./support/auth";
+import { landing, signedIn, type SignedIn } from "./support/auth";
 import { savedCustomer } from "./support/customers";
 
 // Through the Worker: what each route answers, and to whom. Tests share one
@@ -111,14 +111,13 @@ describe("only an Admin", () => {
     const page = `/clientes/${hugo.id}`;
 
     const renamed = await ana.fetch(page, form({ intent: "edit", name: "Hugo Méndez", note: "Paga los viernes" }));
-    expect(renamed.status).toBe(200);
-    expect(await renamed.text()).toContain("Paga los viernes");
+    expect(await (await landing(ana, renamed)).text()).toContain("Paga los viernes");
     expect((await pick(ana, "hugo m")).customers.map((customer) => customer.id)).toEqual([hugo.id]);
 
-    expect((await ana.fetch(page, form({ intent: "retire" }))).status).toBe(200);
+    expect((await ana.fetch(page, form({ intent: "retire" }))).status).toBe(302);
     expect((await pick(ana, "hugo")).customers).toEqual([]);
 
-    expect((await ana.fetch(page, form({ intent: "restore" }))).status).toBe(200);
+    expect((await ana.fetch(page, form({ intent: "restore" }))).status).toBe(302);
     expect((await pick(ana, "hugo")).customers.map((customer) => customer.id)).toEqual([hugo.id]);
   });
 

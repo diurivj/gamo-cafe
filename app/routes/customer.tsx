@@ -1,5 +1,5 @@
 import { Effect, Result, Schema } from "effect";
-import { data, Form, Link, useNavigation } from "react-router";
+import { data, Form, Link, redirect, useNavigation } from "react-router";
 
 import {
   type ExpectedBillRevision,
@@ -13,12 +13,12 @@ import { editCustomer, getCustomer, restoreCustomer, retireCustomer } from "~/ba
 import { run } from "~/backend/run.server";
 import { LoadMore, usePagedList } from "~/components/paged-list";
 import { PaymentFields } from "~/components/payment-fields";
+import { redirectWithFlash, takeFlash } from "~/flash.server";
 import { requireUser } from "~/session.server";
 import { billStateLabel } from "~/shared/bill-state";
 import { CURSOR_PARAM, cursorOf, nextText } from "~/shared/cursor";
 import { customerNameMessages } from "~/shared/customer-messages";
 import { dayOf, formatDay, formatTime } from "~/shared/day";
-import { newId } from "~/shared/id";
 import { type Centavos, formatMoney, parsePesos } from "~/shared/money";
 import { PAYMENT_METHODS, paymentMethodLabel } from "~/shared/payment";
 import { paymentMessages } from "~/shared/payment-messages";
@@ -77,6 +77,8 @@ export async function loader({ context, params, request }: Route.LoaderArgs) {
     handovers,
     canManage: user.role === "admin",
     pastBills: past === null ? null : { bills: past.bills, next: nextText(past.next) },
+    // What an Abonar that redirected here has to say (spec §3.4).
+    flash: takeFlash(context),
   };
 }
 
@@ -182,8 +184,13 @@ export async function action({ context, params, request }: Route.ActionArgs) {
   });
 
   if ("error" in outcome) return data(outcome, { status: 400 });
-  if (outcome.recorded) return { recorded: { amount: outcome.recorded.amount }, error: null };
-  return { recorded: null, error: null };
+  // Recorded: a redirect, so a reload or the back button records nothing
+  // again (spec §3.4). An Abonar says what it recorded on the page.
+  const page = `/clientes/${id}`;
+  if (outcome.recorded) {
+    return redirectWithFlash(page, { message: `Abono de ${formatMoney(outcome.recorded.amount)} registrado.` });
+  }
+  return redirect(page);
 }
 
 const field = "w-full rounded-xl border border-stone-300 bg-white px-4 py-3 text-lg";
@@ -192,7 +199,7 @@ const primaryButton =
   "block rounded-2xl bg-stone-900 px-4 py-4 text-center text-lg font-semibold text-white active:bg-stone-700 disabled:opacity-60";
 
 export default function Customer({ loaderData, actionData }: Route.ComponentProps) {
-  const { customer, openBills, owed, handovers, canManage, pastBills } = loaderData;
+  const { customer, openBills, owed, handovers, canManage, pastBills, flash } = loaderData;
   const past = usePagedList({
     id: "cuentas-pasadas",
     data: loaderData,
@@ -201,8 +208,6 @@ export default function Customer({ loaderData, actionData }: Route.ComponentProp
   });
   const busy = useNavigation().state !== "idle";
   const retired = customer.retiredAt !== null;
-  const recordedAmount =
-    actionData && "recorded" in actionData && actionData.recorded != null ? actionData.recorded.amount : undefined;
 
   return (
     <>
@@ -229,9 +234,9 @@ export default function Customer({ loaderData, actionData }: Route.ComponentProp
           {actionData.error}
         </p>
       ) : null}
-      {recordedAmount !== undefined ? (
+      {flash?.message ? (
         <p role="status" className="mt-4 rounded-xl bg-green-50 p-3">
-          {`Abono de ${formatMoney(recordedAmount)} registrado.`}
+          {flash.message}
         </p>
       ) : null}
 

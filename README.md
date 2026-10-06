@@ -74,6 +74,7 @@ app/
     count-line.tsx  CountLineItem, one line of a Count as Conteo and Diferencias show it
     paged-list.tsx  usePagedList and LoadMore: a list's pages and its Cargar más
   session.server.ts  the session middleware, requireUser, the cookie
+  flash.server.ts  what a recorded form says on the page it redirects to: redirectWithFlash, takeFlash
   catalog-forms.server.ts  the shared Admin gate (`requireAdminUser`, `refuseRead`) and the Productos forms' parsing and error messages
   routes/      Route modules; resources/ holds routes without UI
     shell.tsx      the signed-in layout and its navigation; screens go inside it
@@ -170,6 +171,7 @@ export async function action({ context, params, request }: Route.ActionArgs) {
 - An operation that only an Admin may run starts with `yield* requireAdmin` (from `~/backend/current-user`). That puts `AdminOnly` among its errors, so the route's `switch` has to answer it. An Admin screen answers it with `throw new Response(null, { status: 403 })`, in its loader and in its action; [`app/routes/users.tsx`](app/routes/users.tsx) does. The root `ErrorBoundary` renders every 403 as its Spanish "No tienes acceso a esta página" page, so the status stays 403 and the words are not the framework's.
 - A route with several forms tells them apart by the submit button's `name="intent"`, and builds one program for whichever was sent inside a single `Effect.gen`, so that `onError` gets the union of every operation's errors (`programFor` in `app/routes/users.tsx`). A form it does not understand is answered 400. A route whose forms belong to distinct families may run more than one program: `app/routes/bill.tsx` runs one for the corrections, with its own `run` and its own exhaustive error map, and another for the payment and edit forms. Each `run` still gets a typed, exhaustive error map — a `switch` on `error._tag` with no `default`.
 - `run(context, program)` resolves with the program's value.
+- An action that records something answers success with a redirect, never with data, so a reload or the back button records nothing twice (spec §3.4). What the screen says afterwards goes with it through `~/flash.server`: the action returns `redirectWithFlash("/clientes/abc", { message: "Abono de $20.00 registrado." })`, the loader of the page it names returns `flash: takeFlash(context)`, and the component renders `flash?.message`. The flash travels in a cookie that lasts a minute and is cleared by the request that took it, so it shows once; it is never put in the URL. Besides `message` it can name the `form` that was recorded, and every flash has a new `id`: a page keys a form on it to start that form over (`fresh` in `app/routes/inventario.tsx`, the selection in `app/routes/home.tsx`). A refusal still answers 400 with its Spanish message as action data, on the same form. An action with nothing to say returns a plain `redirect(...)`.
 - The third argument receives every typed error except `DbError` and returns what the route answers with, or throws a `redirect(...)`. It is required exactly when the program has such errors, and a `switch` on `error._tag` with no `default` makes the compiler report a missing case.
 - `DbError` is logged and becomes a 500 for the error boundary. A bug in the program is rethrown.
 - Add the route to `app/routes.ts`, a screen inside the `shell.tsx` layout, and give its entry in the shell's navigation a `to`. Visible text is Spanish.
@@ -189,13 +191,13 @@ Every operation reads the clock, so events sort by their instant; the facts of o
 
 ## Request budgets
 
-Spec §10.7 holds nine requests to a budget against a year of synthetic records: at most 50 D1 statements each, and rows read that do not grow with the history. Two local tests prove it, inside `npm test`; nothing runs against a deployment (ADR 0007).
+Spec §10.7 holds nine requests to a budget against a year of synthetic records: at most 50 D1 statements each, rows read that do not grow with the history, and no row written by a request that only reads. Two local tests prove it, inside `npm test`; nothing runs against a deployment (ADR 0007).
 
 ```sh
 npm test -- tests/proof-seed.test.ts tests/proof-budget.test.ts
 ```
 
-The seed test loads the whole year into a real D1 and asserts its shape (200 Open Bills, one Customer with 30 of them, a clearly busiest Day, every History fact table) and that `projections:verify`'s SQL finds no difference. The budget test loads four months, measures the nine requests, appends the rest of the year and measures them again: each request must issue at most 50 D1 statements and read the same rows at both sizes, and each has a cap of its own. The requests are real HTTP requests through the Worker, with a counting D1 swapped into the binding. The nine are the Sell screen, a ten-Item selection with Payment, Cuentas abiertas, Abonar across the 30-Bill Customer, Día for the busiest Day, a page of Cuentas, Inventario, a Count of every Item and a page of Historial.
+The seed test loads the whole year into a real D1 and asserts its shape (200 Open Bills, one Customer with 30 of them, a clearly busiest Day, every History fact table) and that `projections:verify`'s SQL finds no difference. The budget test loads four months, measures the nine requests, appends the rest of the year and measures them again: each request must issue at most 50 D1 statements and read the same rows at both sizes, and each has a cap of its own. The six GETs must also write no row: a session's `last_used_at` moves at most once an hour. The requests are real HTTP requests through the Worker, with a counting D1 swapped into the binding. The nine are the Sell screen, a ten-Item selection with Payment, Cuentas abiertas, Abonar across the 30-Bill Customer, Día for the busiest Day, a page of Cuentas, Inventario, a Count of every Item and a page of Historial.
 
 ### The seed
 
@@ -370,7 +372,7 @@ it("does not show Inventario to a Worker", async () => {
 - `runTest(program)` provides `Db` over the real local D1 and a test clock. The clock starts at the Unix epoch and moves only with `setClock` and `advanceClock`.
 - A typed failure rejects the test. To assert on one, turn it into a value with `Effect.flip` or `Effect.exit`.
 - Test through operations and routes, not by reaching into tables.
-- `tests/support/auth.ts` has the Users: `seedUser(role, name?)` adds one inside a `runTest` program and `as(user)` runs an operation as them. For the whole Worker, `signedIn(role, name?)` gives a new User with a session and a `fetch(path, init?)` that sends its cookie; `appFetch(path, init?)` is the same request signed out. Both leave redirects unfollowed and set the app's `Origin` on non-GET requests.
+- `tests/support/auth.ts` has the Users: `seedUser(role, name?)` adds one inside a `runTest` program and `as(user)` runs an operation as them. For the whole Worker, `signedIn(role, name?)` gives a new User with a session and a `fetch(path, init?)` that sends its cookie; `appFetch(path, init?)` is the same request signed out. Both leave redirects unfollowed and set the app's `Origin` on non-GET requests. A recorded form answers 302: `landing(who, response)` asserts that and requests the page it lands on, carrying the cookie the redirect set, which is where the message is.
 - `tests/support/catalog.ts` has the catalog: `seedCategory(name?, by?)` and `seedItem({ name?, price?, categoryId?, stockTracked?, minimum?, startingStock?, by? })`, both through the real operations, with a default for everything. `by` is the Admin who adds it; without it a new Admin is added.
 - `tests/support/customers.ts` has the Customers: `seedCustomer(name, { by?, note?, retired? })` inside a `runTest` program, and `savedCustomer(...)`, the same as a promise, for tests that go through the Worker. In `e2e/fixtures.ts` it is the `addCustomer(name, { by, note?, retired? })` fixture.
 - A rule about the whole table (the last active Admin) needs a file whose tests each start from an empty database: `reset()` and `applyD1Migrations` from `cloudflare:test` in a `beforeEach`, as in `tests/last-admin.test.ts`.

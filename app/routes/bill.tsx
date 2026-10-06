@@ -16,6 +16,7 @@ import { BillChanged, BillIsVoided, PaymentExceedsOwed, PaymentNotPositive } fro
 import { run } from "~/backend/run.server";
 import { CustomerPicker } from "~/components/customer-picker";
 import { PaymentFields } from "~/components/payment-fields";
+import { redirectWithFlash, takeFlash } from "~/flash.server";
 import { requireUser } from "~/session.server";
 import { billStateLabel, isOpenBill } from "~/shared/bill-state";
 import {
@@ -25,7 +26,6 @@ import {
   correctionMessages,
 } from "~/shared/correction-messages";
 import { dayOf, formatDay, formatTime, type Instant } from "~/shared/day";
-import { newId } from "~/shared/id";
 import { type Centavos, formatMoney, parsePesos } from "~/shared/money";
 import { PAYMENT_METHODS, paymentMethodLabel } from "~/shared/payment";
 import { paymentMessages } from "~/shared/payment-messages";
@@ -66,6 +66,8 @@ export async function loader({ context, params }: Route.LoaderArgs) {
     // Any User may while the Bill has no Payment; an Admin may afterwards
     // (spec §4.1). A Voided Bill accepts no corrections, this one included.
     canEdit: bill.state !== "voided" && (user.role === "admin" || bill.paid === 0),
+    // What the form that redirected here recorded (spec §3.4).
+    flash: takeFlash(context),
   };
 }
 
@@ -171,7 +173,7 @@ async function answerCorrection(
   billId: string,
   intent: CorrectionIntent,
   form: FormData,
-): Promise<{ readonly done: string; readonly message: string } | { readonly error: string }> {
+): Promise<{ readonly message: string } | { readonly error: string }> {
   const revision = Number(String(form.get("revision") ?? ""));
   if (!Number.isSafeInteger(revision)) {
     return { error: "Recarga la página e intenta de nuevo." };
@@ -208,20 +210,23 @@ async function answerCorrection(
   // A Worker whose removal leaves the Bill Paid no longer opens it (§4.1),
   // so they are sent to the list, where it is gone, as after a full Payment.
   if ("leftOpen" in result && !result.leftOpen && user.role !== "admin") throw redirect("/cuentas-abiertas");
-  return { done: newId(), message: correctionDone[intent] };
+  return { message: correctionDone[intent] };
 }
 
 export async function action({ context, params, request }: Route.ActionArgs) {
   const user = requireUser(context);
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
+  // Whatever is recorded answers with a redirect back to the page, so a
+  // reload or the back button records nothing again (spec §3.4).
+  const page = `/cuentas/${params.billId}`;
 
   // The corrections have their own program and their own answer: a Worker
   // posting an Admin-only one is refused with a 403.
   if ((CORRECTION_INTENTS as ReadonlyArray<string>).includes(intent)) {
     const answered = await answerCorrection(context, user, params.billId, intent as CorrectionIntent, form);
     if ("error" in answered) return data(answered, { status: 400 });
-    return answered;
+    return redirectWithFlash(page, answered);
   }
 
   const result = await run(
@@ -256,9 +261,13 @@ export async function action({ context, params, request }: Route.ActionArgs) {
     // instead of staying on the page (spec §4.1): they may not open a Paid
     // Bill. An Admin stays and sees it Pagada.
     if (result.paid && user.role !== "admin") throw redirect("/cuentas-abiertas");
-    return { done: newId(), kind: "pago" as const, amount: result.amount };
+    return redirectWithFlash(page, {
+      message: result.paid
+        ? `Cuenta pagada: ${formatMoney(result.total)}.`
+        : `Abono de ${formatMoney(result.amount)} registrado. Debe ${formatMoney(result.owed)}.`,
+    });
   }
-  return { done: newId(), kind: "edicion" as const };
+  return redirectWithFlash(page, { message: "Se guardaron los cambios de la cuenta." });
 }
 
 const primaryButton =
@@ -284,11 +293,8 @@ const reasonField = (
 );
 
 export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
-  const { bill, canAddItems, canPay, isAdmin, canEdit } = loaderData;
+  const { bill, canAddItems, canPay, isAdmin, canEdit, flash } = loaderData;
   const busy = useNavigation().state !== "idle";
-  const paidNow = actionData && "kind" in actionData && actionData.kind === "pago" ? actionData : undefined;
-  const editedNow = actionData && "kind" in actionData && actionData.kind === "edicion" ? actionData : undefined;
-  const corrected = actionData && "message" in actionData ? actionData : undefined;
   // A Voided Bill accepts no further corrections (spec §5.7); a Paid Bill does,
   // which is what §8.5 is about.
   const canCorrect = bill.state !== "voided";
@@ -522,21 +528,9 @@ export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
           {actionData.error}
         </p>
       ) : null}
-      {corrected ? (
+      {flash?.message ? (
         <p role="status" className="mt-6 rounded-xl bg-green-50 p-3">
-          {corrected.message}
-        </p>
-      ) : null}
-      {editedNow ? (
-        <p role="status" className="mt-6 rounded-xl bg-green-50 p-3">
-          Se guardaron los cambios de la cuenta.
-        </p>
-      ) : null}
-      {paidNow ? (
-        <p role="status" className="mt-6 rounded-xl bg-green-50 p-3">
-          {bill.owed === 0
-            ? `Cuenta pagada: ${formatMoney(bill.total)}.`
-            : `Abono de ${formatMoney(paidNow.amount)} registrado. Debe ${formatMoney(bill.owed)}.`}
+          {flash.message}
         </p>
       ) : null}
 

@@ -76,8 +76,10 @@ export async function action({ context, params, request }: Route.ActionArgs) {
     answerCatalogError,
   );
   if ("error" in result) return refused(result, intent);
-  if (intent === "update-item") throw redirect(PRODUCTOS);
-  return result;
+  // Recorded: a redirect, so a reload or the back button records nothing
+  // again (spec §3.4). Saving goes back to the list; retiring or restoring
+  // stays on the Item, which says what it is now.
+  throw redirect(intent === "update-item" ? PRODUCTOS : `${PRODUCTOS}/${params.itemId}`);
 }
 
 const button = "rounded-xl border border-stone-300 bg-white px-4 py-3 font-medium disabled:opacity-60";

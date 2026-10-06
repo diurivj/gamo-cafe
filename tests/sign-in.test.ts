@@ -1,8 +1,11 @@
+import { env } from "cloudflare:workers";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
+import { Db, DbError } from "~/backend/db";
 import { addUser, authenticate, issueSignInCode, signOut, useSignInCode } from "~/backend/sign-in";
 
+import { countingD1 } from "./support/d1";
 import { advanceClock, runTest, setClock } from "./support/effect";
 
 // Tests in this file share one D1, and the sign-in limit counts failures
@@ -170,6 +173,132 @@ describe("a session", () => {
 
         expect((yield* Effect.flip(authenticate(token)))._tag).toBe("NotSignedIn");
         expect((yield* authenticate(other.token)).id).toBe(beto.id);
+      }),
+    ));
+});
+
+describe("using a session", () => {
+  const signIn = Effect.gen(function* () {
+    const beto = yield* addUser("Beto", "worker");
+    const { token } = yield* useSignInCode(yield* issueSignInCode(beto.id, null));
+    return { beto, token };
+  });
+
+  /** The rows D1 reports written while `program` runs. */
+  const rowsWritten = <A, E>(program: Effect.Effect<A, E, Db>) =>
+    Effect.gen(function* () {
+      const { counter, d1 } = countingD1(env.DB);
+      yield* program.pipe(Effect.provide(Db.layer(d1)));
+      return counter.rowsWritten;
+    });
+
+  /** `program` against a D1 that reads but refuses every write, as with its write quota spent. */
+  const withWritesRefused = <A, E>(program: Effect.Effect<A, E, Db>) =>
+    Effect.gen(function* () {
+      const db = yield* Db;
+      const refused = Effect.fail(new DbError({ cause: "writes refused" }));
+      const reads = (sql: string) => sql.trimStart().startsWith("SELECT");
+      return yield* program.pipe(
+        Effect.provideService(
+          Db,
+          Db.of({
+            first: (schema, sql, ...params) => (reads(sql) ? db.first(schema, sql, ...params) : refused),
+            all: (schema, sql, ...params) => (reads(sql) ? db.all(schema, sql, ...params) : refused),
+            run: () => refused,
+            batch: () => refused,
+          }),
+        ),
+      );
+    });
+
+  it("writes nothing within an hour of the last write", () =>
+    runTest(
+      Effect.gen(function* () {
+        yield* setClock("2026-04-01T09:00:00");
+        const { token } = yield* signIn;
+
+        expect(yield* rowsWritten(authenticate(token))).toBe(0);
+
+        yield* advanceClock("1 hour");
+        yield* advanceClock(-1);
+        expect(yield* rowsWritten(authenticate(token))).toBe(0);
+      }),
+    ));
+
+  it("writes one row an hour after the last write, and then nothing for another hour", () =>
+    runTest(
+      Effect.gen(function* () {
+        yield* setClock("2026-04-02T09:00:00");
+        const { token } = yield* signIn;
+        yield* advanceClock("1 hour");
+
+        expect(yield* rowsWritten(authenticate(token))).toBe(1);
+
+        yield* advanceClock("59 minutes");
+        expect(yield* rowsWritten(authenticate(token))).toBe(0);
+      }),
+    ));
+
+  it("never ends while it is used once an hour", () =>
+    runTest(
+      Effect.gen(function* () {
+        yield* setClock("2026-04-03T09:00:00");
+        const { beto, token } = yield* signIn;
+
+        // 61 days, an hour at a time.
+        for (let hour = 0; hour < 61 * 24; hour++) {
+          yield* advanceClock("1 hour");
+          yield* authenticate(token);
+        }
+        expect((yield* authenticate(token)).id).toBe(beto.id);
+
+        yield* advanceClock("60 days");
+        expect((yield* Effect.flip(authenticate(token)))._tag).toBe("NotSignedIn");
+      }),
+    ));
+
+  it("measures the 60 days from the last write, not from a use that wrote nothing", () =>
+    runTest(
+      Effect.gen(function* () {
+        yield* setClock("2026-04-04T09:00:00");
+        const { beto, token } = yield* signIn;
+        yield* advanceClock("59 minutes");
+        yield* authenticate(token);
+
+        yield* advanceClock("60 days");
+        yield* advanceClock("-59 minutes");
+        yield* advanceClock(-1);
+        expect((yield* authenticate(token)).id).toBe(beto.id);
+
+        // That use wrote, so the session now lasts 60 days from it.
+        yield* advanceClock("60 days");
+        yield* advanceClock(-1);
+        expect((yield* authenticate(token)).id).toBe(beto.id);
+      }),
+    ));
+
+  it("still signs the User in when the write fails", () =>
+    runTest(
+      Effect.gen(function* () {
+        yield* setClock("2026-04-05T09:00:00");
+        const { beto, token } = yield* signIn;
+        yield* advanceClock("2 hours");
+
+        expect((yield* withWritesRefused(authenticate(token))).id).toBe(beto.id);
+      }),
+    ));
+
+  it("refuses a session that has ended even when nothing can be written", () =>
+    runTest(
+      Effect.gen(function* () {
+        yield* setClock("2026-04-06T09:00:00");
+        const { token } = yield* signIn;
+        const other = yield* signIn;
+        yield* signOut(token);
+        yield* advanceClock("60 days");
+
+        expect((yield* Effect.flip(withWritesRefused(authenticate(token))))._tag).toBe("NotSignedIn");
+        expect((yield* Effect.flip(withWritesRefused(authenticate(other.token))))._tag).toBe("NotSignedIn");
       }),
     ));
 });

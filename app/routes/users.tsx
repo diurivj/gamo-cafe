@@ -12,6 +12,7 @@ import {
   reactivateUser,
   signOutEverywhere,
 } from "~/backend/users";
+import { type Flash, redirectWithFlash, takeFlash } from "~/flash.server";
 import { requireUser } from "~/session.server";
 import { formatSignInCode } from "~/shared/secret";
 
@@ -43,19 +44,17 @@ export async function loader({ context }: Route.LoaderArgs) {
         throw forbidden();
     }
   });
-  return { users, me: user.id };
+  // What the form that redirected here has to say (spec §3.4).
+  return { users, me: user.id, flash: takeFlash(context) };
 }
 
-/** What an action that worked has to say: a code to read out, or a short notice. */
-type Done =
-  | { readonly issued: { readonly name: string; readonly code: string } }
-  | { readonly notice: string };
-
-const issued = ({ user, code }: { user: { name: string }; code: string }): Done => ({
-  issued: { name: user.name, code: formatSignInCode(code) },
+// What an action that worked has to say on the page it redirects to: a code
+// to read out, or a short notice.
+const issued = ({ user, code }: { user: { name: string }; code: string }): Flash => ({
+  code: { name: user.name, code: formatSignInCode(code) },
 });
 
-const notice = (text: string): Done => ({ notice: text });
+const notice = (text: string): Flash => ({ message: text });
 
 const intents = ["add", "new-code", "sign-out-everywhere", "deactivate", "reactivate", "change-role"] as const;
 
@@ -120,35 +119,37 @@ export async function action({ context, request }: Route.ActionArgs) {
   if (form.get("intent") === "change-role" && form.get("userId") === user.id && form.get("role") === "worker") {
     throw redirect("/");
   }
-  return result;
+  // Recorded: a redirect, so a reload or the back button neither records it
+  // again nor issues another code (spec §3.4).
+  return redirectWithFlash("/usuarios", result);
 }
 
 const button = "rounded-xl border border-stone-300 bg-white px-4 py-3 font-medium disabled:opacity-60";
 
 export default function Users({ loaderData, actionData }: Route.ComponentProps) {
-  const { users, me } = loaderData;
+  const { users, me, flash } = loaderData;
   const sending = useNavigation().state !== "idle";
 
   return (
     <>
       <h1 className="text-3xl font-semibold tracking-tight">Usuarios</h1>
 
-      {actionData && "issued" in actionData ? (
+      {flash?.code ? (
         <div className="mt-6 rounded-xl border border-stone-900 bg-white p-4">
           <p className="text-lg">
-            Código de acceso para <strong>{actionData.issued.name}</strong>
+            Código de acceso para <strong>{flash.code.name}</strong>
           </p>
           <output className="mt-2 block font-mono text-4xl font-semibold tracking-widest">
-            {actionData.issued.code}
+            {flash.code.code}
           </output>
           <p className="mt-2 text-stone-600">
             Sirve una sola vez y dura 10 minutos. No se volverá a mostrar.
           </p>
         </div>
       ) : null}
-      {actionData && "notice" in actionData ? (
+      {flash?.message ? (
         <p role="status" className="mt-6 rounded-xl bg-stone-200 px-4 py-3">
-          {actionData.notice}
+          {flash.message}
         </p>
       ) : null}
       {actionData && "error" in actionData ? (

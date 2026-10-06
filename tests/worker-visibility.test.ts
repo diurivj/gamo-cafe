@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { expect, it } from "vitest";
 
-import { as, seedUser, signedIn, type SignedIn } from "./support/auth";
+import { as, landing, seedUser, signedIn, type SignedIn } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { runTest } from "./support/effect";
 
@@ -41,8 +41,8 @@ async function sell(
       ...(options.amount ? { method: "cash", amount: options.amount } : {}),
     }),
   );
-  expect(response.status, "the sale is recorded").toBe(200);
-  return billIdOf(await response.text(), "the sale response carries the Bill");
+  // Recorded sales answer with a redirect; the page it lands on names the Bill.
+  return billIdOf(await (await landing(who, response)).text(), "the sale response carries the Bill");
 }
 
 /** The distinctive words of the screens §4.1 keeps for Admins. */
@@ -135,12 +135,12 @@ it("a Worker's pages carry no Stock, no other User's totals, no History and no P
     `/cuentas/${mineBill}`,
     form({ intent: "cancelar-cuenta", reason: "Era una prueba", revision: "0" }),
   );
-  expect(voided.status, "the Admin voids Carla's Bill").toBe(200);
+  expect(voided.status, "the Admin voids Carla's Bill").toBe(302);
   const adjusted = await ana.fetch(
     "/inventario",
     form({ intent: "record-adjustment", itemId: mine.id, reason: "waste", units: "2" }),
   );
-  expect(adjusted.status, "the Admin records an Adjustment").toBe(200);
+  expect(adjusted.status, "the Admin records an Adjustment").toBe(302);
 
   // The Voided Bill leaves her list, and its page stays out of her reach.
   const openAfter = await carla.fetch("/cuentas-abiertas");

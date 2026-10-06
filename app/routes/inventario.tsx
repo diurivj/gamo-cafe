@@ -18,9 +18,9 @@ import {
 } from "~/backend/inventory";
 import { run } from "~/backend/run.server";
 import { type Refusal, refuseRead, refused, requireAdminUser, text } from "~/catalog-forms.server";
+import { redirectWithFlash, takeFlash } from "~/flash.server";
 import { ADJUSTMENT_REASONS, adjustmentReasonLabel, adjustmentSign } from "~/shared/adjustment";
 import { formatDay } from "~/shared/day";
-import { newId } from "~/shared/id";
 import { parseUnits } from "~/shared/units";
 
 import type { Route } from "./+types/inventario";
@@ -36,7 +36,7 @@ export async function loader({ context }: Route.LoaderArgs) {
     ),
     refuseRead,
   );
-  return inventory;
+  return { ...inventory, flash: takeFlash(context) };
 }
 
 type InventoryError =
@@ -95,11 +95,13 @@ export async function action({ context, request }: Route.ActionArgs) {
 
   const result = await run(
     context,
-    // `done` is new on every success: the page uses it to empty the form.
-    asked.pipe(Effect.as({ done: newId() }), Effect.provideService(CurrentUser, admin)),
+    asked.pipe(Effect.as({ done: true } as const), Effect.provideService(CurrentUser, admin)),
     answerInventoryError,
   );
-  return "error" in result ? refused(result, formKey) : { ...result, form: formKey };
+  if ("error" in result) return refused(result, formKey);
+  // Recorded: a redirect back to the page, so a reload or the back button
+  // records nothing again (spec §3.4). It names the form, which starts over.
+  return redirectWithFlash("/inventario", { form: formKey });
 }
 
 const field = "w-full rounded-xl border border-stone-300 bg-white px-4 py-3";
@@ -115,13 +117,12 @@ function Refused({ message }: { message: string | undefined }) {
 }
 
 export default function Inventario({ loaderData, actionData }: Route.ComponentProps) {
-  const { lines, adjustments } = loaderData;
+  const { lines, adjustments, flash } = loaderData;
   const busy = useNavigation().state !== "idle";
   const errorOn = (form: string) =>
     actionData && "error" in actionData && actionData.form === form ? actionData.error : undefined;
   // A form that was just recorded starts over, empty.
-  const fresh = (form: string) =>
-    actionData && "done" in actionData && actionData.form === form ? actionData.done : form;
+  const fresh = (form: string) => (flash?.form === form ? flash.id : form);
 
   return (
     <div className="flex flex-col gap-8">
