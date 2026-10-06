@@ -65,6 +65,14 @@ describe("Entrar", () => {
     expect(attributes).toContain("Path=/");
   });
 
+  it("signs in exactly one of two phones that send the same code at the same moment", async () => {
+    const { code } = await userWithCode("Dos");
+
+    const responses = await Promise.all([enterCode(code), enterCode(code)]);
+
+    expect(responses.map((response) => response.status).sort()).toEqual([302, 400]);
+  });
+
   it("answers a wrong code in Spanish and signs nobody in", async () => {
     const response = await enterCode("WRNG WRNG");
 
