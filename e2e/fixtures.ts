@@ -4,6 +4,7 @@ import { test as base, expect } from "@playwright/test";
 import { createTestHarness, type TestHarness } from "wrangler";
 
 import { codeForUser } from "../app/backend/command-line.ts";
+import { normalizeName } from "../app/shared/normalize-name.ts";
 import { hashSecret, newSessionToken, SESSION_COOKIE } from "../app/shared/secret.ts";
 
 export type Role = "admin" | "worker";
@@ -29,7 +30,20 @@ type TestFixtures = {
   signInAs: (role: Role, name?: string) => Promise<SeededUser>;
   /** A fresh sign-in code for a User, as an Admin or the command line issues it. */
   issueCode: (user: SeededUser) => Promise<string>;
+  /**
+   * Adds a Customer: `await addCustomer("Familia Ruiz", { by: beto })`. `by`
+   * is the User who added them; `retired: true` adds them already retired.
+   */
+  addCustomer: (
+    name: string,
+    seed: { by: SeededUser; note?: string; retired?: boolean },
+  ) => Promise<SeededCustomer>;
 };
+
+export interface SeededCustomer {
+  readonly id: string;
+  readonly name: string;
+}
 
 type WorkerFixtures = {
   server: TestHarness;
@@ -140,6 +154,20 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       const { code, statements } = await codeForUser(user.id, Date.now());
       for (const sql of statements) await DB.prepare(sql).run();
       return code;
+    });
+  },
+
+  addCustomer: async ({ server }, use) => {
+    await use(async (name, { by, note, retired }) => {
+      const DB = await database(server);
+      const customer = { id: crypto.randomUUID(), name };
+      const at = Date.now();
+      await DB.prepare(
+        "INSERT INTO customers (id, name, normalized_name, note, retired_at, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+        .bind(customer.id, name, normalizeName(name), note ?? null, retired ? at : null, by.id, at)
+        .run();
+      return customer;
     });
   },
 });

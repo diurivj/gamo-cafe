@@ -16,7 +16,7 @@ type Section = { readonly label: string; readonly to?: string };
 const everyUser: ReadonlyArray<Section> = [
   { label: "Vender", to: "/" },
   { label: "Cuentas abiertas" },
-  { label: "Clientes" },
+  { label: "Clientes", to: "/clientes" },
   { label: "Mi día" },
 ];
 

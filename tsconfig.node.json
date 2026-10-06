@@ -9,7 +9,8 @@
     "scripts/**/*.ts",
     // Plain modules that the script and the browser tests import.
     "app/backend/command-line.ts",
-    "app/shared/secret.ts"
+    "app/shared/secret.ts",
+    "app/shared/normalize-name.ts"
   ],
   "compilerOptions": {
     "composite": true,

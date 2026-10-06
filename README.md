@@ -33,11 +33,15 @@ app/
     time.ts        now, today (the only source of "now")
     run.server.ts  run(): the one way a loader or action runs a program
     health.ts      the reference operation
+    customers.ts   Customers: addCustomer, searchCustomers, getCustomer, editCustomer, retireCustomer, restoreCustomer
   shared/      Plain functions, no Effect. Safe in the browser.
     money.ts       centavos, formatMoney, parsePesos
     day.ts         Instant, Day, dayOf, formatDay, formatTime
     id.ts          newId
     secret.ts      sign-in codes, session tokens, their hash, the cookie name
+    normalize-name.ts  normalizeName: a name with case and accents ignored
+  components/  React components used by more than one screen
+    customer-picker.tsx  CustomerPicker, the form field that chooses a Customer
   session.server.ts  the session middleware, requireUser, the cookie
   routes/      Route modules; resources/ holds routes without UI
     shell.tsx      the signed-in layout and its navigation; screens go inside it
@@ -151,6 +155,20 @@ npm run sign-in-code -- --user "Diego"        # a new code for an existing User
 
 Add `--production` to act on the production D1. Only hashes of codes and session tokens are stored.
 
+## Names, and choosing a Customer
+
+A name that must be unique or searchable "ignoring case and accents" is stored twice: as typed, and as `normalizeName(name)` from `~/shared/normalize-name` in a `normalized_name` column. Compare and search on that column only. A prefix search is a range, which an index answers and in which nothing typed is a wildcard: `normalized_name >= ? AND normalized_name < ?`, bound to the prefix and the prefix plus `"\u{10FFFF}"` (see `searchCustomers`).
+
+`CustomerPicker` from `~/components/customer-picker` is a form field: search as the name is typed, matches first, "add new", retired Customers never offered. It talks to its own resource route (`/clientes/selector`), so the screen it sits on needs nothing for it.
+
+```tsx
+<Form method="post">
+  <CustomerPicker name="customerId" defaultValue={bill.customer} onChange={setCustomer} />
+</Form>
+```
+
+The field's value is the chosen Customer's id, or `""` for none. `defaultValue` is `{ id, name }` or `null`; `onChange` is optional. The action that receives the id still has to check it: the picker hiding retired Customers is not enforcement.
+
 ## Writing a test
 
 Tests live in `tests/*.test.ts` and run inside workerd. Each test file starts with its own freshly migrated D1; tests in the same file share it, so use distinct ids.
@@ -188,5 +206,6 @@ it("does not show Inventario to a Worker", async () => {
 - A typed failure rejects the test. To assert on one, turn it into a value with `Effect.flip` or `Effect.exit`.
 - Test through operations and routes, not by reaching into tables.
 - `tests/support/auth.ts` has the Users: `seedUser(role, name?)` adds one inside a `runTest` program and `as(user)` runs an operation as them. For the whole Worker, `signedIn(role, name?)` gives a new User with a session and a `fetch(path, init?)` that sends its cookie; `appFetch(path, init?)` is the same request signed out. Both leave redirects unfollowed and set the app's `Origin` on non-GET requests.
+- `tests/support/customers.ts` has the Customers: `seedCustomer(name, { by?, note?, retired? })` inside a `runTest` program, and `savedCustomer(...)`, the same as a promise, for tests that go through the Worker. In `e2e/fixtures.ts` it is the `addCustomer(name, { by, note?, retired? })` fixture.
 - The Worker reads the real clock, so a test that goes through it cannot move time. Rules about time are tested on operations with `runTest`.
 - Browser tests live in `e2e/*.spec.ts` and import `test` and `expect` from `./fixtures`, which serves the built Worker over local HTTPS and gives every test an empty migrated D1. Its `signInAs(role, name?)` fixture adds a User and signs the test's browser in without going through Entrar; `addUser` and `issueCode` are there for tests about signing in.
