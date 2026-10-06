@@ -101,17 +101,19 @@ export interface NewAdjustment {
  * The statements that record an Adjustment, for a batch: the fact, then its
  * effect on Stock. Restock adds its units; Waste and Internal use subtract
  * them. For an Item that does not exist or is not stock-tracked, neither
- * statement writes anything, and the `changes` of the first one is 0.
+ * statement writes anything, and the `changes` of the first one is 0. The
+ * same holds when `when`, the condition the batch shares, is false.
  */
-export function adjustmentStatements(adjustment: NewAdjustment): ReadonlyArray<Statement> {
+export function adjustmentStatements(adjustment: NewAdjustment, when?: Condition): ReadonlyArray<Statement> {
   const { id, itemId, reason, units, note, by, at, day } = adjustment;
   return [
     statement(
       `INSERT INTO adjustments (id, item_id, reason, units, note, recorded_by, recorded_at, day)
-       SELECT ?, id, ?, ?, ?, ?, ?, ? FROM items WHERE id = ? AND stock_tracked = 1`,
-      id, reason, units, note, by, at, day, itemId,
+       SELECT ?, id, ?, ?, ?, ?, ?, ? FROM items
+       WHERE id = ? AND stock_tracked = 1${when ? ` AND (${when.sql})` : ""}`,
+      id, reason, units, note, by, at, day, itemId, ...(when?.params ?? []),
     ),
-    changeStock(itemId, adjustmentSign(reason) * units),
+    changeStock(itemId, adjustmentSign(reason) * units, when),
   ];
 }
 
@@ -178,9 +180,10 @@ const rowsOf = (size: number) => Array.from({ length: size }, () => "(?, ?, ?)")
  * The Count's insert is conditional on every Item existing and being
  * stock-tracked; when it writes nothing, the lines and Stock statements do
  * nothing either, because they join the Count the first statement would have
- * written. Its `changes` says whether the Count was recorded.
+ * written. Its `changes` says whether the Count was recorded. `when` is one
+ * more condition on that insert, and so on the whole Count.
  */
-export function countStatements(count: NewCount): ReadonlyArray<Statement> {
+export function countStatements(count: NewCount, when?: Condition): ReadonlyArray<Statement> {
   const { id, note, by, at, day, lines } = count;
   const parts = chunk(lines, COUNTED_LINES_PER_STATEMENT);
   const itemIds = JSON.stringify(lines.map((line) => line.itemId));
@@ -192,8 +195,8 @@ export function countStatements(count: NewCount): ReadonlyArray<Statement> {
       `INSERT INTO counts (id, note, recorded_by, recorded_at, day)
        SELECT ?, ?, ?, ?, ?
        WHERE (SELECT COUNT(*) FROM json_each(?) AS j
-              JOIN items i ON i.id = j.value AND i.stock_tracked = 1) = ?`,
-      id, note, by, at, day, itemIds, lines.length,
+              JOIN items i ON i.id = j.value AND i.stock_tracked = 1) = ?${when ? ` AND (${when.sql})` : ""}`,
+      id, note, by, at, day, itemIds, lines.length, ...(when?.params ?? []),
     ),
     ...parts.map((part) =>
       statement(

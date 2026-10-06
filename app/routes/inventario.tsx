@@ -21,6 +21,7 @@ import { type Refusal, refuseRead, refused, requireAdminUser, text } from "~/cat
 import { redirectWithFlash, takeFlash } from "~/flash.server";
 import { ADJUSTMENT_REASONS, adjustmentReasonLabel, adjustmentSign } from "~/shared/adjustment";
 import { formatDay } from "~/shared/day";
+import { newId } from "~/shared/id";
 import { parseUnits } from "~/shared/units";
 
 import type { Route } from "./+types/inventario";
@@ -36,7 +37,9 @@ export async function loader({ context }: Route.LoaderArgs) {
     ),
     refuseRead,
   );
-  return { ...inventory, flash: takeFlash(context) };
+  // `submissionKey` is the key of the Adjustment form this page renders (spec
+  // §3.4): new every time the loader runs, the same for a double tap.
+  return { ...inventory, flash: takeFlash(context), submissionKey: newId() };
 }
 
 type InventoryError =
@@ -56,7 +59,13 @@ function operation(form: FormData): Effect.Effect<unknown, InventoryError | DbEr
       if (!reason) return { error: "Elige un motivo." };
       const units = parseUnits(text(form, "units"));
       if (units === undefined) return { error: "Las unidades deben ser un número entero, uno o más." };
-      return recordAdjustment({ itemId: text(form, "itemId"), reason, units, note: text(form, "note") });
+      return recordAdjustment({
+        itemId: text(form, "itemId"),
+        reason,
+        units,
+        note: text(form, "note"),
+        submissionKey: text(form, "submissionKey"),
+      });
     }
     case "cancel-adjustment":
       return cancelAdjustment(text(form, "adjustmentId"), text(form, "reason"));
@@ -117,7 +126,7 @@ function Refused({ message }: { message: string | undefined }) {
 }
 
 export default function Inventario({ loaderData, actionData }: Route.ComponentProps) {
-  const { lines, adjustments, flash } = loaderData;
+  const { lines, adjustments, flash, submissionKey } = loaderData;
   const busy = useNavigation().state !== "idle";
   const errorOn = (form: string) =>
     actionData && "error" in actionData && actionData.form === form ? actionData.error : undefined;
@@ -152,6 +161,7 @@ export default function Inventario({ loaderData, actionData }: Route.ComponentPr
         </p>
         <Form method="post" key={fresh("record-adjustment:")} className="mt-4 flex flex-col gap-4">
           <input type="hidden" name="intent" value="record-adjustment" />
+          <input type="hidden" name="submissionKey" value={submissionKey} />
           <label className="flex flex-col gap-1">
             <span className="font-medium">Producto</span>
             <select name="itemId" required defaultValue="" className={field}>

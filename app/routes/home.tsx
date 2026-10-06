@@ -25,6 +25,7 @@ import { CustomerPicker } from "~/components/customer-picker";
 import { PaymentFields } from "~/components/payment-fields";
 import { redirectWithFlash, takeFlash } from "~/flash.server";
 import { requireUser } from "~/session.server";
+import { newId } from "~/shared/id";
 import { formatMoney, parsePesos } from "~/shared/money";
 import { PAYMENT_METHODS, type PaymentMethod } from "~/shared/payment";
 import { paymentMessages } from "~/shared/payment-messages";
@@ -45,7 +46,11 @@ export async function loader({ context, request }: Route.LoaderArgs) {
   const billId = new URL(request.url).searchParams.get("billId") ?? "";
   // What the selection that redirected here recorded (spec §3.4).
   const flash = takeFlash(context);
-  if (billId === "") return { categories, target: null, flash };
+  // The key of the form this page renders (spec §3.4): new every time the
+  // loader runs, so after each recorded sale, and the same for a double tap
+  // or a retry of one rendered form.
+  const submissionKey = newId();
+  if (billId === "") return { categories, target: null, flash, submissionKey };
 
   const bill = await run(
     context,
@@ -61,7 +66,7 @@ export async function loader({ context, request }: Route.LoaderArgs) {
   );
   // The screen shows the target's figures, not its Lines or Payments.
   const { lines: _lines, payments: _payments, ...target } = bill;
-  return { categories, target, flash };
+  return { categories, target, flash, submissionKey };
 }
 
 /** The selection as the browser sends it, in the `selection` form field. */
@@ -78,6 +83,7 @@ function readSelection(form: FormData): NewSelection | { readonly error: string 
     customerId: String(form.get("customerId") ?? "") || null,
     note: String(form.get("note") ?? "") || null,
     billId: String(form.get("billId") ?? "") || null,
+    submissionKey: String(form.get("submissionKey") ?? "") || null,
   };
 }
 
@@ -190,7 +196,7 @@ const paidMessage = (bill: BillSummary) =>
     : `Abono registrado. Debe ${formatMoney(bill.owed)}.`;
 
 export default function Home({ loaderData, actionData }: Route.ComponentProps) {
-  const { categories, target, flash } = loaderData;
+  const { categories, target, flash, submissionKey } = loaderData;
   const busy = useNavigation().state !== "idle";
   const [quantities, setQuantities] = useState<Readonly<Record<string, number>>>({});
   // A new key remounts the form after a recorded selection, so the picker and
@@ -258,6 +264,8 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
         <input type="hidden" name="selection" value={selection} />
         {/* Set when Cuenta's Agregar productos sent the User here. */}
         <input type="hidden" name="billId" value={target?.id ?? ""} />
+        {/* One sale per rendered form, however many times it is sent. */}
+        <input type="hidden" name="submissionKey" value={submissionKey} />
 
         {selected.length > 0 ? (
           <section aria-labelledby="seleccion" className="rounded-2xl border border-stone-200 bg-white p-4">

@@ -9,6 +9,7 @@ import { ItemNotFound } from "./catalog";
 import { requireAdmin } from "./current-user";
 import { Db, statement } from "./db";
 import { adjustmentStatements } from "./stock";
+import { json, notYetRecorded, recordedAnswer, submissionOf, submissionStatement } from "./submissions";
 import { now, today } from "./time";
 
 /**
@@ -87,12 +88,22 @@ export interface NewAdjustmentInput {
   readonly units: number;
   /** Trimmed; empty or absent is no note. */
   readonly note?: string | null;
+  /**
+   * The key of the form this Adjustment came from, made when the form was
+   * rendered (spec §3.4). A second Adjustment with the same key records
+   * nothing and is answered as the first.
+   */
+  readonly submissionKey?: string | null;
 }
+
+/** What `recordAdjustment` answers, and what a repeat of its form is answered with. */
+const AdjustmentAnswer = Schema.Struct({ id: Schema.String });
 
 /**
  * Records an Adjustment: the fact and its effect on Stock, in one batch
  * (spec §7.3). Restock adds its units; Waste and Internal use subtract them.
- * An Item that is not stock-tracked is refused, and nothing is written.
+ * An Item that is not stock-tracked is refused, and nothing is written. The
+ * same form sent twice is recorded once (spec §3.4, `./submissions`).
  */
 export const recordAdjustment = Effect.fn("recordAdjustment")(function* (input: NewAdjustmentInput) {
   const admin = yield* requireAdmin;
@@ -100,24 +111,32 @@ export const recordAdjustment = Effect.fn("recordAdjustment")(function* (input: 
 
   if (!Number.isSafeInteger(input.units) || input.units < 1) return yield* new InvalidAdjustmentUnits();
   const note = trimToNull(input.note);
+
+  const submission = submissionOf("adjustment", admin.id, input.submissionKey);
+  const earlier = yield* recordedAnswer(AdjustmentAnswer, submission);
+  if (earlier) return earlier;
+
   const id = newId();
+  const at = yield* now;
 
   // The fact's insert is conditional on the Item being stock-tracked, so its
   // `changes` says whether the Adjustment was recorded.
-  const [fact] = yield* db.batch(
-    adjustmentStatements({
-      id,
-      itemId: input.itemId,
-      reason: input.reason,
-      units: input.units,
-      note,
-      by: admin.id,
-      at: yield* now,
-      day: yield* today,
+  const [fact] = yield* db.batch([
+    ...adjustmentStatements(
+      { id, itemId: input.itemId, reason: input.reason, units: input.units, note, by: admin.id, at, day: yield* today },
+      notYetRecorded(submission),
+    ),
+    submissionStatement(submission, {
+      at,
+      answer: json({ id }),
+      wrote: { sql: "EXISTS (SELECT 1 FROM adjustments WHERE id = ?)", params: [id] },
     }),
-  );
+  ]);
 
   if (fact!.changes === 0) {
+    // Another request with this form's key recorded it meanwhile.
+    const meanwhile = yield* recordedAnswer(AdjustmentAnswer, submission);
+    if (meanwhile) return meanwhile;
     const item = yield* db.first(
       Schema.Struct({ stockTracked: Schema.Int }),
       "SELECT stock_tracked AS stockTracked FROM items WHERE id = ?",
