@@ -3,7 +3,7 @@ import { Effect, Schema } from "effect";
 import type { Day, Instant } from "~/shared/day";
 
 import { requireAdmin } from "./current-user";
-import { Db, statement, type Statement } from "./db";
+import { Db, statement, type Condition, type Statement } from "./db";
 
 /**
  * Stock (spec §5.8, ADR 0002). `stock_levels` is a projection: nothing writes
@@ -22,14 +22,19 @@ import { Db, statement, type Statement } from "./db";
  * It does nothing to an Item that is not stock-tracked at that moment (spec
  * §5.1), and its `changes` says whether Stock moved. Because the change is
  * relative, two phones moving the same Item's Stock never conflict (§7.3).
+ *
+ * When the batch has a condition all of its statements share (`Condition`),
+ * pass it as `when`, so Stock moves exactly when the rest of the batch does
+ * and not when a refused selection would have moved it.
  */
-export function changeStock(itemId: string, units: number): Statement {
+export function changeStock(itemId: string, units: number, when?: Condition): Statement {
   return statement(
     `INSERT INTO stock_levels (item_id, units)
-     SELECT id, ? FROM items WHERE id = ? AND stock_tracked = 1
+     SELECT id, ? FROM items WHERE id = ? AND stock_tracked = 1${when ? ` AND (${when.sql})` : ""}
      ON CONFLICT (item_id) DO UPDATE SET units = units + excluded.units`,
     units,
     itemId,
+    ...(when?.params ?? []),
   );
 }
 
