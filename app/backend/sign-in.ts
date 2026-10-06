@@ -114,34 +114,53 @@ export const useSignInCode = Effect.fn("useSignInCode")(function* (typed: string
   return { token };
 });
 
-const SessionUser = Schema.Struct({
+/**
+ * A use moves a session's `last_used_at` only when it is at least this old,
+ * so a request that only reads writes nothing (spec §10.7). Against 60 days,
+ * an hour costs a session at most an hour of its lifetime.
+ */
+const SESSION_TOUCH_INTERVAL = 60 * 60 * 1000;
+
+const LiveSession = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   role: Schema.Literals(["admin", "worker"]),
+  lastUsedAt: Schema.Int,
 });
 
 /**
  * The User a session token belongs to, which is what `CurrentUser` is made
- * of. Finding the session is also its use: one statement extends it and reads
- * its User, and changes nothing unless the session is live and the User
- * active.
+ * of. A read finds the session, and only if it is live and its User active.
+ * The use extends the session with a write of its own, at most once every
+ * `SESSION_TOUCH_INTERVAL`; when D1 refuses that write the User is signed in
+ * all the same, because the session was live when it was read.
  */
 export const authenticate = Effect.fn("authenticate")(function* (token: string) {
   const db = yield* Db;
   const at = yield* now;
-  const user = yield* db.first(
-    SessionUser,
-    `UPDATE sessions SET last_used_at = ?
-     WHERE token_hash = ? AND revoked_at IS NULL AND last_used_at > ?
-       AND (SELECT active FROM users WHERE users.id = sessions.user_id) = 1
-     RETURNING
-       user_id AS id,
-       (SELECT name FROM users WHERE users.id = sessions.user_id) AS name,
-       (SELECT role FROM users WHERE users.id = sessions.user_id) AS role`,
-    at, yield* hash(token), at - SESSION_IDLE_LIFETIME,
+  const tokenHash = yield* hash(token);
+  const session = yield* db.first(
+    LiveSession,
+    `SELECT users.id, users.name, users.role, sessions.last_used_at AS lastUsedAt
+     FROM sessions JOIN users ON users.id = sessions.user_id
+     WHERE sessions.token_hash = ? AND sessions.revoked_at IS NULL
+       AND sessions.last_used_at > ? AND users.active = 1`,
+    tokenHash, at - SESSION_IDLE_LIFETIME,
   );
-  if (!user) return yield* new NotSignedIn();
-  return user satisfies CurrentUser["Service"];
+  if (!session) return yield* new NotSignedIn();
+
+  if (at - session.lastUsedAt >= SESSION_TOUCH_INTERVAL) {
+    yield* db
+      // Never backwards, and never a session revoked since the read.
+      .run(
+        "UPDATE sessions SET last_used_at = ? WHERE token_hash = ? AND revoked_at IS NULL AND last_used_at < ?",
+        at, tokenHash, at,
+      )
+      .pipe(Effect.catchTag("DbError", () => Effect.void));
+  }
+
+  const { id, name, role } = session;
+  return { id, name, role } satisfies CurrentUser["Service"];
 });
 
 /** Ends the session of the phone that holds this token. */

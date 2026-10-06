@@ -22,7 +22,8 @@ import { countingD1 } from "./support/d1";
 // every request of the release gate issues at most 50 D1 statements, and none
 // of them reads rows in proportion to the history. The history grows from
 // four months to the whole year between the two measurements; the same
-// request must read the same rows either way.
+// request must read the same rows either way. The six requests that only read
+// (the GETs) write no row at all, the session's included (ticket 26).
 //
 // The requests are real HTTP requests through the Worker — the same document
 // and action paths a browser uses, so a POST carries whatever re-render the
@@ -49,6 +50,8 @@ interface Counts {
   readonly rowsRead: number;
   readonly rowsWritten: number;
   readonly status: number;
+  /** The request only reads: it is a GET. */
+  readonly readOnly: boolean;
 }
 
 /** Every statement of a window as one D1 batch at a time. */
@@ -88,6 +91,7 @@ async function measure(request: Request): Promise<Counts> {
       rowsRead: counter.rowsRead,
       rowsWritten: counter.rowsWritten,
       status: response.status,
+      readOnly: request.method === "GET",
     };
   } finally {
     Object.defineProperty(env, "DB", descriptor ?? { value: original, configurable: true });
@@ -233,7 +237,7 @@ async function measureAll(cookie: string) {
 }
 
 describe("the §10.7 budget against the seeded year", () => {
-  it("keeps every request under 50 statements, reading its own rows at both history sizes", async () => {
+  it("keeps every request under 50 statements, reading its own rows at both history sizes, and writing none when it only reads", async () => {
     await load(seedStatements({ from: smallFrom, to: SEED_TO }));
     // The window the budget is measured against is the seed's own shape: 200
     // Open Bills, one Customer with 30 of them, the busiest Day inside it.
@@ -263,6 +267,11 @@ describe("the §10.7 budget against the seeded year", () => {
       // Bills, Lines or Payments of the other nine months would show it here.
       expect(large.rowsRead, `${at}: rows read with a year`).toBeLessThanOrEqual(small.rowsRead + 64);
       expect(large.rowsRead, `${at}: rows read against its own page`).toBeLessThan(request.cap);
+      if (small.readOnly) {
+        expect(small.rowsWritten, `${at}: rows written at four months`).toBe(0);
+        expect(large.rowsWritten, `${at}: rows written with a year`).toBe(0);
+      }
     }
+    expect([...year.values()].filter((counted) => counted.readOnly)).toHaveLength(6);
   });
 });

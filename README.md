@@ -188,13 +188,13 @@ Every operation reads the clock, so events sort by their instant; the facts of o
 
 ## Request budgets
 
-Spec §10.7 holds nine requests to a budget against a year of synthetic records: at most 50 D1 statements each, and rows read that do not grow with the history. Two local tests prove it, inside `npm test`; nothing runs against a deployment (ADR 0007).
+Spec §10.7 holds nine requests to a budget against a year of synthetic records: at most 50 D1 statements each, rows read that do not grow with the history, and no row written by a request that only reads. Two local tests prove it, inside `npm test`; nothing runs against a deployment (ADR 0007).
 
 ```sh
 npm test -- tests/proof-seed.test.ts tests/proof-budget.test.ts
 ```
 
-The seed test loads the whole year into a real D1 and asserts its shape (200 Open Bills, one Customer with 30 of them, a clearly busiest Day, every History fact table) and that `projections:verify`'s SQL finds no difference. The budget test loads four months, measures the nine requests, appends the rest of the year and measures them again: each request must issue at most 50 D1 statements and read the same rows at both sizes, and each has a cap of its own. The requests are real HTTP requests through the Worker, with a counting D1 swapped into the binding. The nine are the Sell screen, a ten-Item selection with Payment, Cuentas abiertas, Abonar across the 30-Bill Customer, Día for the busiest Day, a page of Cuentas, Inventario, a Count of every Item and a page of Historial.
+The seed test loads the whole year into a real D1 and asserts its shape (200 Open Bills, one Customer with 30 of them, a clearly busiest Day, every History fact table) and that `projections:verify`'s SQL finds no difference. The budget test loads four months, measures the nine requests, appends the rest of the year and measures them again: each request must issue at most 50 D1 statements and read the same rows at both sizes, and each has a cap of its own. The six GETs must also write no row: a session's `last_used_at` moves at most once an hour. The requests are real HTTP requests through the Worker, with a counting D1 swapped into the binding. The nine are the Sell screen, a ten-Item selection with Payment, Cuentas abiertas, Abonar across the 30-Bill Customer, Día for the busiest Day, a page of Cuentas, Inventario, a Count of every Item and a page of Historial.
 
 ### The seed
 
