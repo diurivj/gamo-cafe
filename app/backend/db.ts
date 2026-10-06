@@ -23,6 +23,17 @@ export function statement(sql: string, ...params: ReadonlyArray<Param>): Stateme
   return { sql, params };
 }
 
+/**
+ * A SQL condition and its parameters, for the statements of one batch to
+ * share. A D1 batch cannot branch, so when the first statement's condition
+ * fails the later ones have to fail it too: an operation that must write
+ * everything or nothing repeats the same condition in every statement.
+ */
+export interface Condition {
+  readonly sql: string;
+  readonly params: ReadonlyArray<Param>;
+}
+
 /** How many rows a write inserted, updated or deleted. */
 export interface WriteResult {
   readonly changes: number;

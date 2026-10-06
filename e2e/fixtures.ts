@@ -76,6 +76,14 @@ type TestFixtures = {
     name: string,
     seed: { by: SeededUser; note?: string; retired?: boolean },
   ) => Promise<SeededCustomer>;
+  /**
+   * Reads rows from the Worker's D1, for what no screen shows yet:
+   * `await query("SELECT units FROM stock_levels WHERE item_id = ?", [item.id])`.
+   */
+  query: (
+    sql: string,
+    params?: ReadonlyArray<string | number | null>,
+  ) => Promise<Array<Record<string, unknown>>>;
 };
 
 export interface SeededCustomer {
@@ -104,6 +112,7 @@ function localHttpsWorkerConfig() {
 interface Statement {
   bind(...values: ReadonlyArray<string | number | null>): Statement;
   run(): Promise<unknown>;
+  all(): Promise<{ readonly results: Array<Record<string, unknown>> }>;
 }
 interface Database {
   prepare(sql: string): Statement;
@@ -246,6 +255,15 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
         .bind(customer.id, name, normalizeName(name), note ?? null, retired ? at : null, by.id, at)
         .run();
       return customer;
+    });
+  },
+
+  query: async ({ server }, use) => {
+    await use(async (sql, params = []) => {
+      const DB = await database(server);
+      const prepared = DB.prepare(sql);
+      const { results } = await (params.length > 0 ? prepared.bind(...params) : prepared).all();
+      return results;
     });
   },
 });

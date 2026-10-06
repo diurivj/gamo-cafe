@@ -37,6 +37,7 @@ app/
     run.server.ts  run(): the one way a loader or action runs a program
     health.ts      the reference operation
     customers.ts   Customers: addCustomer, searchCustomers, getCustomer, editCustomer, retireCustomer, restoreCustomer
+    bills.ts       Bills and Lines: recordSelection (one batch), getBill
   shared/      Plain functions, no Effect. Safe in the browser.
     money.ts       centavos, formatMoney, parsePesos
     day.ts         Instant, Day, dayOf, formatDay, formatTime
@@ -107,7 +108,7 @@ export const addNote = Effect.fn("addNote")(function* (billId: string, text: str
 ```
 
 - `db.first(schema, sql, ...params)` gives the decoded row or `undefined`; `db.all` gives every row; `db.run` and `db.batch` give `{ changes }` per statement.
-- A batch cannot branch. Put the condition in the SQL (`WHERE revision = ?`) and read `changes` afterwards to detect a stale submission.
+- A batch cannot branch. Put the condition in the SQL (`WHERE revision = ?`) and read `changes` afterwards to detect a stale submission. When one rule refuses a whole operation, every statement of the batch carries the same `Condition` from `~/backend/db`, so a refused operation writes nothing at all; `recordSelection` in `~/backend/bills.ts` shows it.
 - Every `Db` method can fail with `DbError`. Leave it alone unless the operation has something better to answer.
 
 ## Writing a route
@@ -221,4 +222,4 @@ it("does not show Inventario to a Worker", async () => {
 - `tests/support/customers.ts` has the Customers: `seedCustomer(name, { by?, note?, retired? })` inside a `runTest` program, and `savedCustomer(...)`, the same as a promise, for tests that go through the Worker. In `e2e/fixtures.ts` it is the `addCustomer(name, { by, note?, retired? })` fixture.
 - A rule about the whole table (the last active Admin) needs a file whose tests each start from an empty database: `reset()` and `applyD1Migrations` from `cloudflare:test` in a `beforeEach`, as in `tests/last-admin.test.ts`.
 - The Worker reads the real clock, so a test that goes through it cannot move time. Rules about time are tested on operations with `runTest`.
-- Browser tests live in `e2e/*.spec.ts` and import `test` and `expect` from `./fixtures`, which serves the built Worker over local HTTPS and gives every test an empty migrated D1. Its `signInAs(role, name?)` fixture adds a User and signs the test's browser in without going through Entrar; `addUser` and `issueCode` are there for tests about signing in. `addCategory(name?)` and `addItem({ name?, price?, category?, stockTracked?, minimum?, stock? })` seed the catalog by writing rows directly.
+- Browser tests live in `e2e/*.spec.ts` and import `test` and `expect` from `./fixtures`, which serves the built Worker over local HTTPS and gives every test an empty migrated D1. Its `signInAs(role, name?)` fixture adds a User and signs the test's browser in without going through Entrar; `addUser` and `issueCode` are there for tests about signing in. `addCategory(name?)` and `addItem({ name?, price?, category?, stockTracked?, minimum?, stock? })` seed the catalog by writing rows directly. `query(sql, params?)` reads rows from the Worker's D1, for what no screen shows yet.
