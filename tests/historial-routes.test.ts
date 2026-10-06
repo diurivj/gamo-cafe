@@ -9,6 +9,7 @@ import { formatDay, formatTime } from "~/shared/day";
 import { as, seedUser, signedIn } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { advanceClock, runTest, setClock } from "./support/effect";
+import { nextHref } from "./support/pages";
 
 // Historial through the Worker (spec §6.2, §10.4): what the route shows, what
 // it refuses, and how the page's link walks the keyset. Tests share one D1, so
@@ -106,19 +107,19 @@ describe("Historial", () => {
     const admin = await signedIn("admin", "Ana");
     const first = await admin.fetch("/historial");
     const firstHtml = await first.text();
-    expect(firstHtml).toContain("Más movimientos");
+    expect(firstHtml).toContain("Cargar más");
     expect(historyIds(firstHtml).filter((id) => seeded.ids.includes(id))).toEqual(seeded.ids.slice(0, 50));
 
     // The link carries the keyset; the next page holds exactly the rest.
-    const href = /href="(\/historial\?[^"]+)"/.exec(firstHtml)?.[1];
-    expect(href).toBeTruthy();
-    const second = await admin.fetch(href!.replaceAll("&amp;", "&"));
+    const href = nextHref(firstHtml);
+    expect(href).toContain("/historial?desde=");
+    const second = await admin.fetch(href!);
     const secondHtml = await second.text();
     expect(historyIds(secondHtml).filter((id) => seeded.ids.includes(id))).toEqual(seeded.ids.slice(50));
-    expect(secondHtml).not.toContain("Más movimientos");
+    expect(secondHtml).not.toContain("Cargar más");
 
     // An unreadable cursor is no cursor: the first page, not an error.
-    const bad = await admin.fetch("/historial?antes=ayer&id=");
+    const bad = await admin.fetch("/historial?desde=ayer");
     expect(bad.status).toBe(200);
     expect(historyIds(await bad.text()).filter((id) => seeded.ids.includes(id))).toEqual(
       seeded.ids.slice(0, 50),

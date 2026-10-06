@@ -2,10 +2,12 @@ import { Effect } from "effect";
 import { Link } from "react-router";
 
 import { CurrentUser } from "~/backend/current-user";
-import { type HistoryCursor, type HistoryEntry, listHistory } from "~/backend/history";
+import { type HistoryEntry, listHistory } from "~/backend/history";
 import { run } from "~/backend/run.server";
 import { refuseRead, requireAdminUser } from "~/catalog-forms.server";
+import { LoadMore, usePagedList } from "~/components/paged-list";
 import { adjustmentReasonLabel, adjustmentSign, type AdjustmentReason } from "~/shared/adjustment";
+import { CURSOR_PARAM, cursorOf, nextText } from "~/shared/cursor";
 import { dayOf, formatDay, formatTime } from "~/shared/day";
 import { formatMoney } from "~/shared/money";
 import { paymentMethodLabel } from "~/shared/payment";
@@ -19,22 +21,19 @@ import type { Route } from "./+types/historial";
 
 export const meta: Route.MetaFunction = () => [{ title: "Historial · Gamo Cafe" }];
 
-/** The keyset the URL carries, or the first page when it is unreadable. */
-function cursorFrom(url: URL): HistoryCursor | null {
-  const at = Number(url.searchParams.get("antes"));
-  const id = url.searchParams.get("id") ?? "";
-  return Number.isSafeInteger(at) && at >= 0 && id !== "" ? { at, id } : null;
-}
-
 export async function loader({ context, request }: Route.LoaderArgs) {
   const admin = requireAdminUser(context);
   const page = await run(
     context,
-    listHistory(cursorFrom(new URL(request.url))).pipe(Effect.provideService(CurrentUser, admin)),
+    listHistory(cursorOf(request.url)).pipe(Effect.provideService(CurrentUser, admin)),
     refuseRead,
   );
-  return page;
+  return { entries: page.entries, next: nextText(page.next) };
 }
+
+type Data = Route.ComponentProps["loaderData"];
+const pageOf = (data: Data) => ({ rows: data.entries, next: data.next });
+const hrefFor = (cursor: string) => `/historial?${CURSOR_PARAM}=${encodeURIComponent(cursor)}`;
 
 /**
  * Everything one row shows, from the entry alone: its line, its link, the
@@ -132,7 +131,7 @@ function Entry({ entry }: { entry: HistoryEntry }) {
 }
 
 export default function Historial({ loaderData }: Route.ComponentProps) {
-  const { entries, next } = loaderData;
+  const { rows: entries, more } = usePagedList({ id: "historial", data: loaderData, pageOf, hrefFor });
 
   return (
     <div className="flex flex-col gap-6">
@@ -151,14 +150,7 @@ export default function Historial({ loaderData }: Route.ComponentProps) {
         </ul>
       )}
 
-      {next === null ? null : (
-        <Link
-          to={`/historial?antes=${next.at}&id=${encodeURIComponent(next.id)}`}
-          className="rounded-xl border border-stone-300 bg-white px-4 py-3 text-center font-medium"
-        >
-          Más movimientos
-        </Link>
-      )}
+      <LoadMore more={more} />
     </div>
   );
 }

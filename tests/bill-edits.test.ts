@@ -77,7 +77,7 @@ describe("editing a Bill's Customer or note", () => {
 
         // The Bill now appears among that Customer's Open Bills and in what
         // they owe (spec §5.2).
-        expect(yield* listOpenBills("familia rui")).toMatchObject([
+        expect((yield* listOpenBills("familia rui")).bills).toMatchObject([
           { id: bill.id, customer: { id: ruiz.id, name: "Familia Ruiz" }, owed: 3700 },
         ]);
       }),
