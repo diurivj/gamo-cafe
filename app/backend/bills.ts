@@ -8,10 +8,13 @@ import { normalizeName } from "~/shared/normalize-name";
 import { PAYMENT_METHODS, type PaymentMethod } from "~/shared/payment";
 
 import { CurrentUser } from "./current-user";
+import { CustomerNotFound } from "./customers";
 import { Db, statement, type Condition, type Statement } from "./db";
 import {
   BillChanged,
   BillIsVoided,
+  CustomerBillsChanged,
+  handoverStatements,
   paymentStatements,
   PaymentExceedsOwed,
   PaymentNotPositive,
@@ -35,6 +38,8 @@ import { now } from "./time";
  * conflicts: totals and Stock change by relative amounts, so two phones
  * adding to the same Bill both succeed. `takePayment` (spec §7.3.2) records a
  * Payment on one Bill, conditionally on the revision the page showed.
+ * `takeCustomerPayment` (ticket 09) spreads one amount over a Customer's Open
+ * Bills, oldest first, all of them or none (spec §5.5, §7.3.2).
  */
 
 const BillStateSchema = Schema.Literals(BILL_STATES);
@@ -192,6 +197,122 @@ const ChosenRow = Schema.Struct({ id: Schema.String, price: Schema.Int });
 const IdRow = Schema.Struct({ id: Schema.String });
 
 const StateRow = Schema.Struct({ state: BillStateSchema });
+
+/** One of a Customer's Open Bills, as their page and an Abonar see it. */
+export interface CustomerBill {
+  readonly id: string;
+  readonly day: Day;
+  readonly total: Centavos;
+  readonly paid: Centavos;
+  /** What the Bill still owes (spec §5.6). */
+  readonly owed: Centavos;
+  readonly state: BillState;
+  readonly revision: number;
+}
+
+const CustomerBillRow = Schema.Struct({
+  id: Schema.String,
+  day: Schema.String,
+  total: Schema.Int,
+  paid: Schema.Int,
+  state: BillStateSchema,
+  revision: Schema.Int,
+});
+
+/**
+ * A Customer's Open Bills that still owe something, oldest first (spec §5.2,
+ * §5.5). One index-driven read; retired Customers are included, because their
+ * Open Bills stay collectable.
+ */
+export const listCustomerOpenBills = Effect.fn("listCustomerOpenBills")(function* (customerId: string) {
+  const db = yield* Db;
+  const rows = yield* db.all(
+    CustomerBillRow,
+    `SELECT id, day, total, paid, state, revision
+     FROM bills
+     WHERE customer_id = ? AND state IN ('open', 'partial') AND total > paid
+     ORDER BY opened_at, rowid`,
+    customerId,
+  );
+  return rows.map((row) => ({ ...row, owed: row.total - row.paid }));
+});
+
+const HandoverRow = Schema.Struct({
+  id: Schema.String,
+  amount: Schema.Int,
+  method: Schema.Literals(PAYMENT_METHODS),
+  reference: Schema.NullOr(Schema.String),
+  by: Schema.String,
+  byName: Schema.String,
+  at: Schema.Int,
+  day: Schema.String,
+});
+
+/** One Payment, or the several Payments of one handover, on the Customer page. */
+export interface Handover {
+  /** The newest Payment of the event, for keys. */
+  readonly id: string;
+  /** The shared reference; null for a Payment taken on one Bill. */
+  readonly reference: string | null;
+  /** The event's money: one Payment's amount, or the Payments' sum. */
+  readonly amount: Centavos;
+  readonly method: PaymentMethod;
+  readonly by: string;
+  readonly byName: string;
+  readonly at: Instant;
+  readonly day: Day;
+  /** How many Bills the money reached; 1 for a Payment on one Bill. */
+  readonly billCount: number;
+}
+
+/** How many Payment rows a Customer's handover list reads at most. */
+export const HANDOVER_ROWS = 60;
+/** How many events a Customer's handover list shows at most. */
+export const HANDOVER_LIMIT = 10;
+
+/**
+ * A Customer's Payments, newest first, with the Payments of one handover (the
+ * same `handover_reference` of §5.5) collapsed into one event. `LIMIT` bounds
+ * the rows read to the Customer's recent money, whatever the rest of the
+ * history holds (spec §2.4).
+ */
+export const listCustomerHandovers = Effect.fn("listCustomerHandovers")(function* (customerId: string) {
+  const db = yield* Db;
+  const rows = yield* db.all(
+    HandoverRow,
+    `SELECT p.id, p.amount, p.method, p.handover_reference AS reference,
+            p.received_by AS "by", u.name AS byName, p.received_at AS at, p.day
+     FROM payments p
+     JOIN bills b ON b.id = p.bill_id
+     JOIN users u ON u.id = p.received_by
+     WHERE b.customer_id = ?
+     ORDER BY p.received_at DESC, p.rowid DESC
+     LIMIT ?`,
+    customerId,
+    HANDOVER_ROWS,
+  );
+
+  const totals = new Map<string, { amount: Centavos; billCount: number }>();
+  for (const row of rows) {
+    if (row.reference === null) continue;
+    const total = totals.get(row.reference) ?? { amount: 0, billCount: 0 };
+    totals.set(row.reference, { amount: total.amount + row.amount, billCount: total.billCount + 1 });
+  }
+
+  const events: Array<Handover> = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (row.reference === null) {
+      events.push({ ...row, billCount: 1 });
+      continue;
+    }
+    if (seen.has(row.reference)) continue;
+    seen.add(row.reference);
+    const total = totals.get(row.reference)!;
+    events.push({ ...row, amount: total.amount, billCount: total.billCount });
+  }
+  return events.slice(0, HANDOVER_LIMIT);
+});
 
 /**
  * Records a selection as Lines on a Bill (spec §7.3.1), in one batch:
@@ -482,6 +603,108 @@ export const takePayment = Effect.fn("takePayment")(function* (input: NewPayment
   // so this says whether the Payment left the Bill Paid; the route needs it to
   // know whether a Worker may stay on the page (§4.1).
   return { id, amount, paid: bill.paid + amount === bill.total };
+});
+
+/** One Bill and the revision the User's page showed it at (spec §7.3). */
+export interface ExpectedBillRevision {
+  readonly billId: string;
+  readonly revision: number;
+}
+
+export interface NewCustomerPayment {
+  readonly customerId: string;
+  /** Centavos; absent or null pays everything the Customer owes (spec §5.5). */
+  readonly amount?: Centavos | null;
+  readonly method: PaymentMethod;
+  /**
+   * Every Open Bill and the revision the User's page showed it at. A
+   * submission whose Bills do not match these exactly changes nothing
+   * (spec §5.5, §7.3).
+   */
+  readonly expectedRevisions: ReadonlyArray<ExpectedBillRevision>;
+}
+
+/** What one Bill received from a handover. */
+export interface CustomerPaymentShare {
+  readonly billId: string;
+  readonly paymentId: string;
+  readonly amount: Centavos;
+}
+
+/**
+ * Takes one amount across a Customer's Open Bills (spec §7.3.2, §5.5, flow
+ * §8.3): the amount defaults to everything the Customer owes and may be less,
+ * never more. It reaches the Bills oldest first, one Payment per Bill with the
+ * same method, User, moment and `handover_reference`, and the last Bill it
+ * touches may be left Pago parcial.
+ *
+ * All of it is recorded or none of it. The batch holds two multi-row
+ * statements (one insert, one update) under one shared condition, so 30 Open
+ * Bills cost two statements and no query comes near 100 bound parameters
+ * (spec §2.4, §10.3). The condition is the set of Open Bills that still owe,
+ * with each revision: any Bill that changed since the page was rendered —
+ * another phone paying it, adding Lines to it — makes every statement refuse,
+ * and the User is told the Bills changed.
+ *
+ * A retired Customer's Bills stay collectable (spec §5.2): nothing here looks
+ * at `retired_at`.
+ */
+export const takeCustomerPayment = Effect.fn("takeCustomerPayment")(function* (
+  input: NewCustomerPayment,
+) {
+  const db = yield* Db;
+  const user = yield* CurrentUser;
+
+  const customer = yield* db.first(IdRow, "SELECT id FROM customers WHERE id = ?", input.customerId);
+  if (!customer) return yield* new CustomerNotFound();
+
+  const bills = yield* listCustomerOpenBills(input.customerId);
+  const expected = new Map(input.expectedRevisions.map((bill) => [bill.billId, bill.revision]));
+  const unchanged =
+    expected.size === bills.length && bills.every((bill) => expected.get(bill.id) === bill.revision);
+  if (!unchanged) return yield* new CustomerBillsChanged({ customerId: input.customerId });
+
+  const owed = bills.reduce((sum, bill) => sum + bill.owed, 0);
+  const amount = input.amount ?? owed;
+  if (!Number.isSafeInteger(amount) || amount < 1) return yield* new PaymentNotPositive();
+  if (amount > owed) return yield* new PaymentExceedsOwed({ owed });
+
+  // Oldest first, until the amount is used up (spec §5.5, flow §8.3).
+  const shares: Array<CustomerPaymentShare> = [];
+  let left = amount;
+  for (const bill of bills) {
+    if (left === 0) break;
+    const share = Math.min(left, bill.owed);
+    shares.push({ billId: bill.id, paymentId: newId(), amount: share });
+    left -= share;
+  }
+
+  const at = yield* now;
+  const reference = newId();
+  // A D1 batch cannot branch: every statement carries this condition, so any
+  // Bill that moved since the read refuses the whole handover (spec §7.3).
+  const shown = JSON.stringify(bills.map((bill) => [bill.id, bill.revision]));
+  const condition: Condition = {
+    sql: `(SELECT COUNT(*) FROM bills b
+           WHERE b.customer_id = ? AND b.state IN ('open', 'partial') AND b.total > b.paid
+             AND EXISTS (SELECT 1 FROM json_each(?) AS j
+                         WHERE json_extract(j.value, '$[0]') = b.id
+                           AND json_extract(j.value, '$[1]') = b.revision))
+          = (SELECT COUNT(*) FROM json_each(?))`,
+    params: [input.customerId, shown, shown],
+  };
+  const [recorded] = yield* db.batch(
+    handoverStatements(
+      { reference, shares, method: input.method, by: user.id, at, day: dayOf(at) },
+      condition,
+    ),
+  );
+  if (recorded!.changes !== shares.length) {
+    // The condition refused the whole batch: the Bills moved while the
+    // submission was in flight, so nothing was recorded (spec §5.5).
+    return yield* new CustomerBillsChanged({ customerId: input.customerId });
+  }
+  return { reference, amount, shares };
 });
 
 const SummaryRow = Schema.Struct({
