@@ -1,6 +1,6 @@
 # 06 — Vender: record a selection and leave the Bill Open
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 04, 05
 Spec: [`../spec.md`](../spec.md) §2.2, §5.3, §5.4, §5.8, §6.1 (Vender), §7.2, §7.3 (1), §8.2, §10.2, §10.5 · ADR 0002, 0003
 
@@ -18,6 +18,11 @@ Spec: [`../spec.md`](../spec.md) §2.2, §5.3, §5.4, §5.8, §6.1 (Vender), §7
 ## Acceptance criteria
 
 - [ ] Two selections for the same Customer on the same Day land on one Bill while it is Open, and on a new Bill on a later Day (test clock).
+
+## Comments
+
+- 2026-10-06: Implemented on `ticket/06-vender`, merged into `gamo-cafe-v1` at `9d28514`. Decisions: the Vender form posts to `?index` (React Router sends `POST /` to the root); Lines carry `moved_stock`, a fact set from the Item's flag when the Line is written, so ticket 19's rebuild need not guess after a tracking toggle; a target Bill given with a Customer or note is refused (`TargetConflict`); the same Item sent twice becomes one Line of both quantities; every statement of the batch shares one `Condition`, so a refused selection writes nothing, Stock included; only Open Bills take Lines.
+- Ticket 08: `recordSelection` is shaped to append the Payment's statements to the same batch, carrying the same `Condition`. `getBill` is not gated yet; ticket 07 adds the Paid/Voided permission rule.
 - [ ] A Line keeps its price after the Item's price changes.
 - [ ] A retired Item cannot be added, and a retired Customer cannot be chosen.
 - [ ] A Bill with no Customer can be left Open.
