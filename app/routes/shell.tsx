@@ -24,7 +24,7 @@ const adminOnly: ReadonlyArray<Section> = [
   { label: "Día" },
   { label: "Cuentas" },
   { label: "Por cobrar" },
-  { label: "Inventario" },
+  { label: "Inventario", to: "/inventario" },
   { label: "Diferencias" },
   { label: "Historial" },
   { label: "Productos", to: "/productos" },
