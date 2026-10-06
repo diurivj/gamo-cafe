@@ -452,7 +452,7 @@ describe("Cobrar on Vender", () => {
       }),
     ));
 
-  it("refuses a Payment larger than what a target Bill will owe", () =>
+  it("refuses a Payment larger than the selection on a target Bill, even when the Bill owes more", () =>
     runTest(
       Effect.gen(function* () {
         const ana = yield* seedUser("admin");
@@ -468,6 +468,45 @@ describe("Cobrar on Vender", () => {
         );
 
         expect(error._tag).toBe("PaymentExceedsOwed");
+      }),
+    ));
+
+  it("caps a target Bill's Payment at the selection, so a concurrent payment cannot leave Lines without their Payment", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const item = yield* seedItem({ name: "Deuda previa y pago", price: 1000, by: ana });
+        // The target Bill owes 2000 before this selection.
+        const bill = yield* recordSelection({ items: [{ itemId: item.id, quantity: 2 }] }).pipe(as(ana));
+        expect(bill.owed).toBe(2000);
+
+        // A selection of 1000 pays at most 1000 on Vender; 1500 is refused,
+        // and nothing of the refused sale is written.
+        const error = yield* Effect.flip(
+          recordSelection({
+            items: [{ itemId: item.id, quantity: 1 }],
+            billId: bill.id,
+            payment: { method: "cash", amount: 1500 },
+          }).pipe(as(ana)),
+        );
+        expect(error._tag).toBe("PaymentExceedsOwed");
+        expect(yield* getBill(bill.id).pipe(as(ana))).toMatchObject({
+          total: 2000,
+          paid: 0,
+          owed: 2000,
+          state: "open",
+        });
+
+        // Paying exactly the selection's total works, and the prior debt stays:
+        // prior debt is settled from Cuenta (spec §6.1).
+        const paid = yield* recordSelection({
+          items: [{ itemId: item.id, quantity: 1 }],
+          billId: bill.id,
+          payment: { method: "cash", amount: 1000 },
+        }).pipe(as(ana));
+
+        expect(paid).toMatchObject({ total: 3000, paid: 1000, owed: 2000, state: "partial" });
+        expect((yield* getBill(bill.id).pipe(as(ana))).payments).toMatchObject([{ amount: 1000, method: "cash" }]);
       }),
     ));
 

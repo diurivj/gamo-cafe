@@ -8,8 +8,10 @@
 export const paymentMessages = {
   /** A Payment of zero or less (spec §2.3). */
   PaymentNotPositive: "El pago debe ser mayor que cero.",
-  /** More than the Bill still owes (spec §2.3, §5.5). */
+  /** More than the Bill still owes when paying on Cuenta (spec §2.3, §5.5). */
   PaymentExceedsOwed: "El pago no puede ser mayor que lo que debe la cuenta.",
+  /** More than the selection's total when paying on Vender (spec §6.1). */
+  PaymentExceedsSelection: "El pago no puede ser mayor que el total de la selección.",
   /** The Bill was Voided (spec §5.7). */
   BillIsVoided: "Esta cuenta está cancelada.",
   /** Another phone changed the Bill first (spec §5.5). */

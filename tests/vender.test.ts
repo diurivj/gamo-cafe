@@ -178,7 +178,7 @@ describe("Vender", () => {
     expect(requests.map((request) => request.status)).toEqual([400, 400, 400, 400]);
     const messages = await Promise.all(requests.map((request) => request.text()));
     expect(messages[0]).toContain("El pago debe ser mayor que cero.");
-    expect(messages[1]).toContain("El pago no puede ser mayor que lo que debe la cuenta.");
+    expect(messages[1]).toContain("El pago no puede ser mayor que el total de la selección.");
     expect(messages[2]).toContain("El monto no es válido. Escríbelo como 18.50.");
     expect(messages[3]).toContain("Elige cómo se pagó.");
 

@@ -128,7 +128,7 @@ function answerSelectionError(error: SelectionError): { readonly error: string }
     case "PaymentNotPositive":
       return { error: paymentMessages.PaymentNotPositive };
     case "PaymentExceedsOwed":
-      return { error: paymentMessages.PaymentExceedsOwed };
+      return { error: paymentMessages.PaymentExceedsSelection };
   }
 }
 

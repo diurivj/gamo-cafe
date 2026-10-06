@@ -106,16 +106,17 @@ export interface NewSelection {
   /**
    * The Payment taken together with the selection (**Cobrar** on Vender,
    * spec §6.1, §7.3.1). Its amount defaults to the selection's total and may
-   * be less; the amount handed over for cash is not stored, so it is not
-   * here.
+   * be less, and it is never more than the selection's total: a Vender
+   * payment settles what is being sold now, and prior debt is paid from
+   * Cuenta. The amount handed over for cash is not stored, so it is not here.
    */
   readonly payment?: NewSelectionPayment | null;
 }
 
-/** The Payment of **Cobrar**: a method, and optionally less than the total. */
+/** The Payment of **Cobrar**: a method, and at most the selection's total. */
 export interface NewSelectionPayment {
   readonly method: PaymentMethod;
-  /** Centavos. Absent or null pays the selection's total. */
+  /** Centavos. Absent or null pays the selection's total; never more than it. */
   readonly amount?: Centavos | null;
 }
 
@@ -179,18 +180,11 @@ function mergeSelection(items: ReadonlyArray<SelectionItem>): ReadonlyArray<Sele
   return [...quantities].map(([itemId, quantity]) => ({ itemId, quantity }));
 }
 
-const TargetRow = Schema.Struct({
-  id: Schema.String,
-  state: BillStateSchema,
-  total: Schema.Int,
-  paid: Schema.Int,
-});
+const TargetRow = Schema.Struct({ id: Schema.String, state: BillStateSchema });
 
 const CustomerRoute = Schema.Struct({
   billId: Schema.NullOr(Schema.String),
   billState: Schema.NullOr(BillStateSchema),
-  billTotal: Schema.NullOr(Schema.Int),
-  billPaid: Schema.NullOr(Schema.Int),
 });
 
 const ChosenRow = Schema.Struct({ id: Schema.String, price: Schema.Int });
@@ -207,7 +201,9 @@ const StateRow = Schema.Struct({ state: BillStateSchema });
  * - one Line per distinct Item, at the price read now;
  * - the Bill's projections: total, revision and the derived state (§5.6);
  * - Stock, down by the quantity of every stock-tracked Item;
- * - the Payment of **Cobrar**, when the selection is paid on the spot.
+ * - the Payment of **Cobrar**, when the selection is paid on the spot; it is
+ *   never more than the selection's total, so it can never make
+ *   `paid + amount` outrun the Bill's `total` once these Lines are written.
  *
  * Every statement carries the same condition (`Condition`), because a D1
  * batch cannot branch: when an Item was retired or a target Bill stopped
@@ -237,18 +233,16 @@ export const recordSelection = Effect.fn("recordSelection")(function* (input: Ne
 
   // Where the Lines go: a given Open Bill, the Customer's Open Bill of today,
   // or a new Bill.
-  let target:
-    | { readonly id: string; readonly state: BillState; readonly total: number; readonly paid: number }
-    | undefined;
+  let target: { readonly id: string; readonly state: BillState } | undefined;
   if (billId !== null) {
-    const bill = yield* db.first(TargetRow, "SELECT id, state, total, paid FROM bills WHERE id = ?", billId);
+    const bill = yield* db.first(TargetRow, "SELECT id, state FROM bills WHERE id = ?", billId);
     if (!bill) return yield* new BillNotFound({ billId });
     if (!isOpenBill(bill.state)) return yield* new BillNotOpen({ billId, state: bill.state });
     target = bill;
   } else if (customerId !== null) {
     const route = yield* db.first(
       CustomerRoute,
-      `SELECT b.id AS billId, b.state AS billState, b.total AS billTotal, b.paid AS billPaid
+      `SELECT b.id AS billId, b.state AS billState
        FROM customers c
        LEFT JOIN bills b ON b.customer_id = c.id AND b.day = ? AND b.state IN ('open', 'partial')
        WHERE c.id = ? AND c.retired_at IS NULL
@@ -258,9 +252,7 @@ export const recordSelection = Effect.fn("recordSelection")(function* (input: Ne
       customerId,
     );
     if (!route) return yield* new CustomerUnavailable({ customerId });
-    if (route.billId !== null && route.billState !== null) {
-      target = { id: route.billId, state: route.billState, total: route.billTotal!, paid: route.billPaid! };
-    }
+    if (route.billId !== null && route.billState !== null) target = { id: route.billId, state: route.billState };
   }
 
   // The prices are read once and bound into every statement, so the Bill's
@@ -286,16 +278,23 @@ export const recordSelection = Effect.fn("recordSelection")(function* (input: Ne
 
   /**
    * The Payment of **Cobrar** (spec §6.1, §7.3.1), when there is one. Its
-   * amount defaults to the selection's total and may be less, and it is never
-   * more than what the Bill will still owe once these Lines are on it.
+   * amount defaults to the selection's total and may be less; it is never more
+   * than the selection's total, so prior debt is paid from Cuenta, not from
+   * Vender.
+   *
+   * That bound is what keeps the batch's own `paid + amount <= total`
+   * condition from ever failing once the Lines are written: at batch time
+   * `paid <= total` (the column's CHECK), so `paid + amount <= total + delta`
+   * whenever `amount <= delta`. A concurrent partial payment from another
+   * phone therefore cannot leave a committed batch whose Lines are written and
+   * whose Payment silently is not.
    */
   const payment = input.payment ?? null;
   let paymentAmount: Centavos | null = null;
   if (payment) {
-    const owedAfter = (target ? target.total - target.paid : 0) + delta;
     paymentAmount = payment.amount ?? delta;
     if (!Number.isSafeInteger(paymentAmount) || paymentAmount < 1) return yield* new PaymentNotPositive();
-    if (paymentAmount > owedAfter) return yield* new PaymentExceedsOwed({ owed: owedAfter });
+    if (paymentAmount > delta) return yield* new PaymentExceedsOwed({ owed: delta });
   }
 
   /**
