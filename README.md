@@ -29,6 +29,7 @@ app/
     db.ts          Db service over the D1 binding, DbError, statement()
     current-user.ts  CurrentUser service, requireAdmin and the AdminOnly error
     sign-in.ts     codes and sessions: addUser, issueSignInCode, useSignInCode, authenticate, signOut
+    users.ts       what an Admin does on Usuarios: add, new code, sign out everywhere, deactivate, role
     command-line.ts  the SQL that scripts/sign-in-code.ts sends to D1
     time.ts        now, today (the only source of "now")
     run.server.ts  run(): the one way a loader or action runs a program
@@ -129,7 +130,8 @@ export async function action({ context, params, request }: Route.ActionArgs) {
 ```
 
 - Every loader and action starts with `requireUser(context)`. The session middleware on the root route has already answered a request without a valid session with a redirect to `/entrar`, before any loader or action ran; `requireUser` hands over the User it found.
-- An operation that only an Admin may run starts with `yield* requireAdmin` (from `~/backend/current-user`). That puts `AdminOnly` among its errors, so the route's `switch` has to answer it.
+- An operation that only an Admin may run starts with `yield* requireAdmin` (from `~/backend/current-user`). That puts `AdminOnly` among its errors, so the route's `switch` has to answer it. An Admin screen answers it with `throw new Response(null, { status: 403 })`, in its loader and in its action; [`app/routes/users.tsx`](app/routes/users.tsx) does.
+- A route with several forms tells them apart by the submit button's `name="intent"`, and builds one program for whichever was sent, inside a single `Effect.gen`, so that `onError` gets the union of every operation's errors (`programFor` in `app/routes/users.tsx`). A form it does not understand is answered 400.
 - `run(context, program)` resolves with the program's value.
 - The third argument receives every typed error except `DbError` and returns what the route answers with, or throws a `redirect(...)`. It is required exactly when the program has such errors, and a `switch` on `error._tag` with no `default` makes the compiler report a missing case.
 - `DbError` is logged and becomes a 500 for the error boundary. A bug in the program is rethrown.
@@ -150,6 +152,8 @@ npm run sign-in-code -- --user "Diego"        # a new code for an existing User
 ```
 
 Add `--production` to act on the production D1. Only hashes of codes and session tokens are stored.
+
+Everyone else gets their code from an Admin on **Usuarios** (`app/backend/users.ts`), where an Admin also signs a User out of every phone, deactivates or reactivates them and changes their role. `addUser` and `issueSignInCode` in `sign-in.ts` carry no permission check: they are what those operations, the tests and the command line are built on, and no route calls them. The app always keeps one active Admin; that condition is inside the `UPDATE` that would break it, so racing requests cannot get past it.
 
 ## Writing a test
 
@@ -188,5 +192,6 @@ it("does not show Inventario to a Worker", async () => {
 - A typed failure rejects the test. To assert on one, turn it into a value with `Effect.flip` or `Effect.exit`.
 - Test through operations and routes, not by reaching into tables.
 - `tests/support/auth.ts` has the Users: `seedUser(role, name?)` adds one inside a `runTest` program and `as(user)` runs an operation as them. For the whole Worker, `signedIn(role, name?)` gives a new User with a session and a `fetch(path, init?)` that sends its cookie; `appFetch(path, init?)` is the same request signed out. Both leave redirects unfollowed and set the app's `Origin` on non-GET requests.
+- A rule about the whole table (the last active Admin) needs a file whose tests each start from an empty database: `reset()` and `applyD1Migrations` from `cloudflare:test` in a `beforeEach`, as in `tests/last-admin.test.ts`.
 - The Worker reads the real clock, so a test that goes through it cannot move time. Rules about time are tested on operations with `runTest`.
 - Browser tests live in `e2e/*.spec.ts` and import `test` and `expect` from `./fixtures`, which serves the built Worker over local HTTPS and gives every test an empty migrated D1. Its `signInAs(role, name?)` fixture adds a User and signs the test's browser in without going through Entrar; `addUser` and `issueCode` are there for tests about signing in.

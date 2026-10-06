@@ -28,7 +28,7 @@ const adminOnly: ReadonlyArray<Section> = [
   { label: "Diferencias" },
   { label: "Historial" },
   { label: "Productos" },
-  { label: "Usuarios" },
+  { label: "Usuarios", to: "/usuarios" },
 ];
 
 export function loader({ context }: Route.LoaderArgs) {

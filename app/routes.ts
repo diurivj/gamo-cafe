@@ -8,5 +8,8 @@ export default [
   route("healthz", "routes/resources/healthz.ts"),
 
   // The signed-in shell: screens go inside it.
-  layout("routes/shell.tsx", [index("routes/home.tsx")]),
+  layout("routes/shell.tsx", [
+    index("routes/home.tsx"),
+    route("usuarios", "routes/users.tsx"),
+  ]),
 ] satisfies RouteConfig;
