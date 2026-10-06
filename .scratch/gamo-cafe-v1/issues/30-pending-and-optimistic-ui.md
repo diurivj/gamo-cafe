@@ -24,6 +24,7 @@ Spec §3.4 asks that every tap be acknowledged at once. Make it true screen by s
 
 - 2026-10-06: Opened from the decision to follow the best patterns for forms. Blocked by 27 because the messages move to the redirect there.
 - 2026-10-06: Resolved. See the Answer.
+- 2026-10-06: The single-cookie losses the Answer accepts are fixed for Vender by ticket 33: a sale the browser's router sends is answered with its own flash, so nothing waits in a cookie for another answer or another tab. See ticket 33's Answer for the boundary that remains on the other routes.
 
 ## Answer
 

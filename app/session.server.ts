@@ -62,14 +62,21 @@ export function sessionToken(request: Request): string | undefined {
   return requestCookie(request, SESSION_COOKIE);
 }
 
+/** How a data request's path carries the page it is about: `/x.data`, `/_.data` for the home page. */
+const DATA_SUFFIX = /(\/_)?\.data$/;
+
+/** Whether this request is the browser's router asking for a page's data, not a document. */
+export function isDataRequest(request: Request): boolean {
+  return DATA_SUFFIX.test(new URL(request.url).pathname);
+}
+
 /**
  * The path of the page a request is about. The browser's router asks for a
  * page's data at the page's path plus `.data` (`/_.data` for the home page),
  * and middleware sees that address as it was sent.
  */
 export function pagePath(request: Request): string {
-  const { pathname } = new URL(request.url);
-  return pathname.replace(/(\/_)?\.data$/, "") || "/";
+  return new URL(request.url).pathname.replace(DATA_SUFFIX, "") || "/";
 }
 
 const userContext = createContext<User | null>(null);

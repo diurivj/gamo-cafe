@@ -1,7 +1,7 @@
 import { Result, Schema } from "effect";
 import { createContext, type MiddlewareFunction, replace, type RouterContextProvider } from "react-router";
 
-import { pagePath } from "~/session.server";
+import { isDataRequest, pagePath } from "~/session.server";
 import { newId } from "~/shared/id";
 
 /**
@@ -25,6 +25,11 @@ import { newId } from "~/shared/id";
  * run and clears it on the response of the request whose loader took it. The
  * message is never in the URL, and a page other than the one the redirect
  * named neither shows it nor clears it.
+ *
+ * Vender answers a sale the browser's router sent with `answerWithFlash`
+ * instead: the flash travels in the action's own answer, which only the
+ * screen that sent the form can read. Two sales on their way at once each
+ * get their own words, and no other tab can take them.
  */
 
 /** What an action says about what it recorded. Every field is optional. */
@@ -63,6 +68,21 @@ const Carried = Schema.fromJsonString(
   }),
 );
 
+/** The flash a screen gets, with the `id` that is new for every recorded form. */
+function withNewId(flash: Flash): TakenFlash {
+  return { ...flash, id: newId() };
+}
+
+/** The redirect to `to` that leaves `held` in the cookie for the page it names. */
+function redirectWithFlashCookie(to: string, held: TakenFlash): Response {
+  const cookie = { ...held, to: new URL(to, "https://app.invalid").pathname };
+  return replace(to, {
+    headers: {
+      "Set-Cookie": `${FLASH_COOKIE}=${encodeURIComponent(JSON.stringify(cookie))}; Max-Age=${MAX_AGE}; ${COOKIE_ATTRIBUTES}`,
+    },
+  });
+}
+
 /**
  * The answer of an action that recorded something: a redirect to `to`, a path
  * of the app, carrying `flash` for the page at that path.
@@ -72,12 +92,35 @@ const Carried = Schema.fromJsonString(
  * entry for the page the User is already on, one for every sale on Vender.
  */
 export function redirectWithFlash(to: string, flash: Flash): Response {
-  const carried = { ...flash, id: newId(), to: new URL(to, "https://app.invalid").pathname };
-  return replace(to, {
-    headers: {
-      "Set-Cookie": `${FLASH_COOKIE}=${encodeURIComponent(JSON.stringify(carried))}; Max-Age=${MAX_AGE}; ${COOKIE_ATTRIBUTES}`,
-    },
-  });
+  return redirectWithFlashCookie(to, withNewId(flash));
+}
+
+/**
+ * The answer of an action that recorded something, for the request that sent
+ * the form (spec §3.4).
+ *
+ * A document request — a browser without JavaScript posted the page itself —
+ * gets the redirect and the cookie, and the page it lands on reads the flash
+ * once. The browser's router sends the same form as a data request, asking
+ * for `path.data` (see `isDataRequest`); there the flash travels in the
+ * action's own answer, which only the screen that sent the form can read.
+ * Vender uses it so that two sales on their way at once each get their own
+ * words, and a second tab cannot take a message that was not meant for it:
+ *
+ *     return answerWithFlash(request, "/", { message, billId: result.id });
+ *
+ *     // the fetcher of the sale, in the component
+ *     const answer = useFetcher<typeof action>({ key: sale.key });
+ *     answer.data?.flash;
+ */
+export function answerWithFlash(
+  request: Request,
+  to: string,
+  flash: Flash,
+): Response | { readonly flash: TakenFlash } {
+  const held = withNewId(flash);
+  if (isDataRequest(request)) return { flash: held };
+  return redirectWithFlashCookie(to, held);
 }
 
 /** The flash this request carries for this page, if any. */

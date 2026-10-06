@@ -6,11 +6,14 @@ import { as, landing, signedIn } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { savedCustomer } from "./support/customers";
 import { runTest } from "./support/effect";
+import { saleForm } from "./support/sales";
 
 // A form that records something answers with a redirect, and what the screen
 // says afterwards travels with it in a short-lived cookie that the next page
 // reads and clears (spec §3.4). Abonar on a Customer's page stands for every
-// such form here; each route's own tests cover its own messages.
+// such form here; each route's own tests cover its own messages. A sale the
+// browser's router sends to Vender is answered with its words in that answer
+// itself instead (ticket 33), so a second tab has nothing to take.
 
 /** A Customer who owes $50.00 on one Open Bill, and the Abonar form for it. */
 async function owing(name: string) {
@@ -30,6 +33,62 @@ async function owing(name: string) {
     });
   return { beto, path, abonar };
 }
+
+describe("a sale the browser sends", () => {
+  it("is answered with its own words, and leaves no cookie another tab could take", async () => {
+    const beto = await signedIn("worker", "Beto del navegador");
+    const item = await runTest(seedItem({ name: "Café del navegador", price: 2000 }));
+
+    const answer = await beto.fetch("/_.data?index", {
+      method: "POST",
+      body: saleForm({ itemId: item.id, submissionKey: "venta-a" }),
+    });
+
+    expect(answer.status).toBe(200);
+    // The words travel in the answer itself: nothing waits in a cookie.
+    expect(answer.headers.getSetCookie()).toEqual([]);
+    expect(await answer.text()).toContain("Se dejó abierta una cuenta por $20.00.");
+
+    // The page the router loads next does not show them again.
+    const page = await beto.fetch("/_.data?_routes=routes%2Fhome");
+    expect(await page.text()).not.toContain("Se dejó abierta");
+  });
+
+  it("carries each sale's own words, not the other's", async () => {
+    const beto = await signedIn("worker", "Beto de dos ventas");
+    const item = await runTest(seedItem({ name: "Agua de dos ventas", price: 1850 }));
+
+    const [first, second] = await Promise.all([
+      beto.fetch("/_.data?index", {
+        method: "POST",
+        body: saleForm({ itemId: item.id, submissionKey: "venta-una" }),
+      }),
+      beto.fetch("/_.data?index", {
+        method: "POST",
+        body: saleForm({ itemId: item.id, quantity: 2, submissionKey: "venta-dos" }),
+      }),
+    ]);
+    const [firstText, secondText] = await Promise.all([first.text(), second.text()]);
+
+    expect(firstText).toContain("$18.50");
+    expect(firstText).not.toContain("$37.00");
+    expect(secondText).toContain("$37.00");
+    expect(secondText).not.toContain("$18.50");
+  });
+
+  it("still answers a document POST with a redirect and the cookie, once", async () => {
+    const beto = await signedIn("worker", "Beto del documento");
+    const item = await runTest(seedItem({ name: "Café del documento", price: 2000 }));
+
+    const response = await beto.fetch("/?index", {
+      method: "POST",
+      body: saleForm({ itemId: item.id, submissionKey: "venta-doc" }),
+    });
+
+    expect(response.status).toBe(302);
+    expect(await (await landing(beto, response)).text()).toContain("Se dejó abierta una cuenta por $20.00.");
+  });
+});
 
 describe("a recorded form", () => {
   it("answers with a redirect, and the page it lands on shows the message", async () => {

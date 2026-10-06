@@ -9,6 +9,7 @@ import { seedItem } from "./support/catalog";
 import { savedCustomer } from "./support/customers";
 import { measured } from "./support/d1";
 import { runTest } from "./support/effect";
+import { saleForm } from "./support/sales";
 
 // Spec §3.4: what is not about money is not fetched again after every sale.
 // These are the requests the browser's router sends (e2e/reuse.spec.ts checks
@@ -30,23 +31,19 @@ function cookies(sent: string, response: Response): string {
   return [...jar.values()].join("; ");
 }
 
-/** One sale as Vender's form sends it from the browser, and the cookies its redirect set. */
-async function sell(who: Pick<SignedIn, "cookie" | "fetch">, itemId: string) {
+/** One sale as Vender's form sends it from the browser, and what its own answer said. */
+async function sell(who: Pick<SignedIn, "cookie" | "fetch">, itemId: string, message: string) {
   const sale = await measured(() =>
     who.fetch("/_.data?index", {
       method: "POST",
       headers: { Cookie: who.cookie },
-      body: new URLSearchParams({
-        intent: "cobrar",
-        selection: JSON.stringify([{ itemId, quantity: 1 }]),
-        customerId: "",
-        note: "",
-        method: "cash",
-        amount: "",
-      }),
+      body: saleForm({ itemId, intent: "cobrar" }),
     }),
   );
-  expect(sale.body, "the sale answered with a redirect to Vender").toContain("redirect");
+  // The screen that sent the sale is answered with its words (ticket 33),
+  // and no cookie is set for a later load to read.
+  expect(sale.body, "the sale answered the screen that sent it").toContain(message);
+  expect(sale.response.headers.getSetCookie()).toEqual([]);
   return { ...sale, cookie: cookies(who.cookie, sale.response) };
 }
 
@@ -62,11 +59,11 @@ describe("after a sale on Vender", () => {
     const phone = { ...beto, cookie: cookies(beto.cookie, opened.response) };
 
     for (const _sale of ["first", "second"]) {
-      const { cookie } = await sell(phone, cafe.id);
+      const { cookie } = await sell(phone, cafe.id, "Cuenta pagada: $25.00.");
       const after = await measured(() => beto.fetch(AFTER_A_SALE, { headers: { Cookie: cookie } }));
 
       expect(after.response.status).toBe(200);
-      expect(after.body).toContain("Cuenta pagada: $25.00.");
+      expect(after.body, "the words are not fetched again").not.toContain("Cuenta pagada: $25.00.");
       expect(after.body, "the catalog").not.toContain("Café que no se vuelve a leer");
       expect(after.body, "the shell").not.toContain("Beto");
       expect(after.statements).toBe(1);
@@ -184,7 +181,7 @@ describe("what is about Bills, Payments or Stock", () => {
     }
 
     // A recorded form's redirect, and a refused one.
-    const sale = await sell({ ...ana, cookie: phone }, item.id);
+    const sale = await sell({ ...ana, cookie: phone }, item.id, "Cuenta pagada: $20.00.");
     expect(sale.response.headers.get("Cache-Control")).toBe("no-store");
     const refused = await ana.fetch("/?index", { method: "POST", body: new URLSearchParams({ intent: "cobrar" }) });
     expect(refused.status).toBe(400);

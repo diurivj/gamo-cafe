@@ -85,6 +85,41 @@ test("a second sale is started while the first is still being recorded, and both
   ]);
 });
 
+test("a sale's words reach the Vender tab that recorded it, and no other", async ({
+  page,
+  context,
+  signInAs,
+  addItem,
+  query,
+}) => {
+  const beto = await signInAs("worker", "Beto de dos pestañas");
+  await addItem({ name: "Agua de dos pestañas", price: 1850, stock: { units: 6, by: beto } });
+  await page.goto("/");
+  // The sale and the loads it answers with are held, so the words are on
+  // their way while the other tab looks.
+  const held = await holdSubmissions(page, { loads: true });
+  await page.getByRole("button", { name: /^Agua de dos pestañas/ }).click();
+  await page.getByRole("region", { name: "Cobrar" }).getByRole("button", { name: "Cobrar" }).click();
+  await held.waitFor(1);
+
+  const other = await context.newPage();
+  await other.goto("/");
+  await expect(other.getByRole("button", { name: /^Agua de dos pestañas/ })).toBeVisible();
+
+  await held.release();
+  // The answer of the sale is in flight, still held; the other tab asks for
+  // the page and must find nothing of it.
+  await held.waitFor(1);
+  await other.reload();
+  await expect(other.getByRole("status")).toHaveCount(0);
+
+  await held.releaseAll();
+  await expect(page.getByRole("status")).toHaveText("Cuenta pagada: $18.50.");
+  await expect(page.getByRole("status")).toHaveCount(1);
+  await expect(other.getByRole("status")).toHaveCount(0);
+  expect(await query("SELECT id FROM bills")).toHaveLength(1);
+});
+
 test("a refused sale brings back the selection it emptied, with its Customer, note and Payment", async ({
   page,
   signInAs,

@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { data, Form, Link, useFetcher, useOutletContext, useRevalidator, useSubmit } from "react-router";
+import { data, Form, Link, useFetcher, useOutletContext, useSubmit } from "react-router";
 import { Effect, Result, Schema } from "effect";
 
 import {
@@ -22,7 +22,7 @@ import { type PaymentExceedsOwed, type PaymentNotPositive } from "~/backend/paym
 import { run } from "~/backend/run.server";
 import { CustomerPicker, type PickedCustomer } from "~/components/customer-picker";
 import { PaymentFields } from "~/components/payment-fields";
-import { redirectWithFlash, takeFlash } from "~/flash.server";
+import { answerWithFlash, type TakenFlash, takeFlash } from "~/flash.server";
 import { requireUser } from "~/session.server";
 import { newId } from "~/shared/id";
 import { type Centavos, formatMoney, parsePesos } from "~/shared/money";
@@ -164,12 +164,15 @@ export async function action({ context, request }: Route.ActionArgs) {
   const program = recordSelection({ ...selection, payment }).pipe(Effect.provideService(CurrentUser, user));
   const result = await run(context, program, answerSelectionError);
   if ("error" in result) return data(result, { status: 400 });
-  // Recorded: a redirect back to the screen, so a reload or the back button
-  // records nothing again (spec §3.4). The message and the Bill's id travel
-  // with it. The page emptied the selection when the sale was sent.
+  // Recorded: the screen that sent the form is answered with what it must say
+  // (spec §3.4). The browser's router gets the words in its own answer, so
+  // two sales on their way at once each get theirs (ticket 33); a document
+  // POST is answered with a redirect that carries them in the cookie, so a
+  // reload or the back button records nothing again (ticket 27). The page
+  // emptied the selection when the sale was sent.
   const message =
     intent === "cobrar" ? paidMessage(result) : selection.billId ? addedMessage(result) : recordedMessage(result);
-  return redirectWithFlash(selection.billId ? `/?billId=${encodeURIComponent(selection.billId)}` : "/", {
+  return answerWithFlash(request, selection.billId ? `/?billId=${encodeURIComponent(selection.billId)}` : "/", {
     message,
     billId: result.id,
   });
@@ -217,8 +220,8 @@ interface SentSale extends FormFields {
 /** How a sale that was sent ended. */
 type SaleAnswer =
   | { readonly refusal: string }
-  /** Recorded. `landed` says whether the router followed the redirect back to this page. */
-  | { readonly refusal: null; readonly landed: boolean };
+  /** Recorded. The action's answer carries this sale's own flash (ticket 33). */
+  | { readonly refusal: null; readonly flash: TakenFlash };
 
 /** One sale on its way. It says so, and tells the screen how it ended. */
 function SaleBeingRecorded({
@@ -230,24 +233,18 @@ function SaleBeingRecorded({
 }) {
   const fetcher = useFetcher<typeof action>({ key: sale.key });
   const sent = useRef(false);
-  // A fetcher whose redirect the router follows is "loading" while the page
-  // it lands on loads.
-  const landed = useRef(false);
   const answered = useRef(false);
   useEffect(() => {
     if (fetcher.state !== "idle") {
       sent.current = true;
-      if (fetcher.state === "loading") landed.current = true;
       return;
     }
-    if (!sent.current || answered.current) return;
+    // An answer that recorded something always carries the flash; no data at
+    // all is an error page, which the router renders instead of this screen.
+    if (!sent.current || answered.current || fetcher.data === undefined) return;
     answered.current = true;
-    onAnswer(
-      sale,
-      fetcher.data && "error" in fetcher.data
-        ? { refusal: fetcher.data.error }
-        : { refusal: null, landed: landed.current },
-    );
+    const answer = fetcher.data;
+    onAnswer(sale, "error" in answer ? { refusal: answer.error } : { refusal: null, flash: answer.flash });
   }, [fetcher.state]);
 
   return <li>{`Registrando venta de ${formatMoney(sale.total)}…`}</li>;
@@ -257,9 +254,11 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
   const { target, flash, submissionKey } = loaderData;
   const { categories } = useOutletContext<SellItems>();
   const submit = useSubmit();
-  const revalidator = useRevalidator();
-  // The last thing a recorded sale said. A later load of this page brings no
-  // flash, and must not take the message away while the User is still here.
+  // The last thing a recorded sale said, whichever way it arrived: in this
+  // screen's own answer when the browser's router sent the sale (ticket 33),
+  // or in the loader's flash after a document POST. A later load of this page
+  // brings no flash, and must not take the message away while the User is
+  // still here.
   const [said, setSaid] = useState(flash);
   if (flash && flash.id !== said?.id) setSaid(flash);
   const [quantities, setQuantities] = useState<Quantities>({});
@@ -303,7 +302,7 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
   // A tap on Dejar abierta or Cobrar is acknowledged at once (spec §3.4): the
   // sale travels in a fetcher of its own, the selection empties and the next
   // one can start while the server records this one. The screen says what was
-  // recorded only when the redirect brings the message.
+  // recorded only when this sale's own answer brings the words.
   function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const fields = new FormData(event.currentTarget, (event.nativeEvent as SubmitEvent).submitter);
@@ -330,11 +329,8 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
   function answered(sale: SentSale, answer: SaleAnswer) {
     setSent((sales) => sales.filter((other) => other.key !== sale.key));
     if (answer.refusal === null) {
-      // The router follows the redirect of a recorded sale, and that load
-      // brings its message. It does not follow one that answers after a later
-      // navigation began (an earlier sale's redirect, say): then the message
-      // is still waiting in its cookie, and this load fetches it.
-      if (!answer.landed) void revalidator.revalidate();
+      // The answer carried this sale's own words; nothing to fetch (ticket 33).
+      setSaid(answer.flash);
       return;
     }
     // Refused: the selection comes back with the message. If another one was
