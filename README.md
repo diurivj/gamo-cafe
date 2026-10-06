@@ -34,20 +34,21 @@ app/
     sign-in.ts     codes and sessions: addUser, issueSignInCode, useSignInCode, authenticate, signOut
     users.ts       what an Admin does on Usuarios: add, new code, sign out everywhere, deactivate, role
     catalog.ts     Items and Categories; activeItemsByCategory is the read for the Sell screen
+    submissions.ts one submission per rendered form: the key a form carries, written in the batch of what it records
     stock.ts       the statements that move Stock (changeStock, adjustmentStatements, countStatements), stockOf, lastCountedAt
     inventory.ts   Inventario: Stock and Minimums, recording and cancelling Adjustments
-    counts.ts      Conteo: what the entry and review steps show, recording a Count, and the Diferencias read
+    counts.ts      Conteo: what the entry and review steps show, recording a Count, and the Diferencias read (a page of Counts by cursor)
     command-line.ts  the SQL that scripts/sign-in-code.ts sends to D1
     rebuild.ts     the SQL that scripts/projections.ts sends to D1: recompute every projection from the facts
     time.ts        now, today (the only source of "now")
     run.server.ts  run(): the one way a loader or action runs a program
     health.ts      the reference operation
     customers.ts   Customers: addCustomer, searchCustomers, getCustomer, editCustomer, retireCustomer, restoreCustomer
-    bills.ts       Bills, Lines and Payments: recordSelection, takePayment and takeCustomerPayment (one batch each), getBill (the §4.1 gate), listOpenBills, listBills and listCustomerPastBills (paged), listCustomerOpenBills, listCustomerHandovers
+    bills.ts       Bills, Lines and Payments: recordSelection, takePayment and takeCustomerPayment (one batch each), getBill (the §4.1 gate), listOpenBills, listBills and listCustomerPastBills (a page by cursor), listCustomerOpenBills, listCustomerHandovers
     corrections.ts the corrections of Cuenta: removeLine, removePayment, voidBill (one batch each)
     payments.ts    the statements a Payment writes (paymentStatements and handoverStatements) and its errors
     day.ts         the figures of a Day: a User's own records (Mi día), every User's over a range and the Items sold (Día reuses them)
-    owed.ts        Por cobrar: each Customer's Owed, the Open Bills with no Customer and the overall Owed
+    owed.ts        Por cobrar: each Customer's Owed, a page of the Open Bills with no Customer and the overall Owed
     history.ts     Historial: the corrections and Adjustments, newest first, a keyset page over the six fact tables
     seed.ts        the synthetic year behind the §10.7 request budgets, as plain SQL that scripts/seed.ts writes
   shared/      Plain functions, no Effect. Safe in the browser.
@@ -60,7 +61,7 @@ app/
     secret.ts      sign-in codes, session tokens, their hash, the cookie name
     normalize-name.ts  normalizeName: a name with case and accents ignored
     units.ts       parseUnits (a typed whole number of units)
-    page.ts        pageFrom and pageUrl: a list's page in the URL
+    cursor.ts      Cursor: where a paged list's next page starts, and how the URL carries it
     discrepancy.ts discrepancyText: Faltante, Sobrante, or Sin diferencia
     correction-messages.ts  what a correction's rule violations say on screen
     customer-messages.ts  what a Customer form's rule violations say on screen
@@ -73,11 +74,14 @@ app/
     payment-fields.tsx  PaymentFields, a Payment's method, amount and cash change
     item-fields.tsx  ItemFields, the fields of an Item's form, new or existing
     count-line.tsx  CountLineItem, one line of a Count as Conteo and Diferencias show it
+    paged-list.tsx  usePagedList and LoadMore: a list's pages and its Cargar más
   session.server.ts  the session middleware, requireUser, the cookie
   flash.server.ts  what a recorded form says on the page it redirects to: redirectWithFlash, takeFlash
+  shell.server.ts  shellMiddleware: reloads the page of a phone whose shell shows a User as they no longer are
   catalog-forms.server.ts  the shared Admin gate (`requireAdminUser`, `refuseRead`) and the Productos forms' parsing and error messages
   routes/      Route modules; resources/ holds routes without UI
     shell.tsx      the signed-in layout and its navigation; screens go inside it
+    sell-items.tsx the layout around Vender that holds its Items
   routes.ts    Route table
 workers/app.ts   Worker entry; rejects non-GET requests from another origin
 scripts/         Command-line scripts, run by Node as TypeScript
@@ -177,6 +181,8 @@ export async function action({ context, params, request }: Route.ActionArgs) {
   - **A harmless, reversible change** (retiring a Customer, a User's role or active state): its result, at once. The form is a `<fetcher.Form>` with `<SubmitButton fetcher={fetcher}>`, and the page renders what `fetcher.formData` asks for in place of what the loader gave; when the server refuses, `fetcher.data.error` is shown and the form data is gone, so the page is back to what the server has (`UserRow` in `app/routes/users.tsx`). The words that say it was recorded still come with the redirect.
   - **Vender** is its own case (`app/routes/home.tsx`): each sale travels in a fetcher of its own, the selection empties at the tap and the sale is listed as being recorded, so the next one can start. A refused sale puts its selection back.
   No client-side store: the pending state is the router's (`useNavigation`, fetchers).
+- A form that creates a Bill, a Payment, an Adjustment or a Count carries a key, so a double tap or a retry on a bad connection records nothing twice (spec §3.4). The loader of the page makes it (`submissionKey: newId()`), the form sends it in a hidden `submissionKey` field, and the action hands it to the operation, which records one submission per key and answers a repeat with what the first one answered, so the action builds the same redirect and the same message. The loader runs again after every recorded form, which is what gives the next form a new key: a route that skips that revalidation would send the old key again, and the next sale would be taken for a repeat. Vender sends the next sale before that loader has run, so it makes the key of every form after the first in the browser (`form.key` in `app/routes/home.tsx`). Conteo's confirming form is rendered by the review action, which makes its key. See [One submission per form](#one-submission-per-form).
+- After a recorded form the browser's router runs every loader of the page again, and that is what a loader about Bills, Payments or Stock needs: leave it alone. Two loaders are about neither and export `shouldRevalidate` to be kept instead (spec §3.4). The shell's (`app/routes/shell.tsx`) runs again only after a form on Usuarios; when an Admin changes a User's role from another phone, `shellMiddleware` (`~/shell.server`) answers that User's next navigation with a reload of the page. Vender's Items are the loader of a layout around it (`app/routes/sell-items.tsx`), read when Vender is opened and after a refused form, not after a recorded one. A loader that takes a flash must not be skipped, or its message stays on screen. Nothing is cached anywhere else: `workers/app.ts` answers everything with `Cache-Control: no-store`, and `tests/reuse.test.ts` holds that and the D1 statements a sale costs.
 - The third argument receives every typed error except `DbError` and returns what the route answers with, or throws a `redirect(...)`. It is required exactly when the program has such errors, and a `switch` on `error._tag` with no `default` makes the compiler report a missing case.
 - `DbError` is logged and becomes a 500 for the error boundary. A bug in the program is rethrown.
 - Add the route to `app/routes.ts`, a screen inside the `shell.tsx` layout, and give its entry in the shell's navigation a `to`. Visible text is Spanish.
@@ -261,6 +267,28 @@ A D1 batch cannot branch, so the rules are SQL conditions: `paid + amount <= tot
 
 `takePayment` returns `{ id, amount, paid }`. A Worker who pays a Bill in full is redirected to Cuentas abiertas instead of staying on the page, because a Worker may not open a Paid Bill (§4.1). The amount handed over for cash is never submitted or stored: `PaymentFields` from `~/components/payment-fields` shows `changeFor(handedOver, amount)` while it is typed.
 
+## One submission per form
+
+`~/backend/submissions.ts` is how an operation records one submission per key. Five operations use it: `recordSelection`, `takePayment`, `takeCustomerPayment`, `recordAdjustment` and `recordCount`, each with an optional `submissionKey` in its input.
+
+```ts
+const submission = submissionOf("payment", user.id, input.submissionKey);
+const earlier = yield* recordedAnswer(PaymentAnswer, submission);
+if (earlier) return earlier; // a repeat: answered as the first, before any rule is checked
+
+const [recorded] = yield* db.batch([
+  ...paymentStatements(payment, both(rules, notYetRecorded(submission))),
+  submissionStatement(submission, { at, answer: json(answer), wrote: paymentWasWritten }),
+]);
+if (recorded.changes === 0) {
+  const meanwhile = yield* recordedAnswer(PaymentAnswer, submission);
+  if (meanwhile) return meanwhile; // the other of two requests that arrived together
+  // ...otherwise a rule refused it
+}
+```
+
+The key is a row of `submissions`, written last in the batch of what the form records, with the operation's answer as JSON. Every other statement of the batch carries `notYetRecorded`, and the table's primary key (User, kind of form, key) is the rule underneath. The repeat is looked for first because the first submission moved what the rules read: a second `takePayment` would otherwise be told the Bill changed. A refused operation writes no key, so the corrected form can be sent again. An input without a key gets one of its own and is recorded like any other. A `submissions` row is a fact about the submission, not a projection: the rebuild neither reads nor writes it.
+
 ## Abonar across a Customer's Bills
 
 On a Customer's page, **Abonar** spreads one amount over their Open Bills, oldest first, as one Payment per Bill with the same method, User, moment and `handover_reference` (spec §5.5, §8.3): `takeCustomerPayment({ customerId, amount, method, expectedRevisions })` in `~/backend/bills.ts`. The amount defaults to everything the Customer owes and is never more; `expectedRevisions` is one `{ billId, revision }` per Bill the page showed, which the form carries as one hidden `bill` field per Bill.
@@ -273,27 +301,73 @@ Removing a Line or a Payment and voiding a Bill are spec §5.7, in `~/backend/co
 
 A Worker may remove a Line while the Bill has no Payment, which is `paid = 0`; with a Payment only an Admin may, with a reason. Removing a Payment lowers `paid`, so "has a Payment" stays meaningful for ticket 10, and a Bill whose total would fall below `paid` refuses the removal. Stock comes back from the Line's own `moved_stock` fact, not from the Item's flag today, once per Line: a Line already removed is not returned again when its Bill is Voided, and rebuilding Stock from the facts (ticket 19) uses the same rule. A Voided Bill keeps its Lines, Payments and totals on record and refuses every later correction.
 
-## Cuentas: every Bill, one page at a time
+## Paged lists
 
-**Cuentas** (`app/routes/cuentas.tsx`) is the Admin screen listing every Bill
-with its state, filtered by Day, state or Customer; a Customer's page shows
-their past Bills — Pagada or Cancelada — to an Admin. Both reads are
-`listBills` in `~/backend/bills.ts`; `listCustomerPastBills` is the same read
-with `settledOnly`. They are Admin only twice over: the routes refuse a Worker
-with `requireAdminUser` before reading anything, and the operations refuse one
-again with `requireAdmin`.
+Every list that grows with time shows one page and a **Cargar más** control
+(spec §2.4, §3.4): Cuentas abiertas, Cuentas, a Customer's past Bills,
+Historial, Diferencias and the Open Bills with no Customer on Por cobrar. What
+the catalog bounds is not paged: the Items on Vender, Inventario and Conteo,
+and the Customers' totals on Por cobrar.
 
-Paging is 50 rows plus one more, and that extra row is `hasMore`: a page never
-counts the history to learn whether another follows. `pageFrom` in
-`~/shared/page.ts` reads the page from the URL. The read is one statement. A
-Customer's Bills come from `bills_by_customer_day`, whose reverse scan already
-provides `day DESC, opened_at DESC`. Everything else is one arm per state
-(`bills_by_state`, or `bills_by_day_state` when a Day is asked), each arm
-limited to the page, merged and ordered by `opened_at`; a page therefore reads
-at most about 4 × 50 rows whatever the history holds, and a page past
-`MAX_BILL_PAGE` is answered without reading anything (spec §2.4, §7.4).
-`tests/cuentas.test.ts` holds the row-budget test, using the counting D1 from
-`tests/support/d1.ts`.
+**The read** pages by cursor, never by offset. A `Cursor` (`~/shared/cursor.ts`)
+is the last row of a page as its place in the list's order: an instant and a
+tie-breaker. The operation takes the cursor, reads one row past the page and
+answers `next`, the cursor of the page after it, or null:
+
+```ts
+const first = yield* listOpenBills("familia");        // { bills, next }
+const second = yield* listOpenBills("familia", first.next);
+```
+
+Because a page is "what follows this row", a row added or removed between two
+pages neither repeats nor skips one. Each read seeks to the cursor in an index
+and stops after its page, so any page costs what the first did:
+
+- Bills in `opened_at DESC, rowid DESC`: one arm per state on `bills_by_state`
+  (or `bills_by_day_state` when a Day is asked), each limited to the page,
+  merged. Cuentas abiertas searches by Customer inside the arms, so the search
+  is over every Open Bill, not over the page.
+- One Customer's Bills in `day DESC, opened_at DESC, rowid DESC` on
+  `bills_by_customer_day`; the keyset is a row value over those columns.
+- Historial over its six fact tables, Counts on `counts_by_time`, the id
+  breaking ties.
+
+`listBills` and `listCustomerPastBills` are Admin only twice over: the routes
+refuse a Worker with `requireAdminUser` before reading anything, and the
+operations refuse one again with `requireAdmin`.
+
+**The route** reads the cursor from the URL with `cursorOf(request.url)` — the
+parameter is `desde`, and an unreadable one is the first page — and answers
+`next` as text with `nextText`. The same loader serves the first page and
+every page after it.
+
+**The screen** uses `usePagedList` and `LoadMore` from
+`~/components/paged-list`:
+
+```tsx
+const pageOf = (data: Data) => ({ rows: data.entries, next: data.next });
+const hrefFor = (cursor: string) => `/historial?${CURSOR_PARAM}=${encodeURIComponent(cursor)}`;
+
+const { rows, more } = usePagedList({ id: "historial", data: loaderData, pageOf, hrefFor });
+// ...render `rows`...
+<LoadMore more={more} />
+```
+
+`hrefFor` keeps the list's filters. The control is a link to the next page,
+which is all it is without JavaScript; with it, the link fetches that URL with
+a fetcher and appends the rows, and does so by itself when it scrolls into
+view. It says "Cargando…" and "No hay más." in a status region. New loader
+data starts the list over. Coming back to a list shows what it had loaded at
+once, so the scroll position is restored, and fetches those pages again behind
+it; the rows are remembered in memory only, per history entry.
+
+Tests: the row budgets are in `tests/cuentas.test.ts`, `tests/counts.test.ts`,
+`tests/owed.test.ts` and `tests/history-paging.test.ts`, with the counting D1
+from `tests/support/d1.ts`; `tests/paged-lists.test.ts` walks every list
+through the Worker by its link (`nextHref` in `tests/support/pages.ts`);
+`e2e/load-more.spec.ts` drives the control in a browser. A browser test that
+clicks **Cargar más** races the scroll loading; scroll the control into view
+instead, or switch scroll loading off as that spec does.
 
 ## Writing a test
 

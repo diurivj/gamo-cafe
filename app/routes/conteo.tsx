@@ -17,6 +17,7 @@ import { run } from "~/backend/run.server";
 import { type Refusal, refuseRead, refused, requireAdminUser, text } from "~/catalog-forms.server";
 import { CountLineItem } from "~/components/count-line";
 import { SubmitButton } from "~/components/submit-button";
+import { newId } from "~/shared/id";
 import { parseUnits } from "~/shared/units";
 
 import type { Route } from "./+types/conteo";
@@ -87,13 +88,19 @@ export async function action({ context, request }: Route.ActionArgs) {
       answerCountError,
     );
     if ("error" in lines) return refused(lines, "review");
-    return { review: { lines, note: text(form, "note").trim() }, form: "review" };
+    // The review is what renders the form that confirms, so it makes that
+    // form's key (spec §3.4): one Count per review, however often confirmed.
+    return { review: { lines, note: text(form, "note").trim(), submissionKey: newId() }, form: "review" };
   }
 
   // The only intent left is confirming.
   const result = await run(
     context,
-    recordCount({ lines: counted.lines, note: text(form, "note") }).pipe(
+    recordCount({
+      lines: counted.lines,
+      note: text(form, "note"),
+      submissionKey: text(form, "submissionKey"),
+    }).pipe(
       Effect.provideService(CurrentUser, admin),
     ),
     answerCountError,
@@ -139,6 +146,7 @@ export default function Conteo({ loaderData, actionData }: Route.ComponentProps)
           <Form method="post" className="mt-4 flex flex-col gap-4">
             <input type="hidden" name="intent" value="confirm" />
             <input type="hidden" name="note" value={review.note} />
+            <input type="hidden" name="submissionKey" value={review.submissionKey} />
             {review.lines.map((line) => (
               <input key={line.itemId} type="hidden" name={`units.${line.itemId}`} value={line.found} />
             ))}

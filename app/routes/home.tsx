@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { data, Form, Link, useFetcher, useRevalidator, useSubmit } from "react-router";
+import { data, Form, Link, useFetcher, useOutletContext, useRevalidator, useSubmit } from "react-router";
 import { Effect, Result, Schema } from "effect";
 
 import {
@@ -17,7 +17,6 @@ import {
   recordSelection,
   type TargetConflict,
 } from "~/backend/bills";
-import { activeItemsByCategory } from "~/backend/catalog";
 import { CurrentUser } from "~/backend/current-user";
 import { type PaymentExceedsOwed, type PaymentNotPositive } from "~/backend/payments";
 import { run } from "~/backend/run.server";
@@ -31,22 +30,28 @@ import { PAYMENT_METHODS, type PaymentMethod } from "~/shared/payment";
 import { paymentMessages } from "~/shared/payment-messages";
 
 import type { Route } from "./+types/home";
+import type { SellItems } from "./sell-items";
 
 // Vender (spec §6.1): the Items as large buttons by Category, a selection the
 // browser holds until it is recorded, a Customer or a note, **Dejar abierta**
 // and **Cobrar** (ticket 08), which records the selection and a Payment in one
 // batch. With `?billId=`, Cuenta's **Agregar productos** turns it into the
-// same screen targeting one Open Bill (ticket 07).
+// same screen targeting one Open Bill (ticket 07). The Items come from the
+// layout around it, `./sell-items`, which a sale does not load again.
 
 export const meta: Route.MetaFunction = () => [{ title: "Vender · Gamo Cafe" }];
 
 export async function loader({ context, request }: Route.LoaderArgs) {
   const user = requireUser(context);
-  const categories = await run(context, activeItemsByCategory);
   const billId = new URL(request.url).searchParams.get("billId") ?? "";
   // What the selection that redirected here recorded (spec §3.4).
   const flash = takeFlash(context);
-  if (billId === "") return { categories, target: null, flash };
+  // The key of the form this page renders (spec §3.4): new every time the
+  // loader runs, so after each recorded sale, and the same for a double tap
+  // or a retry of one rendered form. It is why this loader, unlike the Items'
+  // in `./sell-items`, must run again after a sale.
+  const submissionKey = newId();
+  if (billId === "") return { target: null, flash, submissionKey };
 
   const bill = await run(
     context,
@@ -62,7 +67,7 @@ export async function loader({ context, request }: Route.LoaderArgs) {
   );
   // The screen shows the target's figures, not its Lines or Payments.
   const { lines: _lines, payments: _payments, ...target } = bill;
-  return { categories, target, flash };
+  return { target, flash, submissionKey };
 }
 
 /** The selection as the browser sends it, in the `selection` form field. */
@@ -79,6 +84,7 @@ function readSelection(form: FormData): NewSelection | { readonly error: string 
     customerId: String(form.get("customerId") ?? "") || null,
     note: String(form.get("note") ?? "") || null,
     billId: String(form.get("billId") ?? "") || null,
+    submissionKey: String(form.get("submissionKey") ?? "") || null,
   };
 }
 
@@ -248,7 +254,8 @@ function SaleBeingRecorded({
 }
 
 export default function Home({ loaderData, actionData }: Route.ComponentProps) {
-  const { categories, target, flash } = loaderData;
+  const { target, flash, submissionKey } = loaderData;
+  const { categories } = useOutletContext<SellItems>();
   const submit = useSubmit();
   const revalidator = useRevalidator();
   // The last thing a recorded sale said. A later load of this page brings no
@@ -258,9 +265,13 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
   const [quantities, setQuantities] = useState<Quantities>({});
   // Every sale sent starts the form over under a new key, so the picker, the
   // note and the Payment are empty for the next one. A refused sale starts it
-  // over once more, with what it held.
+  // over once more, with what it held. The key is also the form's submission
+  // key (spec §3.4, ticket 28): the first form has the one the loader made,
+  // and each later one is made here, because the next sale can be sent before
+  // the loader has run again. A sale sent with the key of the one before it
+  // would be taken for its repeat and not recorded.
   const [form, setForm] = useState<{ readonly key: string; readonly fields: FormFields | null }>({
-    key: "nueva",
+    key: submissionKey,
     fields: null,
   });
   const [customer, setCustomer] = useState<PickedCustomer | null>(null);
@@ -296,7 +307,7 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
   function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const fields = new FormData(event.currentTarget, (event.nativeEvent as SubmitEvent).submitter);
-    const key = newId();
+    const key = form.key;
     void submit(fields, { method: "post", action: formAction, navigate: false, fetcherKey: key });
     setSent((sales) => [
       ...sales,
@@ -313,7 +324,7 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
     setQuantities({});
     setCustomer(null);
     setRefusal(null);
-    setForm({ key, fields: null });
+    setForm({ key: newId(), fields: null });
   }
 
   function answered(sale: SentSale, answer: SaleAnswer) {
@@ -337,7 +348,8 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
     });
     if (startedAnother) return;
     setCustomer(sale.customer);
-    setForm({ key: `${sale.key}:devuelta`, fields: sale });
+    // Nothing was recorded under its key, and a new one costs nothing.
+    setForm({ key: newId(), fields: sale });
   }
 
   return (
@@ -377,6 +389,8 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
         <input type="hidden" name="selection" value={selection} />
         {/* Set when Cuenta's Agregar productos sent the User here. */}
         <input type="hidden" name="billId" value={target?.id ?? ""} />
+        {/* One sale per rendered form, however many times it is sent. */}
+        <input type="hidden" name="submissionKey" value={form.key} />
 
         {selected.length > 0 ? (
           <section aria-labelledby="seleccion" className="rounded-2xl border border-stone-200 bg-white p-4">
@@ -499,7 +513,7 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
             type="submit"
             name="intent"
             value="dejar-abierta"
-            disabled={items.length === 0}
+            disabled={selected.length === 0}
             className={primaryButton}
           >
             {target ? "Agregar a la cuenta" : "Dejar abierta"}
@@ -525,7 +539,7 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
             type="submit"
             name="intent"
             value="cobrar"
-            disabled={items.length === 0}
+            disabled={selected.length === 0}
             className={primaryButton}
           >
             Cobrar

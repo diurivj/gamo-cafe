@@ -1,6 +1,7 @@
 import { Data, Effect, Schema } from "effect";
 
 import { chunk } from "~/shared/chunk";
+import type { Cursor } from "~/shared/cursor";
 import type { Day, Instant } from "~/shared/day";
 import { newId } from "~/shared/id";
 import { trimToNull } from "~/shared/text";
@@ -10,6 +11,7 @@ import { requireAdmin } from "./current-user";
 import { Db } from "./db";
 import { ItemNotStockTracked } from "./inventory";
 import { countStatements, type CountedLine } from "./stock";
+import { json, notYetRecorded, recordedAnswer, submissionOf, submissionStatement } from "./submissions";
 import { now, today } from "./time";
 
 /**
@@ -156,14 +158,25 @@ export interface NewCountInput {
   readonly lines: ReadonlyArray<CountedInput>;
   /** Trimmed; empty or absent is no note. */
   readonly note?: string | null;
+  /**
+   * The key of the form this Count came from, made when the form was rendered
+   * (spec §3.4). A second Count with the same key records nothing and is
+   * answered as the first.
+   */
+  readonly submissionKey?: string | null;
 }
+
+/** What `recordCount` answers, and what a repeat of its form is answered with. */
+const CountAnswer = Schema.Struct({ id: Schema.String });
 
 /**
  * Records a Count: one batch of multi-row statements (spec §7.3). Per Item,
  * the Stock expected is read inside the batch, then Stock takes the units
  * found and `last_counted_at` becomes this Count's instant. A Discrepancy of
  * zero is recorded like any other. An Item that does not exist, or does not
- * count its units, is refused and nothing is written.
+ * count its units, is refused and nothing is written. The same form sent
+ * twice is recorded once (spec §3.4, `./submissions`): a second Count would
+ * otherwise expect what the first one left and hide its Discrepancy.
  */
 export const recordCount = Effect.fn("recordCount")(function* (input: NewCountInput) {
   const admin = yield* requireAdmin;
@@ -171,20 +184,37 @@ export const recordCount = Effect.fn("recordCount")(function* (input: NewCountIn
 
   const lines = yield* tidyCounted(input.lines);
   const note = trimToNull(input.note);
-  const id = newId();
 
-  const [recorded] = yield* db.batch(
-    countStatements({
-      id,
-      note,
-      by: admin.id,
-      at: yield* now,
-      day: yield* today,
-      lines: lines.map((line): CountedLine => ({ ...line, id: newId() })),
+  const submission = submissionOf("count", admin.id, input.submissionKey);
+  const earlier = yield* recordedAnswer(CountAnswer, submission);
+  if (earlier) return earlier;
+
+  const id = newId();
+  const at = yield* now;
+
+  const [recorded] = yield* db.batch([
+    ...countStatements(
+      {
+        id,
+        note,
+        by: admin.id,
+        at,
+        day: yield* today,
+        lines: lines.map((line): CountedLine => ({ ...line, id: newId() })),
+      },
+      notYetRecorded(submission),
+    ),
+    submissionStatement(submission, {
+      at,
+      answer: json({ id }),
+      wrote: { sql: "EXISTS (SELECT 1 FROM counts WHERE id = ?)", params: [id] },
     }),
-  );
+  ]);
 
   if (recorded!.changes === 0) {
+    // Another request with this form's key recorded it meanwhile.
+    const meanwhile = yield* recordedAnswer(CountAnswer, submission);
+    if (meanwhile) return meanwhile;
     // The Count's insert wrote nothing because an Item was missing or not
     // stock-tracked; one bounded read says which.
     for (const part of chunk(lines, ITEMS_PER_QUERY)) {
@@ -205,8 +235,18 @@ export const recordCount = Effect.fn("recordCount")(function* (input: NewCountIn
   return { id };
 });
 
-/** How many Counts Diferencias shows; the list is bounded (spec §2.4). */
-const RECENT_COUNTS = 20;
+/**
+ * How many Counts one page of Diferencias holds. A Count has a line per Item
+ * counted, so a few of them are already a long page (spec §2.4, §3.4).
+ */
+export const COUNTS_PER_PAGE = 3;
+
+/** One page of Counts, newest first, and where the page after it starts. */
+export interface CountPage {
+  readonly counts: ReadonlyArray<RecordedCount>;
+  /** null when this is the last page. */
+  readonly next: Cursor | null;
+}
 
 const CountRow = Schema.Struct({
   id: Schema.String,
@@ -225,23 +265,33 @@ const CountLineRow = Schema.Struct({
 });
 
 /**
- * The most recent Counts, newest first, each with its lines in name order:
- * Diferencias (spec §6.2). Two statements, both bounded, so the screen never
- * reads rows in proportion to everything ever counted.
+ * One page of Counts, newest first, each with its lines in name order:
+ * Diferencias (spec §6.2). Two statements: the page's Counts by
+ * `counts_by_time`, seeking to the cursor — the last Count of the page before,
+ * its id breaking ties — and then their lines. A page reads about its own
+ * rows, whatever was ever counted (spec §2.4).
  */
-export const listCounts = Effect.fn("listCounts")(function* (limit = RECENT_COUNTS) {
+export const listCounts = Effect.fn("listCounts")(function* (
+  cursor: Cursor | null = null,
+  limit = COUNTS_PER_PAGE,
+) {
   yield* requireAdmin;
   const db = yield* Db;
 
-  const counts = yield* db.all(
+  const read = yield* db.all(
     CountRow,
     `SELECT c.id, c.note, u.name AS byName, c.recorded_at AS at, c.day
      FROM counts c JOIN users u ON u.id = c.recorded_by
+     ${cursor === null ? "" : "WHERE c.recorded_at <= ? AND (c.recorded_at < ? OR c.id < ?)"}
      ORDER BY c.recorded_at DESC, c.id DESC
      LIMIT ?`,
-    limit,
+    ...(cursor === null ? [] : [cursor.at, cursor.at, cursor.id]),
+    limit + 1,
   );
-  if (counts.length === 0) return [] as ReadonlyArray<RecordedCount>;
+  const counts = read.slice(0, limit);
+  const last = counts.at(-1);
+  const next: Cursor | null = read.length > limit && last ? { at: last.at, id: last.id } : null;
+  if (counts.length === 0) return { counts: [], next } as CountPage;
 
   const placeholders = counts.map(() => "?").join(", ");
   const rows = yield* db.all(
@@ -254,7 +304,7 @@ export const listCounts = Effect.fn("listCounts")(function* (limit = RECENT_COUN
     ...counts.map((count) => count.id),
   );
 
-  return counts.map(
+  const listed = counts.map(
     (count): RecordedCount => ({
       ...count,
       lines: rows
@@ -267,4 +317,5 @@ export const listCounts = Effect.fn("listCounts")(function* (limit = RECENT_COUN
         ),
     }),
   );
+  return { counts: listed, next } as CountPage;
 });

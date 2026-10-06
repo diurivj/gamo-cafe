@@ -11,17 +11,19 @@ import {
 import { CurrentUser } from "~/backend/current-user";
 import { editCustomer, getCustomer, restoreCustomer, retireCustomer } from "~/backend/customers";
 import { run } from "~/backend/run.server";
+import { LoadMore, usePagedList } from "~/components/paged-list";
 import { PaymentFields } from "~/components/payment-fields";
 import { SubmitButton } from "~/components/submit-button";
 import { redirectWithFlash, takeFlash } from "~/flash.server";
 import { requireUser } from "~/session.server";
 import { billStateLabel } from "~/shared/bill-state";
+import { CURSOR_PARAM, cursorOf, nextText } from "~/shared/cursor";
 import { customerNameMessages } from "~/shared/customer-messages";
 import { dayOf, formatDay, formatTime } from "~/shared/day";
+import { newId } from "~/shared/id";
 import { type Centavos, formatMoney, parsePesos } from "~/shared/money";
 import { PAYMENT_METHODS, paymentMethodLabel } from "~/shared/payment";
 import { paymentMessages } from "~/shared/payment-messages";
-import { pageFrom, pageUrl } from "~/shared/page";
 
 import type { Route } from "./+types/customer";
 
@@ -55,12 +57,13 @@ export async function loader({ context, params, request }: Route.LoaderArgs) {
     },
   );
   const owed = openBills.reduce((sum, bill) => sum + bill.owed, 0);
-  const page = pageFrom(new URL(request.url).searchParams.get("pagina"));
-  const pastBills =
+  const past =
     user.role === "admin"
       ? await run(
           context,
-          listCustomerPastBills(params.customerId, page).pipe(Effect.provideService(CurrentUser, user)),
+          listCustomerPastBills(params.customerId, cursorOf(request.url)).pipe(
+            Effect.provideService(CurrentUser, user),
+          ),
           (error) => {
             switch (error._tag) {
               case "AdminOnly":
@@ -75,12 +78,18 @@ export async function loader({ context, params, request }: Route.LoaderArgs) {
     owed,
     handovers,
     canManage: user.role === "admin",
-    pastBills,
-    page,
+    pastBills: past === null ? null : { bills: past.bills, next: nextText(past.next) },
     // What an Abonar that redirected here has to say (spec §3.4).
     flash: takeFlash(context),
+    // The key of the Abonar form this page renders (spec §3.4): new every
+    // time the loader runs, the same for a double tap of one rendered form.
+    submissionKey: newId(),
   };
 }
+
+type Data = Route.ComponentProps["loaderData"];
+/** The page of past Bills in the loader's answer; a Worker's has none. */
+const pastPageOf = (data: Data) => ({ rows: data.pastBills?.bills ?? [], next: data.pastBills?.next ?? null });
 
 /** The intents the Customer page's forms ask for. */
 const INTENTS = ["edit", "retire", "restore", "abonar"] as const;
@@ -138,6 +147,7 @@ function programFor(id: string, form: FormData) {
           amount,
           method: method.success,
           expectedRevisions: revisions,
+          submissionKey: String(form.get("submissionKey") ?? "") || null,
         });
         return { recorded: { amount: recorded.amount } };
       }
@@ -196,7 +206,13 @@ const primaryButton =
   "block rounded-2xl bg-stone-900 px-4 py-4 text-center text-lg font-semibold text-white active:bg-stone-700 disabled:opacity-60";
 
 export default function Customer({ loaderData, actionData }: Route.ComponentProps) {
-  const { customer, openBills, owed, handovers, canManage, pastBills, page, flash } = loaderData;
+  const { customer, openBills, owed, handovers, canManage, pastBills, flash, submissionKey } = loaderData;
+  const past = usePagedList({
+    id: "cuentas-pasadas",
+    data: loaderData,
+    pageOf: pastPageOf,
+    hrefFor: (cursor) => `/clientes/${customer.id}?${CURSOR_PARAM}=${encodeURIComponent(cursor)}`,
+  });
   // Retiring and restoring are harmless and reversible, so the page shows
   // them at once (spec §3.4): while the form is on its way the Customer is
   // what was asked for, and a refusal puts them back as the server has them.
@@ -288,6 +304,7 @@ export default function Customer({ loaderData, actionData }: Route.ComponentProp
               what is left, and the form carries the fresh revisions. */}
           <Form key={owed} method="post" className="flex flex-col gap-4">
             <input type="hidden" name="intent" value="abonar" />
+            <input type="hidden" name="submissionKey" value={submissionKey} />
             {openBills.map((bill) => (
               <input key={bill.id} type="hidden" name="bill" value={`${bill.id}:${bill.revision}`} />
             ))}
@@ -333,12 +350,12 @@ export default function Customer({ loaderData, actionData }: Route.ComponentProp
           <h2 id="cuentas-pasadas" className="text-xl font-semibold">
             Cuentas pasadas
           </h2>
-          {pastBills.bills.length === 0 ? (
+          {past.rows.length === 0 ? (
             <p className="mt-3 text-stone-600">Todavía no hay cuentas pasadas.</p>
           ) : (
             <>
               <ul aria-label="Cuentas pasadas" className="mt-3 flex flex-col gap-2">
-                {pastBills.bills.map((bill) => (
+                {past.rows.map((bill) => (
                   <li key={bill.id} data-past-bill-id={bill.id}>
                     <Link
                       to={`/cuentas/${bill.id}`}
@@ -361,25 +378,7 @@ export default function Customer({ loaderData, actionData }: Route.ComponentProp
                   </li>
                 ))}
               </ul>
-              {page > 1 || pastBills.hasMore ? (
-                <nav aria-label="Páginas de cuentas pasadas" className="mt-4 flex items-center justify-between gap-3">
-                  {page > 1 ? (
-                    <Link to={pageUrl(`/clientes/${customer.id}`, page - 1)} className={secondaryButton}>
-                      Anterior
-                    </Link>
-                  ) : (
-                    <span />
-                  )}
-                  <span aria-current="page" className="text-stone-600">{`Página ${page}`}</span>
-                  {pastBills.hasMore ? (
-                    <Link to={pageUrl(`/clientes/${customer.id}`, page + 1)} className={secondaryButton}>
-                      Siguiente
-                    </Link>
-                  ) : (
-                    <span />
-                  )}
-                </nav>
-              ) : null}
+              <LoadMore more={past.more} />
             </>
           )}
         </section>

@@ -1,3 +1,27 @@
+import { env } from "cloudflare:workers";
+
+/**
+ * What one request through the Worker asked of D1: the counting D1 is swapped
+ * into the binding while `send` runs (`env.DB` is configurable in the Workers
+ * pool), so the counts are every statement the request made, the session's
+ * included.
+ *
+ *     const { response, body, statements } = await measured(() => beto.fetch("/"));
+ */
+export async function measured(send: () => Promise<Response>) {
+  const original = env.DB;
+  const descriptor = Object.getOwnPropertyDescriptor(env, "DB");
+  const { counter, d1 } = countingD1(original);
+  Object.defineProperty(env, "DB", { value: d1, configurable: true });
+  try {
+    const response = await send();
+    const body = await response.text();
+    return { response, body, ...counter };
+  } finally {
+    Object.defineProperty(env, "DB", descriptor ?? { value: original, configurable: true });
+  }
+}
+
 /**
  * A D1 binding with counts of what an operation asked of it. `prepare` counts
  * a statement and records the widest parameter list; `all`, `run` and `batch`

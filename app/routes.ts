@@ -10,7 +10,8 @@ export default [
 
   // The signed-in shell: screens go inside it.
   layout("routes/shell.tsx", [
-    index("routes/home.tsx"),
+    // Vender, inside the layout that holds its Items.
+    layout("routes/sell-items.tsx", [index("routes/home.tsx")]),
     route("cuentas-abiertas", "routes/open-bills.tsx"),
     route("cuentas", "routes/cuentas.tsx"),
     route("cuentas/:billId", "routes/bill.tsx"),

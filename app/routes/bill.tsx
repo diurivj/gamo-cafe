@@ -20,6 +20,7 @@ import { SubmitButton } from "~/components/submit-button";
 import { redirectWithFlash, takeFlash } from "~/flash.server";
 import { requireUser } from "~/session.server";
 import { billStateLabel, isOpenBill } from "~/shared/bill-state";
+import { newId } from "~/shared/id";
 import {
   CORRECTION_INTENTS,
   type CorrectionIntent,
@@ -69,6 +70,9 @@ export async function loader({ context, params }: Route.LoaderArgs) {
     canEdit: bill.state !== "voided" && (user.role === "admin" || bill.paid === 0),
     // What the form that redirected here recorded (spec §3.4).
     flash: takeFlash(context),
+    // The key of the Cobrar form this page renders (spec §3.4): new every
+    // time the loader runs, the same for a double tap of one rendered form.
+    submissionKey: newId(),
   };
 }
 
@@ -114,7 +118,13 @@ function programFor(form: FormData, billId: string) {
         if (parsed === undefined) throw data({ error: paymentMessages.InvalidAmount }, { status: 400 });
         amount = parsed;
       }
-      return yield* takePayment({ billId, amount, method: decoded.success, expectedRevision: readRevision(form) });
+      return yield* takePayment({
+        billId,
+        amount,
+        method: decoded.success,
+        expectedRevision: readRevision(form),
+        submissionKey: String(form.get("submissionKey") ?? "") || null,
+      });
     }
 
     if (intent === "editar") {
@@ -294,7 +304,7 @@ const reasonField = (
 );
 
 export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
-  const { bill, canAddItems, canPay, isAdmin, canEdit, flash } = loaderData;
+  const { bill, canAddItems, canPay, isAdmin, canEdit, flash, submissionKey } = loaderData;
   // A Voided Bill accepts no further corrections (spec §5.7); a Paid Bill does,
   // which is what §8.5 is about.
   const canCorrect = bill.state !== "voided";
@@ -541,6 +551,7 @@ export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
               what is now owed, without touching another form's fields. */}
           <Form key={bill.owed} method="post" className="flex flex-col gap-4">
             <input type="hidden" name="revision" value={bill.revision} />
+            <input type="hidden" name="submissionKey" value={submissionKey} />
             <PaymentFields
               defaultAmount={bill.owed}
               initialAmount={formatMoney(bill.owed)}

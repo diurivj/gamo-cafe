@@ -7,7 +7,8 @@ import { recordSelection, takePayment } from "~/backend/bills";
 import type { CurrentUser } from "~/backend/current-user";
 import { retireCustomer } from "~/backend/customers";
 import { Db } from "~/backend/db";
-import { listOwed } from "~/backend/owed";
+import { listOwed, OWED_BILLS_PER_PAGE } from "~/backend/owed";
+import type { Cursor } from "~/shared/cursor";
 
 import { as, seedUser } from "./support/auth";
 import { seedItem } from "./support/catalog";
@@ -138,9 +139,9 @@ describe("listOwed", () => {
     ));
 });
 /** Runs `listOwed` as this Admin with a D1 that counts what it does. */
-async function listed(admin: CurrentUser["Service"]) {
+async function listed(admin: CurrentUser["Service"], cursor: Cursor | null = null) {
   const { counter, d1 } = countingD1(env.DB);
-  const owed = await Effect.runPromise(listOwed().pipe(as(admin), Effect.provide(Db.layer(d1))));
+  const owed = await Effect.runPromise(listOwed(cursor).pipe(as(admin), Effect.provide(Db.layer(d1))));
   return { ...counter, owed };
 }
 
@@ -188,35 +189,56 @@ describe("Por cobrar reads", () => {
       }),
     ));
 
-  it("returns 200 Open Bills reading only about their own rows", () =>
+  it("pages the Open Bills with no Customer, oldest first, while every page carries the whole Owed", () =>
     runTest(
       Effect.gen(function* () {
         const ana = yield* seedUser("admin");
         const db = yield* Db;
         const ruiz = yield* seedCustomer("Familia numerosa", { by: ana });
-        // 100 Bills of a Customer and 100 with no Customer, all Open.
-        for (const customerId of [ruiz.id, null]) {
-          yield* db.run(
-            `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 100)
-             INSERT INTO bills (id, day, opened_by, opened_at, customer_id, total, paid, state, revision)
-             SELECT ? || x, '2026-10-04', ?, 1000 + x, ?, 100, 0, 'open', 0 FROM n`,
-            customerId === null ? "suelta-" : "de-",
-            ana.id,
-            customerId,
-          );
-        }
+        // 100 Bills of a Customer and 120 with no Customer, all Open; the
+        // loose ones are Abiertas and Parciales in turn, two to an instant.
+        yield* db.run(
+          `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 100)
+           INSERT INTO bills (id, day, opened_by, opened_at, customer_id, total, paid, state, revision)
+           SELECT 'de-' || x, '2026-10-04', ?, 1000 + x, ?, 100, 0, 'open', 0 FROM n`,
+          ana.id,
+          ruiz.id,
+        );
+        yield* db.run(
+          `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 120)
+           INSERT INTO bills (id, day, opened_by, opened_at, customer_id, total, paid, state, revision)
+           SELECT 'suelta-' || x, '2026-10-04', ?, 1000 + x / 2, NULL, 100, x % 2,
+                  CASE x % 2 WHEN 0 THEN 'open' ELSE 'partial' END, 0 FROM n`,
+          ana.id,
+        );
+        const oldestFirst = Array.from({ length: 120 }, (_, n) => `suelta-${n + 1}`);
 
-        const measured = yield* Effect.promise(() => listed(ana));
+        const first = yield* Effect.promise(() => listed(ana));
 
-        expect(measured.statements).toBeLessThan(5);
-        expect(measured.owed.customers).toHaveLength(1);
-        expect(measured.owed.customers[0]).toMatchObject({ owed: 10000, oldestDay: "2026-10-04" });
-        expect(measured.owed.bills).toHaveLength(100);
-        expect(measured.owed.total).toBe(20000);
-        // Rows read are the Open Bills' own rows, not the history's.
-        // Under four rows per Open Bill: its index entry, its row and the
-        // Customer it belongs to, if any (spec §2.4, §7.4).
-        expect(measured.rowsRead).toBeLessThan(200 * 4);
+        expect(first.statements).toBeLessThan(5);
+        expect(first.owed.customers).toHaveLength(1);
+        expect(first.owed.customers[0]).toMatchObject({ owed: 10000, oldestDay: "2026-10-04" });
+        // 100 × $1.00 of the Customer, and 120 loose Bills of which 60 paid 1 centavo.
+        expect(first.owed.total).toBe(10000 + 12000 - 60);
+        expect(first.owed.bills.map((bill) => bill.id)).toEqual(oldestFirst.slice(0, OWED_BILLS_PER_PAGE));
+        // Rows read are the Open Bills' own rows, not the history's: under
+        // four per Open Bill (spec §2.4, §7.4).
+        expect(first.rowsRead).toBeLessThan(220 * 4);
+
+        // A Bill paid and a Bill opened between two pages: neither repeats nor skips.
+        yield* markBill("suelta-1", "paid", 100);
+        yield* db.run(
+          `INSERT INTO bills (id, day, opened_by, opened_at, customer_id, total, paid, state, revision)
+           VALUES ('suelta-nueva', '2026-10-04', ?, 500, NULL, 100, 0, 'open', 0)`,
+          ana.id,
+        );
+        const second = yield* Effect.promise(() => listed(ana, first.owed.next));
+        expect(second.owed.bills.map((bill) => bill.id)).toEqual(oldestFirst.slice(50, 100));
+        expect(second.owed.customers).toEqual(first.owed.customers);
+        const third = yield* Effect.promise(() => listed(ana, second.owed.next));
+        expect(third.owed.bills.map((bill) => bill.id)).toEqual(oldestFirst.slice(100));
+        expect(third.owed.next).toBeNull();
+        expect(third.rowsRead).toBeLessThanOrEqual(first.rowsRead + 4);
       }),
     ));
 });

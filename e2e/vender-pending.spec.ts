@@ -6,6 +6,8 @@ import { holdSubmissions } from "./support/held";
 // being recorded, and the next one can start. It says "pagada" or "registrado"
 // only once the server has answered, and a refused sale comes back.
 
+const REFUSED = "El pago no puede ser mayor que el total de la selección.";
+
 test("a second sale is started while the first is still being recorded, and both are recorded", async ({
   page,
   signInAs,
@@ -44,6 +46,9 @@ test("a second sale is started while the first is still being recorded, and both
   // At once: the selection is empty and the sale is said to be on its way.
   await expect(page.getByRole("region", { name: "Selección" })).toHaveCount(0);
   await expect(recording.getByRole("listitem")).toHaveText(["Registrando venta de $18.50…"]);
+  // With nothing selected there is nothing to send: the second tap of a
+  // double tap finds the button disabled.
+  await expect(cobrar).toBeDisabled();
   // Nothing says it is paid: the server has not even received it.
   await held.waitFor(1);
   await expect(page.getByRole("status")).toHaveCount(0);
@@ -88,7 +93,7 @@ test("a refused sale brings back the selection it emptied, with its Customer, no
   query,
 }) => {
   const beto = await signInAs("worker", "Beto");
-  const agua = await addItem({ name: "Agua mineral", price: 1850, stock: { units: 6, by: beto } });
+  await addItem({ name: "Agua mineral", price: 1850, stock: { units: 6, by: beto } });
   await addCustomer("Familia Ruiz", { by: beto });
   await page.goto("/");
 
@@ -99,10 +104,9 @@ test("a refused sale brings back the selection it emptied, with its Customer, no
   await page.getByLabel("Nota (opcional)").fill("Paga los viernes");
   const cobrar = page.getByRole("region", { name: "Cobrar" });
   await cobrar.getByRole("radio", { name: "Transferencia" }).check();
-  await cobrar.getByLabel("Monto").fill("20.00");
+  // More than the selection's total, which the server refuses.
+  await cobrar.getByLabel("Monto").fill("100.00");
 
-  // The Item is retired on another phone before the sale is sent.
-  await query("UPDATE items SET retired_at = ? WHERE id = ?", [Date.now(), agua.id]);
   const held = await holdSubmissions(page);
   await cobrar.getByRole("button", { name: "Cobrar" }).click();
   await expect(page.getByRole("region", { name: "Selección" })).toHaveCount(0);
@@ -110,14 +114,12 @@ test("a refused sale brings back the selection it emptied, with its Customer, no
   await held.waitFor(1);
   await held.release();
 
-  await expect(page.getByRole("alert")).toHaveText(
-    "Un producto de la selección ya no está disponible. Quítalo y vuelve a intentar.",
-  );
+  await expect(page.getByRole("alert")).toHaveText(REFUSED);
   await expect(page.getByRole("region", { name: "Selección" })).toContainText("$37.00");
   await expect(page.getByRole("group", { name: "Cliente" })).toContainText("Familia Ruiz");
   await expect(page.getByLabel("Nota (opcional)")).toHaveValue("Paga los viernes");
   await expect(cobrar.getByRole("radio", { name: "Transferencia" })).toBeChecked();
-  await expect(cobrar.getByLabel("Monto")).toHaveValue("20.00");
+  await expect(cobrar.getByLabel("Monto")).toHaveValue("100.00");
   await expect(page.getByRole("list", { name: "Ventas que se están registrando" })).toHaveCount(0);
   await expect(page.getByRole("status")).toHaveCount(0);
   expect(await query("SELECT id FROM bills")).toHaveLength(0);
@@ -130,18 +132,22 @@ test("a refused sale joins the selection that was started meanwhile", async ({ p
   await page.goto("/");
 
   await page.getByRole("button", { name: /^Agua mineral/ }).click();
-  await query("UPDATE items SET retired_at = ? WHERE id = ?", [Date.now(), agua.id]);
+  const cobrar = page.getByRole("region", { name: "Cobrar" });
+  await cobrar.getByLabel("Monto").fill("100.00");
   const held = await holdSubmissions(page);
-  await page.getByRole("button", { name: "Dejar abierta" }).click();
+  await cobrar.getByRole("button", { name: "Cobrar" }).click();
   await held.waitFor(1);
 
   await page.getByRole("button", { name: new RegExp(`^${cafe.name}`) }).click();
   await expect(page.getByRole("region", { name: "Selección" })).toContainText("$25.00");
   await held.release();
 
-  await expect(page.getByRole("alert")).toContainText("ya no está disponible");
+  await expect(page.getByRole("alert")).toHaveText(REFUSED);
   const selection = page.getByRole("region", { name: "Selección" });
   await expect(selection).toContainText("Agua mineral");
   await expect(selection).toContainText("Café de olla");
   await expect(selection).toContainText("$43.50");
+  // The form of the selection that was started is left as it was.
+  await expect(cobrar.getByLabel("Monto")).toHaveValue("");
+  expect(await query("SELECT id FROM bills")).toHaveLength(0);
 });
