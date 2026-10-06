@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Form, useNavigation } from "react-router";
+import { Form, Link, useNavigation } from "react-router";
 
 import type { ItemNotFound } from "~/backend/catalog";
 import type { AdminOnly } from "~/backend/current-user";
@@ -134,6 +134,21 @@ export default function Inventario({ loaderData, actionData }: Route.ComponentPr
   return (
     <div className="flex flex-col gap-8">
       <h1 className="text-3xl font-semibold tracking-tight">Inventario</h1>
+
+      <section aria-labelledby="conteo" className="rounded-2xl border border-stone-200 bg-white p-4">
+        <h2 id="conteo" className="text-xl font-semibold">
+          Conteo
+        </h2>
+        <p className="mt-1 text-stone-600">
+          Cuenta las unidades que hay en el estante y registra las diferencias contra las existencias.
+        </p>
+        <Link
+          to="/inventario/conteo"
+          className="mt-4 inline-block rounded-xl border border-stone-300 bg-white px-4 py-3 font-medium"
+        >
+          Iniciar conteo
+        </Link>
+      </section>
 
       <section aria-labelledby="registrar-ajuste" className="rounded-2xl border border-stone-200 bg-white p-4">
         <h2 id="registrar-ajuste" className="text-xl font-semibold">

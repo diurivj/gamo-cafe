@@ -81,6 +81,110 @@ export const stockOf = Effect.fn("stockOf")(function* (itemId: string) {
   return level?.units ?? 0;
 });
 
+const LastCounted = Schema.Struct({ lastCountedAt: Schema.NullOr(Schema.Int) });
+
+/** When an Item was last counted, or `null` when it never was. Admins only. */
+export const lastCountedAt = Effect.fn("lastCountedAt")(function* (itemId: string) {
+  yield* requireAdmin;
+  const db = yield* Db;
+  const level = yield* db.first(
+    LastCounted,
+    "SELECT last_counted_at AS lastCountedAt FROM stock_levels WHERE item_id = ?",
+    itemId,
+  );
+  return level?.lastCountedAt ?? null;
+});
+
+/** One Item's line of a Count, with the id of the `count_lines` row to write. */
+export interface CountedLine {
+  readonly id: string;
+  readonly itemId: string;
+  /** The units found on the shelf; zero or more. */
+  readonly found: number;
+}
+
+/** A Count to record, for `countStatements`. Every `lines` Item is distinct. */
+export interface NewCount {
+  readonly id: string;
+  readonly note: string | null;
+  /** The Admin who records it. */
+  readonly by: string;
+  readonly at: Instant;
+  readonly day: Day;
+  readonly lines: ReadonlyArray<CountedLine>;
+}
+
+/**
+ * How many lines one statement carries. Each line binds three parameters and
+ * each statement binds two more, so 32 stays under D1's 100 bound parameters
+ * per query (spec §2.4) with room to spare; a Count of every Item is then a
+ * handful of statements, well under the 50 a request may issue.
+ */
+const COUNTED_LINES_PER_STATEMENT = 32;
+
+function chunk<A>(items: ReadonlyArray<A>, size: number): ReadonlyArray<ReadonlyArray<A>> {
+  const parts: Array<ReadonlyArray<A>> = [];
+  for (let at = 0; at < items.length; at += size) parts.push(items.slice(at, at + size));
+  return parts;
+}
+
+const rowsOf = (size: number) => Array.from({ length: size }, () => "(?, ?, ?)").join(", ");
+
+/**
+ * The statements that record a Count, for a batch: the fact, then per Item the
+ * line and the Stock it sets. The Stock expected is read from `stock_levels`
+ * INSIDE the batch, in the same statement that writes the line and before any
+ * Stock moves, so it is the Stock of the moment of confirming even when the
+ * review page showed another number (spec §5.8).
+ *
+ * The Count's insert is conditional on every Item existing and being
+ * stock-tracked; when it writes nothing, the lines and Stock statements do
+ * nothing either, because they join the Count the first statement would have
+ * written. Its `changes` says whether the Count was recorded.
+ */
+export function countStatements(count: NewCount): ReadonlyArray<Statement> {
+  const { id, note, by, at, day, lines } = count;
+  const parts = chunk(lines, COUNTED_LINES_PER_STATEMENT);
+  const itemIds = JSON.stringify(lines.map((line) => line.itemId));
+
+  return [
+    // json_each carries the whole set of Items as one parameter, so the
+    // condition stays under the parameter limit however many Items are counted.
+    statement(
+      `INSERT INTO counts (id, note, recorded_by, recorded_at, day)
+       SELECT ?, ?, ?, ?, ?
+       WHERE (SELECT COUNT(*) FROM json_each(?) AS j
+              JOIN items i ON i.id = j.value AND i.stock_tracked = 1) = ?`,
+      id, note, by, at, day, itemIds, lines.length,
+    ),
+    ...parts.map((part) =>
+      statement(
+        `INSERT INTO count_lines (id, count_id, item_id, units_expected, units_found)
+         SELECT v.column1, ?, v.column2, COALESCE(s.units, 0), v.column3
+         FROM (VALUES ${rowsOf(part.length)}) AS v
+         JOIN counts c ON c.id = ?
+         LEFT JOIN stock_levels s ON s.item_id = v.column2`,
+        id,
+        ...part.flatMap((line) => [line.id, line.itemId, line.found]),
+        id,
+      ),
+    ),
+    ...parts.map((part) =>
+      statement(
+        `INSERT INTO stock_levels (item_id, units, last_counted_at)
+         SELECT v.column2, v.column3, ?
+         FROM (VALUES ${rowsOf(part.length)}) AS v
+         JOIN counts c ON c.id = ?
+         WHERE c.recorded_at IS NOT NULL
+         ON CONFLICT (item_id) DO UPDATE SET units = excluded.units, last_counted_at = excluded.last_counted_at`,
+        at,
+        ...part.flatMap((line) => [line.id, line.itemId, line.found]),
+        id,
+      ),
+    ),
+  ];
+}
+
 const Adjustment = Schema.Struct({
   id: Schema.String,
   itemId: Schema.String,

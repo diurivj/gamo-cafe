@@ -1,6 +1,6 @@
 # 13 — Conteo and Diferencias
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 12
 Spec: [`../spec.md`](../spec.md) §5.8, §6.2 (Inventario, Diferencias), §7.2, §7.3 (6), §8.7, §10.5, §2.4
 
@@ -18,3 +18,8 @@ Spec: [`../spec.md`](../spec.md) §5.8, §6.2 (Inventario, Diferencias), §7.2, 
 - [ ] A Count of every Item (60 Items) issues fewer than 50 statements and no query exceeds 100 bound parameters.
 - [ ] Faltante and Sobrante are shown correctly; zero Discrepancies are recorded.
 - [ ] Workers are refused. Flow §8.7 passes.
+
+## Comments
+
+- 2026-10-06: Implemented on `ticket/13-conteo`, merged into `gamo-cafe-v1` at `85c5fe8`. Budget: a 60-Item Count is 5 statements, the largest 98 bound parameters (32 lines per statement); the Count's insert carries the whole Item set through one `json_each` parameter, and `count_lines` reads the expected Stock inside the batch before any Stock write. Decisions: Diferencias shows the 20 most recent Counts; a blank entry field leaves an Item out (any subset); a second line for one Item is ignored; retired stock-tracked Items are countable; confirming redirects to `/diferencias`; `lastCountedAt` in `stock.ts` is the read seam for tests.
+- Ticket 19: a Count sets Stock absolutely and updates `last_counted_at`, which the rebuild must treat as a reset.
