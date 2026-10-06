@@ -39,10 +39,13 @@ app/
     run.server.ts  run(): the one way a loader or action runs a program
     health.ts      the reference operation
     customers.ts   Customers: addCustomer, searchCustomers, getCustomer, editCustomer, retireCustomer, restoreCustomer
-    bills.ts       Bills and Lines: recordSelection (one batch), getBill (the §4.1 gate), listOpenBills
+    bills.ts       Bills, Lines and Payments: recordSelection and takePayment (one batch each), getBill (the §4.1 gate), listOpenBills
+    payments.ts    the two statements a Payment writes (paymentStatements) and its errors
   shared/      Plain functions, no Effect. Safe in the browser.
-    money.ts       centavos, formatMoney, parsePesos
+    money.ts       centavos, formatMoney, parsePesos, changeFor
     bill-state.ts  a Bill's states, their Spanish words, isOpenBill
+    payment.ts     cash or transfer, and their Spanish words
+    payment-messages.ts  what a Payment's rule violations say on screen
     day.ts         Instant, Day, dayOf, formatDay, formatTime
     id.ts          newId
     secret.ts      sign-in codes, session tokens, their hash, the cookie name
@@ -51,6 +54,7 @@ app/
     discrepancy.ts discrepancyText: Faltante, Sobrante, or Sin diferencia
   components/  React components used by more than one screen
     customer-picker.tsx  CustomerPicker, the form field that chooses a Customer
+    payment-fields.tsx  PaymentFields, a Payment's method, amount and cash change
     item-fields.tsx  ItemFields, the fields of an Item's form, new or existing
     count-line.tsx  CountLineItem, one line of a Count as Conteo and Diferencias show it
   session.server.ts  the session middleware, requireUser, the cookie
@@ -185,6 +189,17 @@ A name that must be unique or searchable "ignoring case and accents" is stored t
 ```
 
 The field's value is the chosen Customer's id, or `""` for none. `defaultValue` is `{ id, name }` or `null`; `onChange` is optional. The action that receives the id still has to check it: the picker hiding retired Customers is not enforcement.
+
+## Taking a Payment
+
+A Payment is always recorded in the same batch as what moves the Bill's `paid` projection, through the two statements in `~/backend/payments.ts` (`paymentStatements`). There are two ways in, both operations in `~/backend/bills.ts`:
+
+- **Cobrar** on Vender: `recordSelection({ items, payment: { method, amount } })` records the selection and the Payment together (spec §7.3.1). The amount defaults to the selection's total and may be less.
+- **Cobrar** on Cuenta: `takePayment({ billId, amount, method, expectedRevision })` (spec §7.3.2). The amount defaults to what the Bill still owes and may be less; `expectedRevision` is the revision the page was rendered from, which the form carries in a hidden field.
+
+A D1 batch cannot branch, so the rules are SQL conditions: `paid + amount <= total` on both statements, and `revision = ? AND state IN ('open', 'partial') AND total - paid >= ?` when the batch is a lone `takePayment`. `paymentStatements(payment, when)` takes the `Condition` the rest of the batch shares, so a refused operation writes neither the Payment nor the projection. Two phones paying the same Bill in full at once therefore record exactly one Payment; the other gets `BillChanged`. When the first statement's `changes` is 0, `takePayment` reads the Bill again to answer the exact rule (`BillChanged`, `BillIsVoided` or `PaymentExceedsOwed`); the routes turn those into `~/shared/payment-messages.ts`.
+
+`takePayment` returns `{ id, amount, bill }`. A Worker who pays a Bill in full is redirected to Cuentas abiertas instead of staying on the page, because a Worker may not open a Paid Bill (§4.1). The amount handed over for cash is never submitted or stored: `PaymentFields` from `~/components/payment-fields` shows `changeFor(handedOver, amount)` while it is typed.
 
 ## Writing a test
 

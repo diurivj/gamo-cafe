@@ -1,8 +1,9 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { getBill } from "~/backend/bills";
 import { retireItem } from "~/backend/catalog";
+import { Db } from "~/backend/db";
 
 import { as, signedIn, type SignedIn } from "./support/auth";
 import { seedCategory, seedItem } from "./support/catalog";
@@ -17,7 +18,6 @@ const selection = (items: ReadonlyArray<{ itemId: string; quantity: number }>) =
 const post = (who: SignedIn, fields: Record<string, string>) =>
   // `?index` aims the POST at the index route's action, not the layout's.
   who.fetch("/?index", { method: "POST", body: new URLSearchParams(fields) });
-
 /** The Bill the recorded answer points at, so a test can read it back. */
 const billIdIn = (html: string) => {
   const billId = /data-bill-id="([^"]+)"/.exec(html)?.[1];
@@ -118,5 +118,82 @@ describe("Vender", () => {
     expect(messages[2]).toContain("La nota no puede pasar de 80 caracteres.");
     expect(messages[3]).toContain("No pudimos leer la selección. Recarga la página.");
     expect(messages[4]).toContain("No entendimos esa acción.");
+  });
+
+  it("Cobrar records the selection and the Payment together and leaves the Bill Pagada", async () => {
+    const beto = await signedIn("worker", "Beto");
+    const ana = await signedIn("admin", "Ana");
+    const item = await runTest(seedItem({ name: "Cobrado en Vender", price: 1850, startingStock: 3 }));
+
+    const response = await post(beto, {
+      intent: "cobrar",
+      selection: selection([{ itemId: item.id, quantity: 2 }]),
+      method: "cash",
+      amount: "",
+    });
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Cuenta pagada: $37.00.");
+    // A Worker may not open the Paid Bill (§4.1): read it as an Admin.
+    const bill = await runTest(getBill(billIdIn(html)).pipe(as(ana.user)));
+    expect(bill).toMatchObject({ total: 3700, paid: 3700, owed: 0, state: "paid" });
+    expect(bill.payments).toMatchObject([
+      { amount: 3700, method: "cash", by: beto.user.id, byName: "Beto", day: bill.day },
+    ]);
+    expect(bill.lines).toMatchObject([{ itemId: item.id, quantity: 2, by: beto.user.id }]);
+  });
+
+  it("Cobrar with less than the total leaves the Bill Pago parcial", async () => {
+    const ana = await signedIn("admin", "Ana");
+    const item = await runTest(seedItem({ name: "Abonado en Vender", price: 1850, by: ana.user }));
+
+    const response = await post(ana, {
+      intent: "cobrar",
+      selection: selection([{ itemId: item.id, quantity: 2 }]),
+      method: "transfer",
+      amount: "10.00",
+    });
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Abono registrado. Debe $27.00.");
+    const bill = await runTest(getBill(billIdIn(html)).pipe(as(ana.user)));
+    expect(bill).toMatchObject({ total: 3700, paid: 1000, owed: 2700, state: "partial" });
+    expect(bill.payments).toMatchObject([{ amount: 1000, method: "transfer" }]);
+  });
+
+  it("is told in Spanish about a Payment of zero, too large or unreadable, and records nothing", async () => {
+    const beto = await signedIn("worker", "Beto");
+    const item = await runTest(seedItem({ name: "Pago rechazado al vender", price: 1000 }));
+    const one = selection([{ itemId: item.id, quantity: 1 }]);
+
+    const requests = [
+      await post(beto, { intent: "cobrar", selection: one, method: "cash", amount: "0" }),
+      await post(beto, { intent: "cobrar", selection: one, method: "cash", amount: "10.01" }),
+      await post(beto, { intent: "cobrar", selection: one, method: "cash", amount: "no es un monto" }),
+      await post(beto, { intent: "cobrar", selection: one, amount: "" }),
+    ];
+
+    expect(requests.map((request) => request.status)).toEqual([400, 400, 400, 400]);
+    const messages = await Promise.all(requests.map((request) => request.text()));
+    expect(messages[0]).toContain("El pago debe ser mayor que cero.");
+    expect(messages[1]).toContain("El pago no puede ser mayor que lo que debe la cuenta.");
+    expect(messages[2]).toContain("El monto no es válido. Escríbelo como 18.50.");
+    expect(messages[3]).toContain("Elige cómo se pagó.");
+
+    // All or nothing: no Line of the refused sales exists (spec §7.3).
+    const lines = await runTest(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const counted = yield* db.first(
+          Schema.Struct({ lines: Schema.Int }),
+          "SELECT COUNT(*) AS lines FROM lines WHERE item_id = ?",
+          item.id,
+        );
+        return counted!.lines;
+      }),
+    );
+    expect(lines).toBe(0);
   });
 });

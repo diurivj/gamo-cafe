@@ -24,6 +24,18 @@ export function formatMoney(amount: Centavos): string {
 const PESOS = /^(\d{1,3}(?:,\d{3})+|\d*)(?:\.(\d{0,2}))?$/;
 
 /**
+ * The change to hand back for cash: what was handed over minus what was paid
+ * (spec §5.5). The amount handed over is never stored, so this is only what
+ * the screen shows while it is typed.
+ */
+export function changeFor(handedOver: Centavos, amount: Centavos): Centavos {
+  if (!Number.isSafeInteger(handedOver) || !Number.isSafeInteger(amount)) {
+    throw new RangeError(`not whole centavos: ${handedOver} and ${amount}`);
+  }
+  return handedOver - amount;
+}
+
+/**
  * Reads what a person typed as a peso amount: `"18.5"` → `1850`,
  * `"$1,234.56"` → `123456`. Gives `undefined` for anything else, including
  * negative amounts, a third decimal and a decimal comma (`"12,50"`).

@@ -12,24 +12,30 @@ import {
   type InvalidQuantity,
   type ItemUnavailable,
   type NewSelection,
+  type NewSelectionPayment,
   type NoteTooLong,
   recordSelection,
   type TargetConflict,
 } from "~/backend/bills";
 import { activeItemsByCategory } from "~/backend/catalog";
 import { CurrentUser } from "~/backend/current-user";
+import { type PaymentExceedsOwed, type PaymentNotPositive } from "~/backend/payments";
 import { run } from "~/backend/run.server";
 import { CustomerPicker } from "~/components/customer-picker";
+import { PaymentFields } from "~/components/payment-fields";
 import { requireUser } from "~/session.server";
 import { newId } from "~/shared/id";
-import { formatMoney } from "~/shared/money";
+import { formatMoney, parsePesos } from "~/shared/money";
+import { PAYMENT_METHODS, type PaymentMethod } from "~/shared/payment";
+import { paymentMessages } from "~/shared/payment-messages";
 
 import type { Route } from "./+types/home";
 
 // Vender (spec §6.1): the Items as large buttons by Category, a selection the
-// browser holds until it is recorded, a Customer or a note, and **Dejar
-// abierta**. With `?billId=`, Cuenta's **Agregar productos** turns it into the
-// same screen targeting one Open Bill (ticket 07). Cobrar joins in ticket 08.
+// browser holds until it is recorded, a Customer or a note, **Dejar abierta**
+// and **Cobrar** (ticket 08), which records the selection and a Payment in one
+// batch. With `?billId=`, Cuenta's **Agregar productos** turns it into the
+// same screen targeting one Open Bill (ticket 07).
 
 export const meta: Route.MetaFunction = () => [{ title: "Vender · Gamo Cafe" }];
 
@@ -51,8 +57,8 @@ export async function loader({ context, request }: Route.LoaderArgs) {
       }
     },
   );
-  // The screen shows the target's figures, not its Lines.
-  const { lines: _lines, ...target } = bill;
+  // The screen shows the target's figures, not its Lines or Payments.
+  const { lines: _lines, payments: _payments, ...target } = bill;
   return { categories, target };
 }
 
@@ -73,6 +79,21 @@ function readSelection(form: FormData): NewSelection | { readonly error: string 
   };
 }
 
+/** What **Cobrar** sends besides the selection: a method and an optional amount. */
+function readPayment(form: FormData): NewSelectionPayment | { readonly error: string } {
+  const decoded = Schema.decodeUnknownResult(Schema.Literals(PAYMENT_METHODS))(
+    String(form.get("method") ?? ""),
+  );
+  if (!Result.isSuccess(decoded)) return { error: paymentMessages.MethodMissing };
+
+  const method: PaymentMethod = decoded.success;
+  const typed = String(form.get("amount") ?? "").trim();
+  if (typed === "") return { method, amount: null };
+  const amount = parsePesos(typed);
+  if (amount === undefined) return { error: paymentMessages.InvalidAmount };
+  return { method, amount };
+}
+
 type SelectionError =
   | BillNotFound
   | BillNotOpen
@@ -81,6 +102,8 @@ type SelectionError =
   | InvalidQuantity
   | ItemUnavailable
   | NoteTooLong
+  | PaymentExceedsOwed
+  | PaymentNotPositive
   | TargetConflict;
 
 /** What each rule violation of `recordSelection` answers, in Spanish. */
@@ -102,24 +125,38 @@ function answerSelectionError(error: SelectionError): { readonly error: string }
       return { error: "No se puede elegir cliente ni nota al agregar a una cuenta abierta." };
     case "BillNotOpen":
       return { error: "Esta cuenta ya no está abierta. Registra los productos en una cuenta nueva." };
+    case "PaymentNotPositive":
+      return { error: paymentMessages.PaymentNotPositive };
+    case "PaymentExceedsOwed":
+      return { error: paymentMessages.PaymentExceedsOwed };
   }
 }
 
 export async function action({ context, request }: Route.ActionArgs) {
   const user = requireUser(context);
   const form = await request.formData();
-  if (String(form.get("intent") ?? "") !== "dejar-abierta") {
+  const intent = String(form.get("intent") ?? "");
+  if (intent !== "dejar-abierta" && intent !== "cobrar") {
     return data({ error: "No entendimos esa acción. Recarga la página e intenta de nuevo." }, { status: 400 });
   }
 
   const selection = readSelection(form);
   if ("error" in selection) return data(selection, { status: 400 });
 
-  const program = recordSelection(selection).pipe(Effect.provideService(CurrentUser, user));
+  // Cobrar records the selection and a Payment together, in the one batch of
+  // `recordSelection` (spec §7.3.1).
+  let payment: NewSelectionPayment | null = null;
+  if (intent === "cobrar") {
+    const read = readPayment(form);
+    if ("error" in read) return data(read, { status: 400 });
+    payment = read;
+  }
+
+  const program = recordSelection({ ...selection, payment }).pipe(Effect.provideService(CurrentUser, user));
   const result = await run(context, program, answerSelectionError);
   if ("error" in result) return data(result, { status: 400 });
   // `done` is new on every success: the page uses it to empty the selection.
-  return { done: newId(), bill: result };
+  return { done: newId(), bill: result, intent };
 }
 
 const tile =
@@ -136,6 +173,12 @@ const recordedMessage = (bill: BillSummary) =>
 /** What it says after Lines were added to the Bill Cuenta sent the User from. */
 const addedMessage = (bill: BillSummary) =>
   `Se agregaron los productos a la cuenta. Total ${formatMoney(bill.total)} · Debe ${formatMoney(bill.owed)}.`;
+
+/** What it says after **Cobrar** recorded a Payment with the selection. */
+const paidMessage = (bill: BillSummary) =>
+  bill.owed === 0
+    ? `Cuenta pagada: ${formatMoney(bill.total)}.`
+    : `Abono registrado. Debe ${formatMoney(bill.owed)}.`;
 
 export default function Home({ loaderData, actionData }: Route.ComponentProps) {
   const { categories, target } = loaderData;
@@ -201,7 +244,6 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
         key={formKey}
         className="flex flex-col gap-6"
       >
-        <input type="hidden" name="intent" value="dejar-abierta" />
         <input type="hidden" name="selection" value={selection} />
         {/* Set when Cuenta's Agregar productos sent the User here. */}
         <input type="hidden" name="billId" value={target?.id ?? ""} />
@@ -300,12 +342,46 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
           ) : null}
           {actionData && "bill" in actionData ? (
             <p role="status" data-bill-id={actionData.bill.id} className="rounded-xl bg-green-50 p-3">
-              {target ? addedMessage(actionData.bill) : recordedMessage(actionData.bill)}
+              {actionData.intent === "cobrar"
+                ? paidMessage(actionData.bill)
+                : target
+                  ? addedMessage(actionData.bill)
+                  : recordedMessage(actionData.bill)}
             </p>
           ) : null}
 
-          <button type="submit" disabled={busy || items.length === 0} className={primaryButton}>
+          <button
+            type="submit"
+            name="intent"
+            value="dejar-abierta"
+            disabled={busy || items.length === 0}
+            className={primaryButton}
+          >
             {target ? "Agregar a la cuenta" : "Dejar abierta"}
+          </button>
+        </section>
+
+        {/* Cobrar records the selection and a Payment together, in one batch
+            (spec §6.1, §7.3.1, §8.1). */}
+        <section
+          aria-labelledby="cobrar"
+          className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-4"
+        >
+          <h2 id="cobrar" className="text-xl font-semibold">
+            Cobrar
+          </h2>
+          <PaymentFields
+            defaultAmount={total}
+            amountHint="Déjalo vacío para cobrar todo el total; también puedes cobrar menos."
+          />
+          <button
+            type="submit"
+            name="intent"
+            value="cobrar"
+            disabled={busy || items.length === 0}
+            className={primaryButton}
+          >
+            Cobrar
           </button>
         </section>
       </Form>

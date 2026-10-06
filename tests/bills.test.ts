@@ -72,6 +72,7 @@ describe("recording a selection", () => {
               day: "2026-10-05",
             },
           ],
+          payments: [],
         });
       }),
     ));
@@ -328,7 +329,8 @@ describe("validation and a target Bill", () => {
           (yield* Effect.flip(recordSelection({ ...add, billId: bill.id, customerId: ruiz.id }).pipe(as(ana))))._tag,
         ).toBe("TargetConflict");
 
-        // Ticket 08's projection update is what makes a Bill Paid.
+        // A Payment (ticket 08) is what makes a Bill Paid; this stands in for
+        // its projection update.
         const db = yield* Db;
         yield* db.run("UPDATE bills SET paid = total, state = 'paid' WHERE id = ?", bill.id);
 
@@ -374,6 +376,127 @@ describe("two phones at once", () => {
   });
 });
 
+describe("Cobrar on Vender", () => {
+  it("records the selection and a Payment together, each carrying the signed-in User", () =>
+    runTest(
+      Effect.gen(function* () {
+        yield* setClock("2026-10-05T18:00:00");
+        const ana = yield* seedUser("admin");
+        const beto = yield* seedUser("worker", "Beto");
+        const item = yield* seedItem({ name: "Cobrado al momento", price: 1850, startingStock: 5, by: ana });
+
+        const bill = yield* recordSelection({
+          items: [{ itemId: item.id, quantity: 2 }],
+          payment: { method: "cash" },
+        }).pipe(as(beto));
+
+        const at = Date.parse("2026-10-05T18:00:00-06:00");
+        expect(bill).toMatchObject({ total: 3700, paid: 3700, owed: 0, state: "paid", revision: 1 });
+        // Its author reads it as an Admin would: a Worker no longer opens a
+        // Paid Bill (§4.1).
+        expect(yield* getBill(bill.id).pipe(as(ana))).toMatchObject({
+          lines: [{ itemId: item.id, quantity: 2, unitPrice: 1850, by: beto.id, byName: "Beto", day: "2026-10-05" }],
+          payments: [
+            { amount: 3700, method: "cash", by: beto.id, byName: "Beto", at, day: "2026-10-05" },
+          ],
+        });
+        expect(yield* stockOf(item.id).pipe(as(ana))).toBe(3);
+      }),
+    ));
+
+  it("takes an amount lower than the total and leaves the Bill Pago parcial", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const item = yield* seedItem({ name: "Abonado al momento", price: 1000, by: ana });
+
+        const bill = yield* recordSelection({
+          items: [{ itemId: item.id, quantity: 2 }],
+          payment: { method: "transfer", amount: 800 },
+        }).pipe(as(ana));
+
+        expect(bill).toMatchObject({ total: 2000, paid: 800, owed: 1200, state: "partial" });
+        expect((yield* getBill(bill.id).pipe(as(ana))).payments).toMatchObject([{ amount: 800, method: "transfer" }]);
+      }),
+    ));
+
+  it("refuses a Payment of zero or larger than what the Bill owes, and writes nothing at all", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const item = yield* seedItem({ name: "Pago inválido al vender", price: 1000, startingStock: 5, by: ana });
+        const db = yield* Db;
+        const tables = `SELECT (SELECT COUNT(*) FROM bills) AS bills,
+                               (SELECT COUNT(*) FROM lines) AS lines,
+                               (SELECT COUNT(*) FROM payments) AS payments`;
+        const before = yield* db.first(Schema.Struct({ bills: Schema.Int, lines: Schema.Int, payments: Schema.Int }), tables);
+
+        const attempts = [
+          [0, "PaymentNotPositive"],
+          [1.5, "PaymentNotPositive"],
+          [1001, "PaymentExceedsOwed"],
+        ] as const;
+        for (const [amount, tag] of attempts) {
+          const error = yield* Effect.flip(
+            recordSelection({ items: [{ itemId: item.id, quantity: 1 }], payment: { method: "cash", amount } }).pipe(
+              as(ana),
+            ),
+          );
+          expect(error._tag, String(amount)).toBe(tag);
+        }
+
+        // All or nothing: no Bill, no Line and no Stock move from a refused sale.
+        const after = yield* db.first(Schema.Struct({ bills: Schema.Int, lines: Schema.Int, payments: Schema.Int }), tables);
+        expect(after).toEqual(before);
+        expect(yield* stockOf(item.id).pipe(as(ana))).toBe(5);
+      }),
+    ));
+
+  it("refuses a Payment larger than what a target Bill will owe", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const item = yield* seedItem({ name: "Pago sobre una cuenta", price: 1000, by: ana });
+        const bill = yield* recordSelection({ items: [{ itemId: item.id, quantity: 1 }] }).pipe(as(ana));
+
+        const error = yield* Effect.flip(
+          recordSelection({
+            items: [{ itemId: item.id, quantity: 1 }],
+            billId: bill.id,
+            payment: { method: "cash", amount: 2001 },
+          }).pipe(as(ana)),
+        );
+
+        expect(error._tag).toBe("PaymentExceedsOwed");
+      }),
+    ));
+
+  it("sends a Customer's next selection of the same Day to a new Bill once the day's Bill is Paid", () =>
+    runTest(
+      Effect.gen(function* () {
+        yield* setClock("2026-10-05T12:00:00");
+        const ana = yield* seedUser("admin");
+        const item = yield* seedItem({ name: "Nueva cuenta al pagar", price: 1000, by: ana });
+        const ruiz = yield* seedCustomer("Familia que paga", { by: ana });
+
+        const paid = yield* recordSelection({
+          items: [{ itemId: item.id, quantity: 1 }],
+          customerId: ruiz.id,
+          payment: { method: "cash" },
+        }).pipe(as(ana));
+        expect(paid.state).toBe("paid");
+
+        const next = yield* recordSelection({ items: [{ itemId: item.id, quantity: 1 }], customerId: ruiz.id }).pipe(
+          as(ana),
+        );
+
+        expect(next.id).not.toBe(paid.id);
+        expect(next).toMatchObject({ state: "open", paid: 0, day: "2026-10-05" });
+        expect((yield* getBill(paid.id).pipe(as(ana))).state).toBe("paid");
+      }),
+    ));
+});
+
 /**
  * The D1 binding with a count of the statements it is asked to run. Every
  * statement is prepared exactly once, whether it runs alone or inside a
@@ -416,15 +539,16 @@ it("records a ten-Item selection in well under 50 D1 statements", async () => {
 
   const { counter, d1 } = countingD1(env.DB);
   const bill = await Effect.runPromise(
-    recordSelection({ items: seeded.items.map((item) => ({ itemId: item.id, quantity: 1 })) }).pipe(
-      as(seeded.ana),
-      Effect.provide(Db.layer(d1)),
-    ),
+    recordSelection({
+      items: seeded.items.map((item) => ({ itemId: item.id, quantity: 1 })),
+      payment: { method: "cash" },
+    }).pipe(as(seeded.ana), Effect.provide(Db.layer(d1))),
   );
 
   // One read of the Items, the Bill and its ten Lines with their ten Stock
-  // moves, then one read of the Bill: 23 statements, well under the 50 a
-  // request may issue (spec §2.4).
+  // moves, the Payment of Cobrar, then one read of the Bill: 25 statements,
+  // well under the 50 a request may issue (spec §2.4).
   expect(bill.total).toBe(1045);
+  expect(bill.state).toBe("paid");
   expect(counter.statements).toBeLessThan(30);
 });

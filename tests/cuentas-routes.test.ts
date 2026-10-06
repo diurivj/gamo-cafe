@@ -179,3 +179,110 @@ describe("Cuenta", () => {
     expect((await ana.fetch("/cuentas/nadie")).status).toBe(404);
   });
 });
+
+describe("Cobrar on Cuenta", () => {
+  it("takes a Payment that defaults to what the Bill owes, and lists it with who, when and method", async () => {
+    const beto = await signedIn("worker", "Beto");
+    const ana = await signedIn("admin", "Ana");
+    const item = await runTest(seedItem({ name: "Cobrable en Cuenta", price: 1850, by: ana.user }));
+    const bill = await leaveOpen(beto.user, item.id);
+
+    // A Worker takes a partial Payment: the amount may be less than owed.
+    const partial = await post(beto, `/cuentas/${bill.id}`, {
+      intent: "pagar",
+      method: "cash",
+      amount: "5.00",
+      revision: String(bill.revision),
+    });
+    expect(partial.status).toBe(200);
+    expect(await partial.text()).toContain("Abono de $5.00 registrado. Debe $13.50.");
+
+    const page = await (await beto.fetch(`/cuentas/${bill.id}`)).text();
+    expect(page).toContain("Pago parcial");
+    expect(page).toContain("Efectivo");
+    expect(page).toContain("Beto");
+    expect(page).toMatch(/\d{2}:\d{2}/);
+    expect(page).toContain("$13.50");
+    expect(page).toContain("$5.00");
+
+    // An empty amount pays everything still owed; an Admin stays to see it
+    // Pagada.
+    const fresh = await runTest(getBill(bill.id).pipe(as(beto.user)));
+    const paid = await post(ana, `/cuentas/${bill.id}`, {
+      intent: "pagar",
+      method: "transfer",
+      amount: "",
+      revision: String(fresh.revision),
+    });
+    expect(paid.status).toBe(200);
+    expect(await paid.text()).toContain("Cuenta pagada: $18.50.");
+
+    const after = await runTest(getBill(bill.id).pipe(as(ana.user)));
+    expect(after).toMatchObject({ paid: 1850, owed: 0, state: "paid" });
+    expect(after.payments.map((payment) => [payment.amount, payment.method, payment.byName])).toEqual([
+      [500, "cash", "Beto"],
+      [1350, "transfer", "Ana"],
+    ]);
+  });
+
+  it("tells the User the Bill changed when the page is stale, and writes nothing", async () => {
+    const beto = await signedIn("worker", "Beto");
+    const item = await runTest(seedItem({ name: "Revisión en Cuenta", price: 1000 }));
+    const bill = await leaveOpen(beto.user, item.id);
+
+    const response = await post(beto, `/cuentas/${bill.id}`, {
+      intent: "pagar",
+      method: "cash",
+      amount: "",
+      revision: String(bill.revision + 1),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("La cuenta cambió mientras registrabas el pago.");
+    expect((await runTest(getBill(bill.id).pipe(as(beto.user)))).payments).toEqual([]);
+  });
+
+  it("refuses a Payment of zero, larger than owed or unreadable, in Spanish", async () => {
+    const beto = await signedIn("worker", "Beto");
+    const item = await runTest(seedItem({ name: "Rechazo en Cuenta", price: 1000 }));
+    const bill = await leaveOpen(beto.user, item.id);
+    const fields = (extra: Record<string, string>) => ({
+      intent: "pagar",
+      method: "cash",
+      amount: "",
+      revision: String(bill.revision),
+      ...extra,
+    });
+
+    const requests = [
+      await post(beto, `/cuentas/${bill.id}`, fields({ amount: "0" })),
+      await post(beto, `/cuentas/${bill.id}`, fields({ amount: "10.01" })),
+      await post(beto, `/cuentas/${bill.id}`, fields({ amount: "mucho" })),
+      await post(beto, `/cuentas/${bill.id}`, { ...fields({}), method: "" }),
+    ];
+
+    expect(requests.map((response) => response.status)).toEqual([400, 400, 400, 400]);
+    const messages = await Promise.all(requests.map((response) => response.text()));
+    expect(messages[0]).toContain("El pago debe ser mayor que cero.");
+    expect(messages[1]).toContain("El pago no puede ser mayor que lo que debe la cuenta.");
+    expect(messages[2]).toContain("El monto no es válido. Escríbelo como 18.50.");
+    expect(messages[3]).toContain("Elige cómo se pagó.");
+    expect((await runTest(getBill(bill.id).pipe(as(beto.user)))).payments).toEqual([]);
+  });
+
+  it("sends a Worker to Cuentas abiertas after a Payment that makes the Bill Pagada", async () => {
+    const beto = await signedIn("worker", "Beto");
+    const item = await runTest(seedItem({ name: "Pagada por empleado", price: 1200 }));
+    const bill = await leaveOpen(beto.user, item.id);
+
+    const response = await post(beto, `/cuentas/${bill.id}`, {
+      intent: "pagar",
+      method: "cash",
+      amount: "",
+      revision: String(bill.revision),
+    });
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/cuentas-abiertas");
+  });
+});

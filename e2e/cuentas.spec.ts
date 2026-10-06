@@ -175,8 +175,8 @@ test("a Worker is refused a Paid Bill's page, and an Admin opens it", async ({
   await page.goto("/");
   await leaveOpen(page, { items: ["Producto pagado"], total: "$10.00" });
   const [{ id: billId }] = (await query("SELECT id FROM bills")) as Array<{ id: string }>;
-  // Ticket 08 records the Payment that makes a Bill Paid; until then, the
-  // projections are set as its batch will.
+  // The projections a Payment writes (ticket 08), set directly: this test is
+  // about the refusal, not about taking one.
   await query("UPDATE bills SET paid = total, state = 'paid' WHERE id = ?", [billId]);
 
   const refused = await page.goto(`/cuentas/${billId}`);

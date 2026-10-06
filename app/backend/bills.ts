@@ -5,9 +5,17 @@ import { dayOf, type Day, type Instant } from "~/shared/day";
 import { newId } from "~/shared/id";
 import type { Centavos } from "~/shared/money";
 import { normalizeName } from "~/shared/normalize-name";
+import { PAYMENT_METHODS, type PaymentMethod } from "~/shared/payment";
 
 import { CurrentUser } from "./current-user";
 import { Db, statement, type Condition, type Statement } from "./db";
+import {
+  BillChanged,
+  BillIsVoided,
+  paymentStatements,
+  PaymentExceedsOwed,
+  PaymentNotPositive,
+} from "./payments";
 import { changeStock } from "./stock";
 import { now } from "./time";
 
@@ -18,14 +26,15 @@ import { now } from "./time";
  *
  * `getBill` and `listOpenBills` are the reads Cuentas abiertas and Cuenta are
  * built on (ticket 07); `getBill` carries the §4.1 gate for a Bill that is not
- * Open.
+ * Open and lists its Payments.
  *
  * "Record a selection" (spec §7.3.1) is one batch: the new Bill when one is
  * needed, one Line per distinct Item at the price the Item had, the Bill's
- * projections and the Stock of every stock-tracked Item. Adding Lines never
+ * projections, the Stock of every stock-tracked Item and, when the sale is
+ * paid on the spot (**Cobrar**), its Payment (ticket 08). Adding Lines never
  * conflicts: totals and Stock change by relative amounts, so two phones
- * adding to the same Bill both succeed. Ticket 08 appends the on-the-spot
- * Payment's statements to that same batch.
+ * adding to the same Bill both succeed. `takePayment` (spec §7.3.2) records a
+ * Payment on one Bill, conditionally on the revision the page showed.
  */
 
 const BillStateSchema = Schema.Literals(BILL_STATES);
@@ -94,6 +103,20 @@ export interface NewSelection {
    * Items from Cuenta. No Customer and no note with it.
    */
   readonly billId?: string | null;
+  /**
+   * The Payment taken together with the selection (**Cobrar** on Vender,
+   * spec §6.1, §7.3.1). Its amount defaults to the selection's total and may
+   * be less; the amount handed over for cash is not stored, so it is not
+   * here.
+   */
+  readonly payment?: NewSelectionPayment | null;
+}
+
+/** The Payment of **Cobrar**: a method, and optionally less than the total. */
+export interface NewSelectionPayment {
+  readonly method: PaymentMethod;
+  /** Centavos. Absent or null pays the selection's total. */
+  readonly amount?: Centavos | null;
 }
 
 export interface BillSummary {
@@ -125,7 +148,22 @@ export interface BillLine {
   readonly day: Day;
 }
 
-export type Bill = BillSummary & { readonly lines: ReadonlyArray<BillLine> };
+export interface BillPayment {
+  readonly id: string;
+  readonly amount: Centavos;
+  readonly method: PaymentMethod;
+  /** The User who received it. */
+  readonly by: string;
+  /** Their name, for Cuenta and Mi día to show (spec §6.1). */
+  readonly byName: string;
+  readonly at: Instant;
+  readonly day: Day;
+}
+
+export type Bill = BillSummary & {
+  readonly lines: ReadonlyArray<BillLine>;
+  readonly payments: ReadonlyArray<BillPayment>;
+};
 
 const placeholders = (count: number) => Array.from({ length: count }, () => "?").join(", ");
 
@@ -141,11 +179,18 @@ function mergeSelection(items: ReadonlyArray<SelectionItem>): ReadonlyArray<Sele
   return [...quantities].map(([itemId, quantity]) => ({ itemId, quantity }));
 }
 
-const TargetRow = Schema.Struct({ id: Schema.String, state: BillStateSchema });
+const TargetRow = Schema.Struct({
+  id: Schema.String,
+  state: BillStateSchema,
+  total: Schema.Int,
+  paid: Schema.Int,
+});
 
 const CustomerRoute = Schema.Struct({
   billId: Schema.NullOr(Schema.String),
   billState: Schema.NullOr(BillStateSchema),
+  billTotal: Schema.NullOr(Schema.Int),
+  billPaid: Schema.NullOr(Schema.Int),
 });
 
 const ChosenRow = Schema.Struct({ id: Schema.String, price: Schema.Int });
@@ -161,12 +206,13 @@ const StateRow = Schema.Struct({ state: BillStateSchema });
  *   Open Bill of the current Day, else a new one;
  * - one Line per distinct Item, at the price read now;
  * - the Bill's projections: total, revision and the derived state (§5.6);
- * - Stock, down by the quantity of every stock-tracked Item.
+ * - Stock, down by the quantity of every stock-tracked Item;
+ * - the Payment of **Cobrar**, when the selection is paid on the spot.
  *
  * Every statement carries the same condition (`Condition`), because a D1
  * batch cannot branch: when an Item was retired or a target Bill stopped
- * being Open since it was read, nothing at all is written. Ticket 08 adds the
- * Payment's statements after these, carrying the same condition.
+ * being Open since it was read, nothing at all is written, the Payment
+ * included.
  */
 export const recordSelection = Effect.fn("recordSelection")(function* (input: NewSelection) {
   const db = yield* Db;
@@ -191,16 +237,18 @@ export const recordSelection = Effect.fn("recordSelection")(function* (input: Ne
 
   // Where the Lines go: a given Open Bill, the Customer's Open Bill of today,
   // or a new Bill.
-  let target: { readonly id: string; readonly state: BillState } | undefined;
+  let target:
+    | { readonly id: string; readonly state: BillState; readonly total: number; readonly paid: number }
+    | undefined;
   if (billId !== null) {
-    const bill = yield* db.first(TargetRow, "SELECT id, state FROM bills WHERE id = ?", billId);
+    const bill = yield* db.first(TargetRow, "SELECT id, state, total, paid FROM bills WHERE id = ?", billId);
     if (!bill) return yield* new BillNotFound({ billId });
     if (!isOpenBill(bill.state)) return yield* new BillNotOpen({ billId, state: bill.state });
     target = bill;
   } else if (customerId !== null) {
     const route = yield* db.first(
       CustomerRoute,
-      `SELECT b.id AS billId, b.state AS billState
+      `SELECT b.id AS billId, b.state AS billState, b.total AS billTotal, b.paid AS billPaid
        FROM customers c
        LEFT JOIN bills b ON b.customer_id = c.id AND b.day = ? AND b.state IN ('open', 'partial')
        WHERE c.id = ? AND c.retired_at IS NULL
@@ -210,7 +258,9 @@ export const recordSelection = Effect.fn("recordSelection")(function* (input: Ne
       customerId,
     );
     if (!route) return yield* new CustomerUnavailable({ customerId });
-    if (route.billId !== null && route.billState !== null) target = { id: route.billId, state: route.billState };
+    if (route.billId !== null && route.billState !== null) {
+      target = { id: route.billId, state: route.billState, total: route.billTotal!, paid: route.billPaid! };
+    }
   }
 
   // The prices are read once and bound into every statement, so the Bill's
@@ -233,6 +283,20 @@ export const recordSelection = Effect.fn("recordSelection")(function* (input: Ne
     unitPrice: prices.get(itemId)!,
   }));
   const delta = lines.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0);
+
+  /**
+   * The Payment of **Cobrar** (spec §6.1, §7.3.1), when there is one. Its
+   * amount defaults to the selection's total and may be less, and it is never
+   * more than what the Bill will still owe once these Lines are on it.
+   */
+  const payment = input.payment ?? null;
+  let paymentAmount: Centavos | null = null;
+  if (payment) {
+    const owedAfter = (target ? target.total - target.paid : 0) + delta;
+    paymentAmount = payment.amount ?? delta;
+    if (!Number.isSafeInteger(paymentAmount) || paymentAmount < 1) return yield* new PaymentNotPositive();
+    if (paymentAmount > owedAfter) return yield* new PaymentExceedsOwed({ owed: owedAfter });
+  }
 
   /**
    * What every statement of the batch asks for, so a refused selection writes
@@ -312,6 +376,17 @@ export const recordSelection = Effect.fn("recordSelection")(function* (input: Ne
 
   for (const line of lines) statements.push(changeStock(line.itemId, -line.quantity, condition));
 
+  if (payment && paymentAmount !== null) {
+    // The Payment rides in the same batch and under the same condition as the
+    // Lines it pays for: a refused selection records no Payment either.
+    statements.push(
+      ...paymentStatements(
+        { id: newId(), billId: bill.id, amount: paymentAmount, method: payment.method, by: user.id, at, day },
+        condition,
+      ),
+    );
+  }
+
   const results = yield* db.batch(statements);
   if (results[0]!.changes === 0) {
     // The shared condition refused the selection: learn which rule it was.
@@ -330,6 +405,84 @@ export const recordSelection = Effect.fn("recordSelection")(function* (input: Ne
   }
 
   return yield* summaryOf(bill.id);
+});
+
+const PaymentBillRow = Schema.Struct({
+  total: Schema.Int,
+  paid: Schema.Int,
+  state: BillStateSchema,
+  revision: Schema.Int,
+});
+
+export interface NewPaymentInput {
+  readonly billId: string;
+  /** Centavos; absent or null pays everything the Bill still owes (spec §5.5). */
+  readonly amount?: Centavos | null;
+  readonly method: PaymentMethod;
+  /**
+   * The revision of the Bill as the User's page showed it. A submission that
+   * carries another one is stale and changes nothing (spec §5.5, §7.3).
+   */
+  readonly expectedRevision: number;
+}
+
+/**
+ * Takes a Payment on one Bill (spec §7.3.2): the fact and the Bill's
+ * projections, in one batch. The amount defaults to what the Bill still owes
+ * and may be less; it is greater than zero and never more than what is owed.
+ *
+ * The write is conditional on the Bill's revision, so of two phones paying
+ * the same Bill at the same moment exactly one records a Payment and the
+ * other is told that the Bill has changed (spec §2.3, §10.3). A D1 batch
+ * cannot branch: both statements carry the revision in their SQL.
+ */
+export const takePayment = Effect.fn("takePayment")(function* (input: NewPaymentInput) {
+  const db = yield* Db;
+  const user = yield* CurrentUser;
+  const billId = input.billId;
+
+  const bill = yield* db.first(
+    PaymentBillRow,
+    "SELECT total, paid, state, revision FROM bills WHERE id = ?",
+    billId,
+  );
+  if (!bill) return yield* new BillNotFound({ billId });
+  if (bill.revision !== input.expectedRevision) return yield* new BillChanged({ billId });
+  if (bill.state === "voided") return yield* new BillIsVoided({ billId });
+
+  const owed = bill.total - bill.paid;
+  const amount = input.amount ?? owed;
+  if (!Number.isSafeInteger(amount) || amount < 1) return yield* new PaymentNotPositive();
+  if (amount > owed) return yield* new PaymentExceedsOwed({ owed });
+
+  const id = newId();
+  const at = yield* now;
+  const condition: Condition = {
+    sql: `EXISTS (SELECT 1 FROM bills
+                  WHERE id = ? AND revision = ? AND state IN ('open', 'partial') AND total - paid >= ?)`,
+    params: [billId, input.expectedRevision, amount],
+  };
+  const [recorded] = yield* db.batch(
+    paymentStatements({ id, billId, amount, method: input.method, by: user.id, at, day: dayOf(at) }, condition),
+  );
+
+  if (recorded!.changes === 0) {
+    // The condition refused it: learn which rule it was, from the Bill as it
+    // is now (spec §5.5: a stale submission is told the Bill has changed).
+    const after = yield* db.first(
+      PaymentBillRow,
+      "SELECT total, paid, state, revision FROM bills WHERE id = ?",
+      billId,
+    );
+    if (!after) return yield* new BillNotFound({ billId });
+    if (after.revision !== input.expectedRevision) return yield* new BillChanged({ billId });
+    if (after.state === "voided") return yield* new BillIsVoided({ billId });
+    return yield* new PaymentExceedsOwed({ owed: after.total - after.paid });
+  }
+  // On success the batch saw the very figures just read (the revision held),
+  // so this says whether the Payment left the Bill Paid; the route needs it to
+  // know whether a Worker may stay on the page (§4.1).
+  return { id, amount, paid: bill.paid + amount === bill.total };
 });
 
 const SummaryRow = Schema.Struct({
@@ -411,9 +564,19 @@ const LineRow = Schema.Struct({
   day: Schema.String,
 });
 
+const PaymentRow = Schema.Struct({
+  id: Schema.String,
+  amount: Schema.Int,
+  method: Schema.Literals(PAYMENT_METHODS),
+  by: Schema.String,
+  byName: Schema.String,
+  at: Schema.Int,
+  day: Schema.String,
+});
+
 /**
- * One Bill with its Lines, oldest first, each with its Item, author and
- * moment. The read Cuenta (ticket 07) builds on.
+ * One Bill with its Lines and Payments, oldest first, each with its author
+ * and moment. The read Cuenta (ticket 07) builds on.
  *
  * The §4.1 gate lives here: a Worker requesting a Paid or Voided Bill is
  * refused, and `Mi día` (ticket 14) is the only view that shows them their own
@@ -436,5 +599,15 @@ export const getBill = Effect.fn("getBill")(function* (billId: string) {
      ORDER BY l.added_at, l.rowid`,
     billId,
   );
-  return { ...bill, lines };
+  const payments = yield* db.all(
+    PaymentRow,
+    `SELECT p.id, p.amount, p.method, p.received_by AS "by", u.name AS byName,
+            p.received_at AS at, p.day
+     FROM payments p
+     JOIN users u ON u.id = p.received_by
+     WHERE p.bill_id = ?
+     ORDER BY p.received_at, p.rowid`,
+    billId,
+  );
+  return { ...bill, lines, payments };
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatMoney, parsePesos } from "~/shared/money";
+import { changeFor, formatMoney, parsePesos } from "~/shared/money";
 
 describe("formatMoney", () => {
   it("writes centavos as es-MX pesos", () => {
@@ -60,6 +60,19 @@ describe("parsePesos", () => {
     for (const text of ["", " ", "$", ".", "abc", "18.505", "-5", "1e3", "12,50", "1,23", "1 000", "18.5.0", "90071992547409.92"]) {
       expect(parsePesos(text), text).toBeUndefined();
     }
+  });
+});
+
+describe("changeFor", () => {
+  it("is what was handed over minus what was paid, in whole centavos", () => {
+    expect(changeFor(5000, 3700)).toBe(1300);
+    expect(changeFor(100, 100)).toBe(0);
+    expect(changeFor(100000, 1850)).toBe(98150);
+  });
+
+  it("refuses amounts that are not whole centavos", () => {
+    expect(() => changeFor(50.5, 3700)).toThrow(RangeError);
+    expect(() => changeFor(5000, Number.NaN)).toThrow(RangeError);
   });
 });
 
