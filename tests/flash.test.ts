@@ -69,7 +69,7 @@ describe("a recorded form", () => {
     // Another page neither shows the message nor clears it.
     const other = await beto.fetch("/clientes", { headers: { Cookie: [beto.cookie, ...cookies].join("; ") } });
     expect(await other.text()).not.toContain("registrado.");
-    expect(other.headers.getSetCookie()).toEqual([]);
+    expect(other.headers.getSetCookie().filter((cookie) => cookie.includes("Max-Age=0"))).toEqual([]);
 
     expect(await (await landing(beto, response)).text()).toContain("Abono de $20.00 registrado.");
   });

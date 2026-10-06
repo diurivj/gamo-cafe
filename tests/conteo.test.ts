@@ -69,7 +69,7 @@ describe("the entry step", () => {
 describe("the review step", () => {
   it("shows expected, found and difference, and records nothing", async () => {
     const { ana, cafe, pan } = await shelf();
-    const before = (await runTest(listCounts().pipe(as(ana.user)))).length;
+    const before = (await runTest(listCounts(null, 100).pipe(as(ana.user)))).counts.length;
 
     const response = await post(ana, {
       intent: "review",
@@ -85,7 +85,7 @@ describe("the review step", () => {
     expect(html).toContain("Sobrante: 2");
     expect(html).toContain("Confirmar conteo");
 
-    expect((await runTest(listCounts().pipe(as(ana.user)))).length).toBe(before);
+    expect((await runTest(listCounts(null, 100).pipe(as(ana.user)))).counts.length).toBe(before);
     expect(await stockNow(ana, cafe.id)).toBe(47);
     expect(await stockNow(ana, pan.id)).toBe(12);
   });
@@ -126,7 +126,7 @@ describe("confirming", () => {
     expect(response.status).toBe(302);
     expect(await stockNow(ana, cafe.id)).toBe(40);
     expect(await stockNow(ana, pan.id)).toBe(12);
-    const count = (await runTest(listCounts().pipe(as(ana.user)))).find(
+    const count = (await runTest(listCounts(null, 100).pipe(as(ana.user)))).counts.find(
       (row) => row.lines.length === 1 && row.lines[0]!.itemId === cafe.id,
     )!;
     expect(count.lines[0]).toMatchObject({ expected: 47, found: 40, difference: -7 });
@@ -134,7 +134,7 @@ describe("confirming", () => {
 
   it("answers 404 and writes nothing for an Item that does not exist", async () => {
     const { ana, cafe } = await shelf();
-    const before = (await runTest(listCounts().pipe(as(ana.user)))).length;
+    const before = (await runTest(listCounts(null, 100).pipe(as(ana.user)))).counts.length;
 
     const response = await post(ana, {
       intent: "confirm",
@@ -143,7 +143,7 @@ describe("confirming", () => {
     });
 
     expect(response.status).toBe(404);
-    expect((await runTest(listCounts().pipe(as(ana.user)))).length).toBe(before);
+    expect((await runTest(listCounts(null, 100).pipe(as(ana.user)))).counts.length).toBe(before);
     expect(await stockNow(ana, cafe.id)).toBe(47);
   });
 });

@@ -1,6 +1,7 @@
-import { Form, NavLink, Outlet, useNavigation } from "react-router";
+import { Form, NavLink, Outlet, type ShouldRevalidateFunctionArgs, useNavigation } from "react-router";
 
 import { requireUser } from "~/session.server";
+import { shellMiddleware } from "~/shell.server";
 
 import type { Route } from "./+types/shell";
 
@@ -37,6 +38,16 @@ export function loader({ context }: Route.LoaderArgs) {
     user: { name: user.name, role: user.role },
     sections: user.role === "admin" ? { everyUser, adminOnly } : { everyUser, adminOnly: [] },
   };
+}
+
+// The loader's answer changes only with the User, so the browser keeps it
+// (spec §3.4). Signing in or out leaves the shell and comes back to it, which
+// loads it; a form on Usuarios may have changed this very User; and when an
+// Admin changes them from another phone, `shellMiddleware` reloads the page.
+export const middleware: Route.MiddlewareFunction[] = [shellMiddleware];
+
+export function shouldRevalidate({ formAction }: ShouldRevalidateFunctionArgs) {
+  return formAction?.split("?")[0] === "/usuarios";
 }
 
 function Sections({ label, sections }: { label: string; sections: ReadonlyArray<Section> }) {

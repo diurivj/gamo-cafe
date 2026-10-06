@@ -1,6 +1,7 @@
 import { Data, Effect, Schema } from "effect";
 
 import { chunk } from "~/shared/chunk";
+import type { Cursor } from "~/shared/cursor";
 import type { Day, Instant } from "~/shared/day";
 import { newId } from "~/shared/id";
 import { trimToNull } from "~/shared/text";
@@ -234,8 +235,18 @@ export const recordCount = Effect.fn("recordCount")(function* (input: NewCountIn
   return { id };
 });
 
-/** How many Counts Diferencias shows; the list is bounded (spec §2.4). */
-const RECENT_COUNTS = 20;
+/**
+ * How many Counts one page of Diferencias holds. A Count has a line per Item
+ * counted, so a few of them are already a long page (spec §2.4, §3.4).
+ */
+export const COUNTS_PER_PAGE = 3;
+
+/** One page of Counts, newest first, and where the page after it starts. */
+export interface CountPage {
+  readonly counts: ReadonlyArray<RecordedCount>;
+  /** null when this is the last page. */
+  readonly next: Cursor | null;
+}
 
 const CountRow = Schema.Struct({
   id: Schema.String,
@@ -254,23 +265,33 @@ const CountLineRow = Schema.Struct({
 });
 
 /**
- * The most recent Counts, newest first, each with its lines in name order:
- * Diferencias (spec §6.2). Two statements, both bounded, so the screen never
- * reads rows in proportion to everything ever counted.
+ * One page of Counts, newest first, each with its lines in name order:
+ * Diferencias (spec §6.2). Two statements: the page's Counts by
+ * `counts_by_time`, seeking to the cursor — the last Count of the page before,
+ * its id breaking ties — and then their lines. A page reads about its own
+ * rows, whatever was ever counted (spec §2.4).
  */
-export const listCounts = Effect.fn("listCounts")(function* (limit = RECENT_COUNTS) {
+export const listCounts = Effect.fn("listCounts")(function* (
+  cursor: Cursor | null = null,
+  limit = COUNTS_PER_PAGE,
+) {
   yield* requireAdmin;
   const db = yield* Db;
 
-  const counts = yield* db.all(
+  const read = yield* db.all(
     CountRow,
     `SELECT c.id, c.note, u.name AS byName, c.recorded_at AS at, c.day
      FROM counts c JOIN users u ON u.id = c.recorded_by
+     ${cursor === null ? "" : "WHERE c.recorded_at <= ? AND (c.recorded_at < ? OR c.id < ?)"}
      ORDER BY c.recorded_at DESC, c.id DESC
      LIMIT ?`,
-    limit,
+    ...(cursor === null ? [] : [cursor.at, cursor.at, cursor.id]),
+    limit + 1,
   );
-  if (counts.length === 0) return [] as ReadonlyArray<RecordedCount>;
+  const counts = read.slice(0, limit);
+  const last = counts.at(-1);
+  const next: Cursor | null = read.length > limit && last ? { at: last.at, id: last.id } : null;
+  if (counts.length === 0) return { counts: [], next } as CountPage;
 
   const placeholders = counts.map(() => "?").join(", ");
   const rows = yield* db.all(
@@ -283,7 +304,7 @@ export const listCounts = Effect.fn("listCounts")(function* (limit = RECENT_COUN
     ...counts.map((count) => count.id),
   );
 
-  return counts.map(
+  const listed = counts.map(
     (count): RecordedCount => ({
       ...count,
       lines: rows
@@ -296,4 +317,5 @@ export const listCounts = Effect.fn("listCounts")(function* (limit = RECENT_COUN
         ),
     }),
   );
+  return { counts: listed, next } as CountPage;
 });

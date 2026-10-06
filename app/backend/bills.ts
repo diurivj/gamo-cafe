@@ -2,6 +2,7 @@ import { Data, Effect, Schema } from "effect";
 
 import { BILL_STATES, type BillState, isOpenBill } from "~/shared/bill-state";
 import { chunk } from "~/shared/chunk";
+import type { Cursor } from "~/shared/cursor";
 import { dayOf, type Day, type Instant } from "~/shared/day";
 import { newId } from "~/shared/id";
 import type { Centavos } from "~/shared/money";
@@ -30,7 +31,7 @@ import { now } from "./time";
  * (spec §5.6).
  *
  * `getBill` and `listOpenBills` are the reads Cuentas abiertas and Cuenta are
- * built on (ticket 07); `getBill` carries the §4.1 gate for a Bill that is not
+ * built on (ticket 07), the list one page at a time (ticket 29); `getBill` carries the §4.1 gate for a Bill that is not
  * Open and lists its Payments.
  *
  * "Record a selection" (spec §7.3.1) is one batch: the new Bill when one is
@@ -1059,46 +1060,143 @@ const summaryOf = Effect.fnUntraced(function* (billId: string) {
   return summary(row);
 });
 
-/**
- * Every Open Bill, newest first: Cuentas abiertas (spec §6.1). One statement
- * driven by the index on state, so it reads the Open Bills and nothing else,
- * however many Paid Bills the history holds (spec §2.4, §7.4). With `typed`,
- * it keeps only the Bills of Customers whose name starts with it, ignoring
- * case and accents, as on Clientes (spec §5.2).
- */
-export const listOpenBills = Effect.fn("listOpenBills")(function* (typed = "") {
-  const db = yield* Db;
-  const prefix = normalizeName(typed);
-  const rows = yield* db.all(
-    SummaryRow,
-    `SELECT b.id, b.day, b.opened_by AS openedBy, b.opened_at AS openedAt,
-            b.customer_id AS customerId, c.name AS customerName, b.note,
-            b.total, b.paid, b.state, b.revision
-     FROM bills b LEFT JOIN customers c ON c.id = b.customer_id
-     WHERE b.state IN ('open', 'partial')${
-       prefix === "" ? "" : " AND c.normalized_name >= ? AND c.normalized_name < ?"
-     }
-     ORDER BY b.opened_at DESC, b.rowid DESC`,
-    ...(prefix === "" ? [] : [prefix, prefixRange(prefix)]),
-  );
-  return rows.map(summary);
-});
-
-/** How many Bills one page of Cuentas holds (spec §6.2). */
+/** How many Bills one page of a list holds (spec §6.1, §6.2). */
 export const BILLS_PER_PAGE = 50;
 
-/**
- * The last page Cuentas reads; a page beyond it is answered empty. An OFFSET
- * still walks the index entries it skips, so this keeps a page's rows read a
- * constant (spec §2.4) instead of letting a made-up page number walk the
- * whole history. 200 pages are 10,000 Bills.
- */
-export const MAX_BILL_PAGE = 200;
+/** One page of Bills, newest first, and where the page after it starts. */
+export interface BillPage {
+  readonly bills: ReadonlyArray<BillSummary>;
+  /** null when this is the last page. */
+  readonly next: Cursor | null;
+}
+
+/** A summary row with what breaks a tie between Bills of the same instant. */
+const PageRow = Schema.Struct({ ...SummaryRow.fields, rowid: Schema.Int });
 
 /**
- * Which Bills a page of Cuentas holds (spec §6.2): a Day, a state and a
- * Customer, each optional and combined with the others. `settledOnly` is a
- * Customer's past Bills: the ones that are no longer Open (spec §6.1).
+ * The `WHERE` fragment of a page after the first: the Bills that follow the
+ * cursor in `opened_at DESC, rowid DESC`. A cursor that cannot be one of this
+ * list's is no cursor.
+ *
+ * The leading `opened_at <= ?` is what lets SQLite seek into the index and
+ * scan backwards from the cursor; the `OR` alone is only a filter, and would
+ * walk the index from the newest Bill for every page.
+ */
+function olderThan(cursor: Cursor | null) {
+  const rowid = cursor === null ? Number.NaN : Number(cursor.id);
+  if (cursor === null || !Number.isSafeInteger(rowid)) {
+    return { sql: "", params: [] as ReadonlyArray<Param> };
+  }
+  return {
+    sql: " AND b.opened_at <= ? AND (b.opened_at < ? OR b.rowid < ?)",
+    params: [cursor.at, cursor.at, rowid] as ReadonlyArray<Param>,
+  };
+}
+
+/**
+ * The same for one Customer's Bills, whose order is `day DESC, opened_at DESC,
+ * rowid DESC`: the cursor's tie-breaker is `rowid:day`. The comparison is a
+ * row value over the columns of `bills_by_customer_day` in its order, which
+ * SQLite turns into one seek to the cursor's place.
+ */
+function olderThanInCustomer(cursor: Cursor | null) {
+  const match = /^(\d+):(\d{4}-\d{2}-\d{2})$/.exec(cursor?.id ?? "");
+  if (cursor === null || !match) return { sql: "", params: [] as ReadonlyArray<Param> };
+  return {
+    sql: " AND (b.day, b.opened_at, b.rowid) < (?, ?, ?)",
+    params: [match[2]!, cursor.at, Number(match[1])] as ReadonlyArray<Param>,
+  };
+}
+
+/**
+ * The page these rows hold. They are one more than a page, to learn whether
+ * another follows; `tieBreaker` is what the list's cursor carries of a row.
+ */
+function billPage(
+  rows: ReadonlyArray<typeof PageRow.Type>,
+  tieBreaker: (row: typeof PageRow.Type) => string = (row) => String(row.rowid),
+): BillPage {
+  const shown = rows.slice(0, BILLS_PER_PAGE);
+  const last = shown.at(-1);
+  return {
+    bills: shown.map(({ rowid, ...row }) => summary(row)),
+    next: rows.length > BILLS_PER_PAGE && last ? { at: last.openedAt, id: tieBreaker(last) } : null,
+  };
+}
+
+/**
+ * One page of the Bills in these states, newest first: one statement over one
+ * arm per state — at most four — each `state` (and `day`, when asked)
+ * constraining `bills_by_state` or `bills_by_day_state` and seeking to the
+ * cursor, so every arm stops after its page's rows. The arms are merged and
+ * ordered by `opened_at`, the newest-first order across states.
+ *
+ * With `prefix`, an arm keeps only the Bills of Customers whose normalized
+ * name starts with it. The arm still walks the Bills of its state and looks
+ * each one's Customer up (`CROSS JOIN` fixes that order): it reads Open Bills
+ * until the page is full, never a Customer's past ones.
+ */
+const pageOfStates = Effect.fnUntraced(function* (
+  states: ReadonlyArray<BillState>,
+  options: { readonly day?: Day | null; readonly prefix?: string; readonly cursor: Cursor | null },
+) {
+  const db = yield* Db;
+  const day = options.day ?? null;
+  const prefix = options.prefix ?? "";
+  const keyset = olderThan(options.cursor);
+  const limit = BILLS_PER_PAGE + 1;
+
+  const arm = `SELECT * FROM (
+      SELECT b.id AS id, b.day AS day, b.opened_by AS openedBy, b.opened_at AS openedAt,
+             b.customer_id AS customerId, b.note AS note, b.total AS total, b.paid AS paid,
+             b.state AS state, b.revision AS revision, b.rowid AS rowid
+      FROM bills b${prefix === "" ? "" : " CROSS JOIN customers n ON n.id = b.customer_id"}
+      WHERE b.state = ?${day === null ? "" : " AND b.day = ?"}${
+        prefix === "" ? "" : " AND n.normalized_name >= ? AND n.normalized_name < ?"
+      }${keyset.sql}
+      ORDER BY b.opened_at DESC, b.rowid DESC
+      LIMIT ?
+    )`;
+  const params: Param[] = [];
+  for (const state of states) {
+    params.push(
+      state,
+      ...(day === null ? [] : [day]),
+      ...(prefix === "" ? [] : [prefix, prefixRange(prefix)]),
+      ...keyset.params,
+      limit,
+    );
+  }
+  const rows = yield* db.all(
+    PageRow,
+    `SELECT p.id, p.day, p.openedBy, p.openedAt, p.customerId,
+            c.name AS customerName, p.note, p.total, p.paid, p.state, p.revision, p.rowid
+     FROM (${states.map(() => arm).join(" UNION ALL ")}) AS p
+     LEFT JOIN customers c ON c.id = p.customerId
+     ORDER BY p.openedAt DESC, p.rowid DESC
+     LIMIT ?`,
+    ...params,
+    limit,
+  );
+  return billPage(rows);
+});
+
+/**
+ * The Open Bills, newest first, one page of 50 at a time: Cuentas abiertas
+ * (spec §6.1). One statement driven by the index on state, so a page reads
+ * about its own rows, whatever the Open Bills and the history hold (spec
+ * §2.4, §7.4). With `typed`, it keeps only the Bills of Customers whose name
+ * starts with it, ignoring case and accents, as on Clientes (spec §5.2): the
+ * search is over every Open Bill, not over the page.
+ */
+export const listOpenBills = Effect.fn("listOpenBills")(function* (typed = "", cursor: Cursor | null = null) {
+  return yield* pageOfStates(["open", "partial"], { prefix: normalizeName(typed), cursor });
+});
+
+/**
+ * Which Bills Cuentas lists (spec §6.2): a Day, a state and a Customer, each
+ * optional and combined with the others. `settledOnly` is a Customer's past
+ * Bills: the ones that are no longer Open (spec §6.1).
  */
 export interface BillFilter {
   /** One Day, `YYYY-MM-DD` (spec §5.9). */
@@ -1109,22 +1207,7 @@ export interface BillFilter {
   readonly customerId?: string | null;
   /** Only Bills that are no longer Open: Pagada or Cancelada. */
   readonly settledOnly?: boolean;
-  /** 1-based; anything else asks for the first page. */
-  readonly page?: number;
 }
-
-/** One page of Bills, newest first. */
-export interface BillPage {
-  readonly bills: ReadonlyArray<BillSummary>;
-  /** The page number these Bills belong to, 1-based. */
-  readonly page: number;
-  /** Whether another page follows this one. */
-  readonly hasMore: boolean;
-}
-
-/** The page asked for, or the first one. */
-const pageNumber = (asked: number | undefined) =>
-  asked !== undefined && Number.isSafeInteger(asked) && asked >= 1 ? asked : 1;
 
 /**
  * Every Bill with its state, newest first, one page of 50 at a time, filtered
@@ -1132,27 +1215,23 @@ const pageNumber = (asked: number | undefined) =>
  * Worker never sees Paid or Voided Bills.
  *
  * The read is index-driven and bounded by the page, never by the history
- * (spec §2.4, §7.4):
+ * (spec §2.4, §7.4), on the first page and on any after it:
  *
  * - one Customer's Bills come from `bills_by_customer_day`, whose order
- *   (`day`, `opened_at`) the reverse scan already provides;
- * - everything else is one statement over one arm per state — at most four —
- *   each `state` (and `day`, when asked) constraining `bills_by_state` or
- *   `bills_by_day_state`, so every arm stops after its page's rows. The arms
- *   are merged and ordered by `opened_at`, which is the newest-first order
- *   across states.
+ *   (`day`, `opened_at`) the reverse scan already provides, and whose cursor
+ *   carries the Day the scan seeks to;
+ * - everything else is `pageOfStates`.
  *
- * `hasMore` comes from reading one row past the page, so a full page says
+ * `next` comes from reading one row past the page, so a full page says
  * whether another follows without counting the history.
  */
-export const listBills = Effect.fn("listBills")(function* (filter: BillFilter = {}) {
+export const listBills = Effect.fn("listBills")(function* (
+  filter: BillFilter = {},
+  cursor: Cursor | null = null,
+) {
   yield* requireAdmin;
   const db = yield* Db;
 
-  const page = pageNumber(filter.page);
-  if (page > MAX_BILL_PAGE) return { bills: [], page, hasMore: false };
-  const offset = (page - 1) * BILLS_PER_PAGE;
-  const limit = BILLS_PER_PAGE + 1;
   const day = filter.day || null;
   const customerId = filter.customerId || null;
   const states: ReadonlyArray<BillState> = filter.state
@@ -1161,60 +1240,26 @@ export const listBills = Effect.fn("listBills")(function* (filter: BillFilter = 
       ? ["paid", "voided"]
       : BILL_STATES;
 
-  const paged = (rows: ReadonlyArray<typeof SummaryRow.Type>): BillPage => ({
-    bills: rows.slice(0, BILLS_PER_PAGE).map(summary),
-    page,
-    hasMore: rows.length > BILLS_PER_PAGE,
-  });
+  if (customerId === null) return yield* pageOfStates(states, { day, cursor });
 
-  if (customerId !== null) {
-    const rows = yield* db.all(
-      SummaryRow,
-      `SELECT b.id, b.day, b.opened_by AS openedBy, b.opened_at AS openedAt,
-              b.customer_id AS customerId, c.name AS customerName, b.note,
-              b.total, b.paid, b.state, b.revision
-       FROM bills b LEFT JOIN customers c ON c.id = b.customer_id
-       WHERE b.customer_id = ?${day === null ? "" : " AND b.day = ?"}
-         AND b.state IN (${placeholders(states.length)})
-       ORDER BY b.day DESC, b.opened_at DESC, b.rowid DESC
-       LIMIT ? OFFSET ?`,
-      customerId,
-      ...(day === null ? [] : [day]),
-      ...states,
-      limit,
-      offset,
-    );
-    return paged(rows);
-  }
-
-  // One arm per state, each index-driven on its own; the outer statement
-  // merges them into the newest 50 (or 50 of the asked page).
-  const arm = `SELECT * FROM (
-      SELECT b.id AS id, b.day AS day, b.opened_by AS openedBy, b.opened_at AS openedAt,
-             b.customer_id AS customerId, b.note AS note, b.total AS total, b.paid AS paid,
-             b.state AS state, b.revision AS revision, b.rowid AS rowid
-      FROM bills b
-      WHERE b.state = ?${day === null ? "" : " AND b.day = ?"}
-      ORDER BY b.opened_at DESC, b.rowid DESC
-      LIMIT ?
-    )`;
-  const params: Param[] = [];
-  for (const state of states) {
-    params.push(state, ...(day === null ? [] : [day]), offset + limit);
-  }
+  const keyset = olderThanInCustomer(cursor);
   const rows = yield* db.all(
-    SummaryRow,
-    `SELECT p.id, p.day, p.openedBy, p.openedAt, p.customerId,
-            c.name AS customerName, p.note, p.total, p.paid, p.state, p.revision
-     FROM (${states.map(() => arm).join(" UNION ALL ")}) AS p
-     LEFT JOIN customers c ON c.id = p.customerId
-     ORDER BY p.openedAt DESC, p.rowid DESC
-     LIMIT ? OFFSET ?`,
-    ...params,
-    limit,
-    offset,
+    PageRow,
+    `SELECT b.id, b.day, b.opened_by AS openedBy, b.opened_at AS openedAt,
+            b.customer_id AS customerId, c.name AS customerName, b.note,
+            b.total, b.paid, b.state, b.revision, b.rowid AS rowid
+     FROM bills b LEFT JOIN customers c ON c.id = b.customer_id
+     WHERE b.customer_id = ?${day === null ? "" : " AND b.day = ?"}${keyset.sql}
+       AND b.state IN (${placeholders(states.length)})
+     ORDER BY b.day DESC, b.opened_at DESC, b.rowid DESC
+     LIMIT ?`,
+    customerId,
+    ...(day === null ? [] : [day]),
+    ...keyset.params,
+    ...states,
+    BILLS_PER_PAGE + 1,
   );
-  return paged(rows);
+  return billPage(rows, (row) => `${row.rowid}:${row.day}`);
 });
 
 /**
@@ -1224,9 +1269,9 @@ export const listBills = Effect.fn("listBills")(function* (filter: BillFilter = 
  */
 export const listCustomerPastBills = Effect.fn("listCustomerPastBills")(function* (
   customerId: string,
-  page = 1,
+  cursor: Cursor | null = null,
 ) {
-  return yield* listBills({ customerId, settledOnly: true, page });
+  return yield* listBills({ customerId, settledOnly: true }, cursor);
 });
 
 const LineRow = Schema.Struct({

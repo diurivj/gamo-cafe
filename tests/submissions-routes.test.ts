@@ -206,7 +206,7 @@ describe("Conteo", () => {
 
     expect([first.status, second.status]).toEqual([302, 302]);
     expect(second.headers.get("Location")).toBe(first.headers.get("Location"));
-    const counts = (await runTest(listCounts().pipe(as(ana.user)))).filter((count) =>
+    const counts = (await runTest(listCounts().pipe(as(ana.user)))).counts.filter((count) =>
       count.lines.some((line) => line.itemId === cafe.id),
     );
     expect(counts).toMatchObject([{ lines: [{ expected: 10, found: 7 }] }]);

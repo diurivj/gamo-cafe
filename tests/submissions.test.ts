@@ -257,7 +257,7 @@ describe("recordCount with a submission key", () => {
         expect(second).toEqual(first);
         expect(third).toEqual(first);
         // A second Count would have expected the 7 units the first one left.
-        const counts = (yield* listCounts().pipe(as(ana))).filter((recorded) =>
+        const counts = (yield* listCounts().pipe(as(ana))).counts.filter((recorded) =>
           recorded.lines.some((line) => line.itemId === cafe.id),
         );
         expect(counts).toMatchObject([{ id: first.id, lines: [{ expected: 10, found: 7, difference: -3 }] }]);

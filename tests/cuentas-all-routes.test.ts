@@ -11,6 +11,7 @@ import { as, signedIn } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { savedCustomer } from "./support/customers";
 import { runTest } from "./support/effect";
+import { nextHref } from "./support/pages";
 
 // Cuentas (spec §6.2) and a Customer's past Bills (§6.1) through the Worker:
 // what the routes let in, what they list and how they page. The read rules
@@ -106,7 +107,7 @@ describe("Cuentas", () => {
     expect(none).toContain("No hay cuentas con esos filtros.");
   });
 
-  it("holds 50 Bills per page and links to the next and previous ones, keeping the filters", async () => {
+  it("holds 50 Bills per page and links to the next one, keeping the filters", async () => {
     const ana = await signedIn("admin", "Ana");
     await runTest(
       Effect.gen(function* () {
@@ -122,15 +123,19 @@ describe("Cuentas", () => {
 
     const first = await (await ana.fetch("/cuentas?dia=2026-09-30")).text();
     expect(listedIds(first)).toHaveLength(50);
-    expect(first).toContain("Página 1");
-    expect(first).toContain("dia=2026-09-30&amp;pagina=2");
-    expect(first).not.toContain("Anterior");
+    expect(first).toContain("Cargar más");
+    const next = nextHref(first);
+    expect(next).toContain("/cuentas?dia=2026-09-30&desde=");
 
-    const second = await (await ana.fetch("/cuentas?dia=2026-09-30&pagina=2")).text();
-    expect(listedIds(second)).toHaveLength(5);
-    expect(second).toContain("Página 2");
-    expect(second).toContain("dia=2026-09-30");
-    expect(second).not.toContain("pagina=3");
+    const second = await (await ana.fetch(next!)).text();
+    expect(listedIds(second)).toEqual(["pagina-ruta-5", "pagina-ruta-4", "pagina-ruta-3", "pagina-ruta-2", "pagina-ruta-1"]);
+    expect(second).not.toContain("Cargar más");
+    expect(nextHref(second)).toBeNull();
+
+    // An unreadable cursor is no cursor: the first page, not an error.
+    const bad = await ana.fetch("/cuentas?dia=2026-09-30&desde=ayer");
+    expect(bad.status).toBe(200);
+    expect(listedIds(await bad.text())).toEqual(listedIds(first));
   });
 });
 
@@ -185,11 +190,11 @@ describe("a Customer's past Bills", () => {
 
     const first = await (await ana.fetch(`/clientes/${ruiz.id}`)).text();
     expect(pastIds(first)).toHaveLength(50);
-    expect(first).toContain("Página 1");
-    expect(first).toContain(`/clientes/${ruiz.id}?pagina=2`);
+    const next = nextHref(first);
+    expect(next).toContain(`/clientes/${ruiz.id}?desde=`);
 
-    const second = await (await ana.fetch(`/clientes/${ruiz.id}?pagina=2`)).text();
+    const second = await (await ana.fetch(next!)).text();
     expect(pastIds(second)).toHaveLength(5);
-    expect(second).toContain("Página 2");
+    expect(nextHref(second)).toBeNull();
   });
 });

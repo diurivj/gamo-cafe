@@ -5,6 +5,8 @@ import { CurrentUser } from "~/backend/current-user";
 import { listOwed } from "~/backend/owed";
 import { run } from "~/backend/run.server";
 import { refuseRead, requireAdminUser } from "~/catalog-forms.server";
+import { LoadMore, usePagedList } from "~/components/paged-list";
+import { CURSOR_PARAM, cursorOf, nextText } from "~/shared/cursor";
 import { formatDay } from "~/shared/day";
 import { formatMoney } from "~/shared/money";
 
@@ -12,24 +14,31 @@ import type { Route } from "./+types/owed";
 
 // Por cobrar (spec §6.2): each Customer with what they owe and the Day of
 // their oldest Open Bill, then the Open Bills with no Customer, flagged when
-// from an earlier Day. Overall Owed at the top. Admin only (spec §4.1).
+// from an earlier Day. Overall Owed at the top. Admin only (spec §4.1). The
+// Customers are bounded by who buys on credit; the loose Bills come a page at
+// a time.
 
 export const meta: Route.MetaFunction = () => [{ title: "Por cobrar · Gamo Cafe" }];
 
-export async function loader({ context }: Route.LoaderArgs) {
+export async function loader({ context, request }: Route.LoaderArgs) {
   const admin = requireAdminUser(context);
   const owed = await run(
     context,
-    listOwed().pipe(Effect.provideService(CurrentUser, admin)),
+    listOwed(cursorOf(request.url)).pipe(Effect.provideService(CurrentUser, admin)),
     refuseRead,
   );
-  return { owed };
+  return { owed: { ...owed, next: nextText(owed.next) } };
 }
+
+type Data = Route.ComponentProps["loaderData"];
+const pageOf = (data: Data) => ({ rows: data.owed.bills, next: data.owed.next });
+const hrefFor = (cursor: string) => `/por-cobrar?${CURSOR_PARAM}=${encodeURIComponent(cursor)}`;
 
 const row = "block rounded-2xl border border-stone-300 bg-white p-4 active:bg-stone-100";
 
 export default function Owed({ loaderData }: Route.ComponentProps) {
-  const { total, customers, bills } = loaderData.owed;
+  const { total, customers } = loaderData.owed;
+  const { rows: bills, more } = usePagedList({ id: "sin-cliente", data: loaderData, pageOf, hrefFor });
 
   return (
     <div className="flex flex-col gap-8">
@@ -74,7 +83,7 @@ export default function Owed({ loaderData }: Route.ComponentProps) {
         ) : (
           <ul aria-label="Cuentas sin cliente" className="mt-3 flex flex-col gap-2">
             {bills.map((bill) => (
-              <li key={bill.id}>
+              <li key={bill.id} data-owed-bill-id={bill.id}>
                 <Link to={`/cuentas/${bill.id}`} className={row}>
                   <span className="flex items-start justify-between gap-3">
                     <span className="block text-stone-600">{formatDay(bill.day)}</span>
@@ -92,6 +101,7 @@ export default function Owed({ loaderData }: Route.ComponentProps) {
             ))}
           </ul>
         )}
+        <LoadMore more={more} />
       </section>
     </div>
   );
