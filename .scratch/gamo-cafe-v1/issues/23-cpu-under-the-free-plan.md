@@ -1,6 +1,6 @@
 # 23 — Bring every screen's CPU under the Workers Free median
 
-Status: ready-for-agent
+Status: wontfix
 Blocked by: 22
 Spec: [`../spec.md`](../spec.md) §10.7, §2.4, §3.2 (exit rule)
 
@@ -39,3 +39,4 @@ Work:
 ## Comments
 
 - 2026-10-06: Opened from ticket 22's proof figures.
+- 2026-10-06: Superseded by ADR 0007. The app moves to Workers Paid, where there is no 10 ms limit to fit, and the remote proof is dropped as a release gate. No code was changed for this ticket. What its profiling found is in [`../research/free-plan-stack-review.md`](../research/free-plan-stack-review.md), and the fixes worth making on any plan are tickets 26 to 31.

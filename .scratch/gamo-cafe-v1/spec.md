@@ -18,7 +18,7 @@ v1 must provide:
 6. Corrections that never erase anything: removing Lines and Payments, and voiding Bills.
 7. Stock for stock-tracked Items, with Adjustments, Counts, Discrepancies and a Minimum per Item.
 8. Six lists for Admins: Day, Bills, Owed, Stock, Discrepancies and History.
-9. Operation within Cloudflare Workers Free and D1 Free.
+9. Operation on Cloudflare Workers and D1, with every request bounded whatever the history holds.
 
 Everything ships in one release.
 
@@ -70,26 +70,29 @@ See ADR 0003.
 - A Bill's total is the sum of its Lines that have not been removed.
 - No Customer ever has credit in their favor.
 
-### 2.4 Free-plan capacity
+### 2.4 Capacity
 
-The app must stay within Cloudflare Workers Free and D1 Free. These are the limits that shape the design, as documented by Cloudflare on 2026-10-05:
+See ADR 0007. The app runs on Cloudflare Workers Paid and D1, in an account it shares with the developer's other projects. The plan's limits are far above the cafeteria's volume, as documented by Cloudflare on 2026-10-06:
 
 | Limit | Value |
 | --- | --- |
-| Worker CPU time per request | 10 ms. Occasional overruns are tolerated; consistent overruns fail with error 1102 |
-| Worker requests | 100,000 per day |
-| D1 queries per Worker request | 50 |
+| Worker CPU time per request | 30 seconds by default |
+| Worker requests | 10 million a month included |
+| Worker CPU time | 30 million CPU-ms a month included |
+| D1 queries per Worker request | 1,000 |
 | D1 bound parameters per query | 100 |
-| D1 rows read | 5 million per day, counted as rows scanned |
-| D1 rows written | 100,000 per day, counting index rows |
-| D1 database size | 500 MB |
-| D1 Time Travel | 7 days |
+| D1 rows read | 25 billion a month included, counted as rows scanned |
+| D1 rows written | 50 million a month included, counting index rows |
+| D1 database size | 10 GB |
+| D1 Time Travel | 30 days |
 
-Consequences:
+The rules below are the app's own. They keep every request fast on a phone and the bill at the plan's minimum:
 
 - No request issues more than 50 statements. Bulk writes, such as a Count of every Item or a Payment spread over many Bills, use multi-row statements.
 - No request reads rows in proportion to the total number of Bills, Lines or Payments ever recorded. Lists are driven by indexes and bounded by Day, by state or by page.
-- Server rendering stays small, and long lists are paged.
+- Every list that grows with time is paged. A list bounded by the catalog, such as the Items on Vender, is not.
+- A request that only reads writes nothing.
+- The Worker sets a CPU ceiling per request, and the account has a budget alert: the plan has no spending cap.
 
 ## 3. Technical architecture
 
@@ -118,7 +121,6 @@ See ADR 0006.
 - Effect `Schema` validates form input and decodes every row read from D1.
 - One runtime is built per isolate from the D1 binding. Loaders and actions stay thin: read the session, parse input, run one program, turn the result into a response.
 - Effect is not used in browser code.
-- Exit rule: if the proof in §10.7 shows that Effect is the reason a screen cannot fit Workers Free, Effect is removed and the operations become plain async functions with the same rules.
 
 ### 3.3 Persistence and migrations
 
@@ -127,7 +129,7 @@ See ADR 0006.
 - Migrations are numbered `.sql` files, created and applied with Wrangler (`wrangler d1 migrations create` and `apply`) and written by hand. Wrangler creates the empty file and tracks what has run; it does not generate the SQL.
 - Local and production use separate databases.
 - D1 batches provide atomicity. D1 has no interactive transactions, so every operation in §7.3 must be expressible as one batch.
-- Recovery posture: D1 Time Travel (7 days on Free), plus a database export taken before every production migration and kept outside Cloudflare.
+- Recovery posture: D1 Time Travel (30 days), plus a database export taken before every production migration and kept outside Cloudflare.
 
 ### 3.4 Browser UI
 
@@ -137,6 +139,11 @@ See ADR 0006.
 - React Router's client-side navigation everywhere, with pending and optimistic UI so that every tap is acknowledged at once.
 - The selection on the Sell screen (§6.1) lives in the browser until it is recorded.
 - A web app manifest and icons let Users add the app to their home screen. There is no service worker.
+- A form that records something answers success with a redirect, so reloading or going back never records it twice. What the screen says afterwards travels with the redirect.
+- A form that creates a Bill, a Payment, an Adjustment or a Count carries a key made when the form was rendered. The server records one submission per key, so a double tap or a retry on a bad connection creates nothing twice.
+- A paged list shows its first page and a **Cargar más** control that appends the next one, and loads it by itself when it scrolls into view. Paging is by cursor, not by offset, wherever the order allows it.
+- Optimistic UI is for what is harmless to take back: the selection empties the moment it is submitted and comes back if the server refuses it. Money is never shown as recorded before the server confirms it; until then the screen says it is being recorded.
+- What is not about money may be reused in the browser: the Items on Vender and the shell's navigation are not fetched again after every sale or navigation. Bills, Payments and Stock are always fetched fresh, and no response about them may be stored by a cache.
 
 ### 3.5 Sign-in and sessions
 
@@ -154,9 +161,9 @@ See ADR 0004.
 
 ### 3.6 Deployment
 
-- A Cloudflare account that belongs to Gamo, created with a mailbox dedicated to it.
+- The developer's own Cloudflare account, on Workers Paid, which also holds the developer's other projects (ADR 0007). The owner reimburses the plan's monthly charge.
 - Two environments: local and production.
-- The address is `workers.dev` until Gamo has a domain on that account.
+- The address is `workers.dev` until Gamo has a domain.
 - The developer deploys from a laptop with Wrangler. There is no CI.
 - Secrets live in Wrangler secrets, never in the repository.
 
@@ -420,7 +427,7 @@ Concurrency:
 
 ## 9. Rollout
 
-1. The developer creates the Gamo mailbox and Cloudflare account, turns on two-step sign-in, and shares custody of both with the owner (assumed; see §11).
+1. The developer moves their Cloudflare account to Workers Paid, sets a budget alert on it, and creates the production database there.
 2. The developer deploys and issues the first Admin's code from the command line.
 3. An Admin enters the Categories, the Items with their prices and starting Stock, and the other Users.
 4. All four Users sign in on their own phones and record a few practice sales, which an Admin then voids.
@@ -428,7 +435,7 @@ Concurrency:
 
 ## 10. Acceptance criteria
 
-v1 is conformant only when automated tests, plus the proof in §10.7, demonstrate all of the following.
+v1 is conformant only when automated tests demonstrate all of the following.
 
 ### 10.1 Sign-in
 
@@ -477,20 +484,19 @@ v1 is conformant only when automated tests, plus the proof in §10.7, demonstrat
 - Per-User figures attribute Sold to Line authors and Collected to Payment receivers.
 - A Worker's Mi día shows only that Worker's records.
 
-### 10.7 Free-plan proof
+### 10.7 Request budgets
 
-A disposable deployment on Workers Free and D1 Free, loaded with a year of synthetic records, is a release gate. It must show, for the Sell screen, recording a ten-Item selection with Payment, Cuentas abiertas with 200 Open Bills, paying a Customer with 30 Open Bills, Día for the busiest Day, a page of Cuentas, Inventario, a Count of every Item, and a page of Historial:
+Against a local database loaded with a year of synthetic records, for the Sell screen, recording a ten-Item selection with Payment, Cuentas abiertas with 200 Open Bills, paying a Customer with 30 Open Bills, Día for the busiest Day, a page of Cuentas, Inventario, a Count of every Item, and a page of Historial:
 
 - no request issues more than 50 D1 statements;
-- no request reads rows in proportion to the total history;
-- CPU time per request, as reported by Cloudflare, has a median under 10 ms over at least 20 runs of each, with the figures recorded;
-- a simulated busy Day stays under a fifth of the daily rows-read and rows-written limits.
+- no request reads rows in proportion to the total history, shown by measuring at two history sizes;
+- no request that only reads writes a row.
 
-If Effect is the reason any screen fails the CPU criterion, the exit rule in §3.2 applies.
+There is no proof against a deployment (ADR 0007).
 
 ## 11. Assumptions awaiting confirmation
 
 1. The cafeteria's Days are counted in `America/Mexico_City`.
 2. There are fewer than about 60 active Items, so Vender is a grid without search. With more, Vender gains a search field.
-3. The owner shares custody of the Gamo mailbox and Cloudflare account with the developer.
+3. The owner accepts that the cafeteria's records live in the developer's Cloudflare account, and reimburses its monthly charge.
 4. The real menu with prices is needed for day one, not for building.

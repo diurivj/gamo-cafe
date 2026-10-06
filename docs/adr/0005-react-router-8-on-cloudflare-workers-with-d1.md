@@ -1,5 +1,7 @@
 # React Router 8 on Cloudflare Workers with D1 and hand-written SQL
 
+Superseded in part by [ADR 0007](0007-workers-paid-in-the-developers-account.md): the account and the free-plan requirement below no longer hold.
+
 The app runs on React Router 8 in framework mode on Cloudflare Workers with D1, in a Cloudflare account that belongs to Gamo. It leaves no server to look after and is a setup the developer has already shipped. It must stay on Workers Free and D1 Free: that is a requirement of the owner, not an optimization, and it outranks every other technical preference here.
 
 We first chose Remix 3 for the smooth feel of its sites on phones and dropped it before writing any code, because the developer did not want this app to be an experiment. The same feel is expected from React Router's client-side navigation and optimistic updates.
