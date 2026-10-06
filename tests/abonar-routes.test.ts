@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { getBill, takePayment } from "~/backend/bills";
+import { retireCustomer } from "~/backend/customers";
 import { Db } from "~/backend/db";
 
 import { as, signedIn, type SignedIn } from "./support/auth";
@@ -143,6 +144,27 @@ describe("the Customer page", () => {
     expect(response.status).toBe(400);
     expect(await response.text()).toContain("Las cuentas del cliente cambiaron");
     expect((await runTest(getBill("revision-nueva").pipe(as(beto.user)))).payments).toEqual([]);
+  });
+
+  it("still offers Abonar on a retired Customer's Open Bills", async () => {
+    const ana = await signedIn("admin", "Ana");
+    const ruiz = await savedCustomer("Familia retirada de la página", { by: ana.user });
+    await seedBill({ id: "retirada-vieja", customerId: ruiz.id, by: ana.user.id, day: "2026-10-01", openedAt: 1000, total: 5000, paid: 0, state: "open", revision: 0 });
+    await runTest(retireCustomer(ruiz.id).pipe(as(ana.user)));
+
+    const response = await abonar(ana, ruiz.id, { amount: "20.00", bills: [hiddenBill("retirada-vieja", 0)] });
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("Abono de $20.00 registrado.");
+    const html = await (await ana.fetch(`/clientes/${ruiz.id}`)).text();
+    expect(html).toContain("Retirado");
+    expect(html).toContain("Sus cuentas abiertas se cobran igual.");
+    expect(html).toContain("Abonar");
+    expect(await runTest(getBill("retirada-vieja").pipe(as(ana.user)))).toMatchObject({
+      paid: 2000,
+      owed: 3000,
+      state: "partial",
+    });
   });
 
   it("refuses a Customer that does not exist, and a form with no Bill fields writes nothing", async () => {

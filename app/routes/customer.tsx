@@ -182,7 +182,10 @@ export default function Customer({ loaderData, actionData }: Route.ComponentProp
         Lo agregó {customer.addedBy.name} el {formatDay(dayOf(customer.addedAt))} a las {formatTime(customer.addedAt)}.
       </p>
       {retired ? (
-        <p className="mt-2 text-stone-600">Ya no se puede elegir para cuentas nuevas, pero sus cuentas abiertas se cobran igual.</p>
+        <>
+          <p className="mt-2 text-stone-600">Ya no se puede elegir para cuentas nuevas.</p>
+          <p className="mt-1 text-stone-600">Sus cuentas abiertas se cobran igual.</p>
+        </>
       ) : null}
 
       {actionData && "error" in actionData && actionData.error ? (
