@@ -126,6 +126,21 @@ const cookie = values.code ? await signIn(values.code) : values.cookie!.split(";
 const session = cookie.startsWith(`${SESSION_COOKIE}=`) ? cookie : `${SESSION_COOKIE}=${cookie}`;
 const options: Options = { url, cookie: session, day: values.day!, customer: values.customer! };
 
+/** A live session answers the Sell screen; a dead one is a redirect to Entrar. */
+async function checkSession() {
+  const response = await fetch(new URL("/", options.url), {
+    headers: { Cookie: options.cookie },
+    redirect: "manual",
+  });
+  await response.arrayBuffer();
+  if (response.status !== 200) {
+    fail(`The session is not valid for ${url.href}: GET / answered ${response.status}.
+Issue a code with \`npm run sign-in-code -- --production --user "Ana"\` and pass it as --code.`);
+  }
+}
+
+await checkSession();
+
 /** One request, timed; redirects are not followed. */
 async function send(options: Options, method: "GET" | "POST", path: string, form?: FormData): Promise<Run> {
   const headers = new Headers({ Cookie: options.cookie });
