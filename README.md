@@ -32,6 +32,7 @@ app/
     users.ts       what an Admin does on Usuarios: add, new code, sign out everywhere, deactivate, role
     catalog.ts     Items and Categories; activeItemsByCategory is the read for the Sell screen
     stock.ts       the statements that move Stock (changeStock, adjustmentStatements), stockOf
+    inventory.ts   Inventario: Stock and Minimums, recording and cancelling Adjustments
     command-line.ts  the SQL that scripts/sign-in-code.ts sends to D1
     time.ts        now, today (the only source of "now")
     run.server.ts  run(): the one way a loader or action runs a program

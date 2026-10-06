@@ -13,6 +13,7 @@ export default [
     index("routes/home.tsx"),
     route("clientes", "routes/customers.tsx"),
     route("clientes/:customerId", "routes/customer.tsx"),
+    route("inventario", "routes/inventario.tsx"),
     route("productos", "routes/productos.tsx"),
     route("productos/:itemId", "routes/producto.tsx"),
     route("usuarios", "routes/users.tsx"),
