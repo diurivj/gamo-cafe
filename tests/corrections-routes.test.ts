@@ -86,7 +86,7 @@ describe("a Worker and corrections", () => {
       }),
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(302);
     const after = await runTest(getBill(bill.id).pipe(as(owner)));
     expect(after).toMatchObject({ total: 1000, paid: 0, state: "open", revision: bill.revision + 1 });
     expect(after.lines[0]!.removal).toMatchObject({ by: beto.user.id, byName: "Beto", reason: null });
@@ -149,7 +149,7 @@ describe("an Admin's corrections through Cuenta", () => {
       }),
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(302);
     const after = await runTest(
       Effect.gen(function* () {
         const seen = yield* getBill(bill.id).pipe(as(owner));
@@ -174,7 +174,7 @@ describe("an Admin's corrections through Cuenta", () => {
       }),
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(302);
     const after = await runTest(
       Effect.gen(function* () {
         const seen = yield* getBill(bill.id).pipe(as(ana.user));

@@ -173,7 +173,7 @@ const REQUESTS: ReadonlyArray<RequestCase> = [
   },
   {
     name: "Record a ten-Item selection with Payment",
-    status: 200,
+    status: 302,
     cap: 2_000,
     request: (cookie) => post("/?index", cookie, selectionForm()),
   },
@@ -185,7 +185,7 @@ const REQUESTS: ReadonlyArray<RequestCase> = [
   },
   {
     name: "Pay a Customer with 30 Open Bills",
-    status: 200,
+    status: 302,
     cap: 3_000,
     request: async (cookie) =>
       post(`/clientes/${THIRTY_BILL_CUSTOMER_ID}`, cookie, await abonarForm(THIRTY_BILL_CUSTOMER_ID, cookie)),

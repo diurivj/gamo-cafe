@@ -72,7 +72,7 @@ describe("an Admin", () => {
   it("adds a Category and an Item whose price is typed in pesos and whose starting Stock is a Restock", async () => {
     const ana = await signedIn("admin");
 
-    expect((await post(ana, "/productos", { intent: "add-category", name: "Botanas" })).status).toBe(200);
+    expect((await post(ana, "/productos", { intent: "add-category", name: "Botanas" })).status).toBe(302);
     const botanas = (await catalog(ana)).find((category) => category.name === "Botanas")!;
 
     const response = await post(ana, "/productos", {
@@ -85,7 +85,8 @@ describe("an Admin", () => {
       startingStock: "30",
     });
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/productos");
     const [item] = (await catalog(ana)).find((category) => category.id === botanas.id)!.items;
     expect(item).toMatchObject({ name: "Papas con chile", price: 2250, stockTracked: true, minimum: 5, retired: false });
     expect(await runTest(stockOf(item!.id).pipe(as(ana.user)))).toBe(30);

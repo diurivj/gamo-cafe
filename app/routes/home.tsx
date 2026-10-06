@@ -23,8 +23,8 @@ import { type PaymentExceedsOwed, type PaymentNotPositive } from "~/backend/paym
 import { run } from "~/backend/run.server";
 import { CustomerPicker } from "~/components/customer-picker";
 import { PaymentFields } from "~/components/payment-fields";
+import { redirectWithFlash, takeFlash } from "~/flash.server";
 import { requireUser } from "~/session.server";
-import { newId } from "~/shared/id";
 import { formatMoney, parsePesos } from "~/shared/money";
 import { PAYMENT_METHODS, type PaymentMethod } from "~/shared/payment";
 import { paymentMessages } from "~/shared/payment-messages";
@@ -43,7 +43,9 @@ export async function loader({ context, request }: Route.LoaderArgs) {
   const user = requireUser(context);
   const categories = await run(context, activeItemsByCategory);
   const billId = new URL(request.url).searchParams.get("billId") ?? "";
-  if (billId === "") return { categories, target: null };
+  // What the selection that redirected here recorded (spec §3.4).
+  const flash = takeFlash(context);
+  if (billId === "") return { categories, target: null, flash };
 
   const bill = await run(
     context,
@@ -59,7 +61,7 @@ export async function loader({ context, request }: Route.LoaderArgs) {
   );
   // The screen shows the target's figures, not its Lines or Payments.
   const { lines: _lines, payments: _payments, ...target } = bill;
-  return { categories, target };
+  return { categories, target, flash };
 }
 
 /** The selection as the browser sends it, in the `selection` form field. */
@@ -155,8 +157,15 @@ export async function action({ context, request }: Route.ActionArgs) {
   const program = recordSelection({ ...selection, payment }).pipe(Effect.provideService(CurrentUser, user));
   const result = await run(context, program, answerSelectionError);
   if ("error" in result) return data(result, { status: 400 });
-  // `done` is new on every success: the page uses it to empty the selection.
-  return { done: newId(), bill: result, intent };
+  // Recorded: a redirect back to the screen, so a reload or the back button
+  // records nothing again (spec §3.4). The message and the Bill's id travel
+  // with it; the page empties the selection when it sees them.
+  const message =
+    intent === "cobrar" ? paidMessage(result) : selection.billId ? addedMessage(result) : recordedMessage(result);
+  return redirectWithFlash(selection.billId ? `/?billId=${encodeURIComponent(selection.billId)}` : "/", {
+    message,
+    billId: result.id,
+  });
 }
 
 const tile =
@@ -181,14 +190,16 @@ const paidMessage = (bill: BillSummary) =>
     : `Abono registrado. Debe ${formatMoney(bill.owed)}.`;
 
 export default function Home({ loaderData, actionData }: Route.ComponentProps) {
-  const { categories, target } = loaderData;
+  const { categories, target, flash } = loaderData;
   const busy = useNavigation().state !== "idle";
   const [quantities, setQuantities] = useState<Readonly<Record<string, number>>>({});
   // A new key remounts the form after a recorded selection, so the picker and
   // the note start over; the key holds after a refusal, which keeps them.
   const [formKey, setFormKey] = useState("nueva");
 
-  const recorded = actionData && "done" in actionData ? actionData.done : undefined;
+  // New for every recorded selection, whether this page was already open or
+  // the redirect loaded it.
+  const recorded = flash?.id;
   useEffect(() => {
     if (!recorded) return;
     setQuantities({});
@@ -340,13 +351,9 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
               {actionData.error}
             </p>
           ) : null}
-          {actionData && "bill" in actionData ? (
-            <p role="status" data-bill-id={actionData.bill.id} className="rounded-xl bg-green-50 p-3">
-              {actionData.intent === "cobrar"
-                ? paidMessage(actionData.bill)
-                : target
-                  ? addedMessage(actionData.bill)
-                  : recordedMessage(actionData.bill)}
+          {flash?.message ? (
+            <p role="status" data-bill-id={flash.billId} className="rounded-xl bg-green-50 p-3">
+              {flash.message}
             </p>
           ) : null}
 

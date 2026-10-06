@@ -8,7 +8,7 @@ import type { NewItem } from "~/backend/catalog";
 import { CurrentUser, type Role } from "~/backend/current-user";
 import type { Db } from "~/backend/db";
 
-import { appFetch, as, type SignedIn, seedUser, signedIn } from "./support/auth";
+import { appFetch, as, landing, seedUser, type SignedIn, signedIn } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { seedCustomer } from "./support/customers";
 import { runTest } from "./support/effect";
@@ -362,6 +362,15 @@ function fieldOf(html: string, name: string): string {
   return found![1]!;
 }
 
+/**
+ * A recorded form answers with a redirect (spec §3.4): this is the page it
+ * lands on, which says what was recorded.
+ */
+async function landed(recorded: Response, who: SignedIn, label: string): Promise<Response> {
+  expect(recorded.status, label).toBe(302);
+  return landing(who, recorded);
+}
+
 interface MatrixRow {
   /** The §4.1 capability, in the spec's words. */
   readonly capability: string;
@@ -390,8 +399,8 @@ const rows: ReadonlyArray<MatrixRow> = [
         "/?index",
         form({ intent: "dejar-abierta", selection: JSON.stringify([{ itemId: item.id, quantity: 1 }]) }),
       );
-      expect(sale.status, label).toBe(200);
-      expect(await sale.text(), label).toContain("Se dejó abierta");
+      const salePage = await landed(sale, who, label);
+      expect(await salePage.text(), label).toContain("Se dejó abierta");
 
       // Any User adds to any Open Bill, not only the one they opened.
       const added = await who.fetch(
@@ -402,8 +411,8 @@ const rows: ReadonlyArray<MatrixRow> = [
           selection: JSON.stringify([{ itemId: item.id, quantity: 1 }]),
         }),
       );
-      expect(added.status, label).toBe(200);
-      expect(await added.text(), label).toContain("Se agregaron los productos a la cuenta.");
+      const addedPage = await landed(added, who, label);
+      expect(await addedPage.text(), label).toContain("Se agregaron los productos a la cuenta.");
       return added;
     },
   },
@@ -421,8 +430,8 @@ const rows: ReadonlyArray<MatrixRow> = [
         `/cuentas/${bill.id}`,
         form({ intent: "pagar", method: "cash", amount: "5.00", revision: String(bill.revision) }),
       );
-      expect(onBill.status, label).toBe(200);
-      expect(await onBill.text(), label).toContain("Abono de $5.00 registrado.");
+      const onBillPage = await landed(onBill, who, label);
+      expect(await onBillPage.text(), label).toContain("Abono de $5.00 registrado.");
 
       // For a Customer: one amount over their Open Bills, oldest first.
       const forCustomer = await who.fetch(
@@ -434,8 +443,8 @@ const rows: ReadonlyArray<MatrixRow> = [
           bill: `${theirs.id}:${theirs.revision}`,
         }),
       );
-      expect(forCustomer.status, label).toBe(200);
-      expect(await forCustomer.text(), label).toContain("Abono de $5.00 registrado.");
+      const forCustomerPage = await landed(forCustomer, who, label);
+      expect(await forCustomerPage.text(), label).toContain("Abono de $5.00 registrado.");
       return forCustomer;
     },
   },
@@ -493,7 +502,7 @@ const rows: ReadonlyArray<MatrixRow> = [
           selection: JSON.stringify([{ itemId: item.id, quantity: 1 }]),
         }),
       );
-      expect(sale.status, label).toBe(200);
+      expect(sale.status, label).toBe(302);
 
       const mine = await who.fetch("/mi-dia");
       expect(mine.status, label).toBe(200);
@@ -516,8 +525,8 @@ const rows: ReadonlyArray<MatrixRow> = [
         `/cuentas/${bill.id}`,
         form({ intent: "editar", note, customerId: "", revision: String(bill.revision) }),
       );
-      expect(edited.status, label).toBe(200);
-      expect(await edited.text(), label).toContain(note);
+      const editedPage = await landed(edited, who, label);
+      expect(await editedPage.text(), label).toContain(note);
       return edited;
     },
   },
@@ -547,8 +556,8 @@ const rows: ReadonlyArray<MatrixRow> = [
         `/cuentas/${bill.id}`,
         form({ intent: "editar", note, customerId: "", revision: String(bill.revision) }),
       );
-      expect(edited.status, label).toBe(200);
-      expect(await edited.text(), label).toContain(note);
+      const editedPage = await landed(edited, who, label);
+      expect(await editedPage.text(), label).toContain(note);
       return edited;
     },
   },
@@ -565,8 +574,8 @@ const rows: ReadonlyArray<MatrixRow> = [
         `/cuentas/${bill.id}`,
         form({ intent: "quitar-linea", lineId: line.id, revision: String(bill.revision) }),
       );
-      expect(removed.status, label).toBe(200);
-      expect(await removed.text(), label).toContain("Producto quitado.");
+      const removedPage = await landed(removed, who, label);
+      expect(await removedPage.text(), label).toContain("Producto quitado.");
       return removed;
     },
   },
@@ -591,8 +600,8 @@ const rows: ReadonlyArray<MatrixRow> = [
         `/cuentas/${bill.id}`,
         form({ ...correction, reason: "Se registró de más" }),
       );
-      expect(removed.status, label).toBe(200);
-      expect(await removed.text(), label).toContain("Producto quitado.");
+      const removedPage = await landed(removed, who, label);
+      expect(await removedPage.text(), label).toContain("Producto quitado.");
       return removed;
     },
   },
@@ -616,8 +625,8 @@ const rows: ReadonlyArray<MatrixRow> = [
         `/cuentas/${bill.id}`,
         form({ ...correction, reason: "Se cobró por error" }),
       );
-      expect(removed.status, label).toBe(200);
-      expect(await removed.text(), label).toContain("Pago quitado.");
+      const removedPage = await landed(removed, who, label);
+      expect(await removedPage.text(), label).toContain("Pago quitado.");
       return removed;
     },
   },
@@ -637,8 +646,8 @@ const rows: ReadonlyArray<MatrixRow> = [
       expect(await withoutReason.text(), label).toContain("Escribe el motivo.");
 
       const voided = await who.fetch(`/cuentas/${bill.id}`, form({ ...correction, reason: "Era una prueba" }));
-      expect(voided.status, label).toBe(200);
-      expect(await voided.text(), label).toContain("Cuenta cancelada.");
+      const voidedPage = await landed(voided, who, label);
+      expect(await voidedPage.text(), label).toContain("Cuenta cancelada.");
       return voided;
     },
   },
@@ -734,8 +743,8 @@ const rows: ReadonlyArray<MatrixRow> = [
       }
 
       const recorded = await who.fetch("/inventario", form(adjustment));
-      expect(recorded.status, label).toBe(200);
-      const recordedHtml = await recorded.text();
+      const recordedPage = await landed(recorded, who, label);
+      const recordedHtml = await recordedPage.text();
       expect(recordedHtml, label).toContain("Entrada +5");
 
       const adjustmentId = fieldOf(recordedHtml, "adjustmentId");
@@ -743,8 +752,8 @@ const rows: ReadonlyArray<MatrixRow> = [
         "/inventario",
         form({ intent: "cancel-adjustment", adjustmentId, reason: "Se contó dos veces" }),
       );
-      expect(cancelled.status, label).toBe(200);
-      expect(await cancelled.text(), label).toContain("Cancelado: Se contó dos veces");
+      const cancelledPage = await landed(cancelled, who, label);
+      expect(await cancelledPage.text(), label).toContain("Cancelado: Se contó dos veces");
 
       const review = await who.fetch(
         "/inventario/conteo",
@@ -779,12 +788,12 @@ const rows: ReadonlyArray<MatrixRow> = [
 
       const name = `Categoría ${++serial}`;
       const category = await who.fetch("/productos", form({ intent: "add-category", name }));
-      expect(category.status, label).toBe(200);
-      expect(await category.text(), label).toContain(name);
+      const categoryPage = await landed(category, who, label);
+      expect(await categoryPage.text(), label).toContain(name);
 
       const retired = await who.fetch(`/productos/${item.id}`, form({ intent: "retire-item" }));
-      expect(retired.status, label).toBe(200);
-      expect(await retired.text(), label).toContain("Retirado: no aparece en Vender.");
+      const retiredPage = await landed(retired, who, label);
+      expect(await retiredPage.text(), label).toContain("Retirado: no aparece en Vender.");
       return retired;
     },
   },
@@ -811,16 +820,16 @@ const rows: ReadonlyArray<MatrixRow> = [
         `/clientes/${customer.id}`,
         form({ intent: "edit", name: renamed, note: "" }),
       );
-      expect(edited.status, label).toBe(200);
-      expect(await edited.text(), label).toContain(renamed);
+      const editedPage = await landed(edited, who, label);
+      expect(await editedPage.text(), label).toContain(renamed);
 
       const retired = await who.fetch(`/clientes/${customer.id}`, form({ intent: "retire" }));
-      expect(retired.status, label).toBe(200);
-      expect(await retired.text(), label).toContain("Ya no se puede elegir para cuentas nuevas.");
+      const retiredPage = await landed(retired, who, label);
+      expect(await retiredPage.text(), label).toContain("Ya no se puede elegir para cuentas nuevas.");
 
       const restored = await who.fetch(`/clientes/${customer.id}`, form({ intent: "restore" }));
-      expect(restored.status, label).toBe(200);
-      const restoredHtml = await restored.text();
+      const restoredPage = await landed(restored, who, label);
+      const restoredHtml = await restoredPage.text();
       expect(restoredHtml, label).toContain(renamed);
       expect(restoredHtml, label).not.toContain("Ya no se puede elegir para cuentas nuevas.");
       return restored;
@@ -841,8 +850,8 @@ const rows: ReadonlyArray<MatrixRow> = [
 
       const name = `Usuario ${++serial}`;
       const added = await who.fetch("/usuarios", form({ intent: "add", name, role: "worker" }));
-      expect(added.status, label).toBe(200);
-      const html = await added.text();
+      const addedPage = await landed(added, who, label);
+      const html = await addedPage.text();
       expect(html, label).toContain("Código de acceso para");
       expect(html, label).toContain(name);
       return added;

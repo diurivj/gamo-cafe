@@ -814,8 +814,9 @@ export const takePayment = Effect.fn("takePayment")(function* (input: NewPayment
   }
   // On success the batch saw the very figures just read (the revision held),
   // so this says whether the Payment left the Bill Paid; the route needs it to
-  // know whether a Worker may stay on the page (§4.1).
-  return { id, amount, paid: bill.paid + amount === bill.total };
+  // know whether a Worker may stay on the page (§4.1). `total` and `owed` are
+  // the Bill's figures after the Payment, for what the screen says.
+  return { id, amount, paid: bill.paid + amount === bill.total, total: bill.total, owed: owed - amount };
 });
 
 /** One Bill and the revision the User's page showed it at (spec §7.3). */
