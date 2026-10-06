@@ -114,7 +114,7 @@ test("Cuentas lists every Bill with its state and filters by Day, state and Cust
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
-test("Cuentas holds 50 Bills per page and pages through the rest", async ({ page, signInAs, query }) => {
+test("Cuentas holds 50 Bills per page and Cargar más appends the rest", async ({ page, signInAs, query }) => {
   const ana = await signInAs("admin", "Ana");
   await query(
     `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 55)
@@ -129,20 +129,15 @@ test("Cuentas holds 50 Bills per page and pages through the rest", async ({ page
 
   const rows = page.getByRole("list", { name: "Cuentas" }).getByRole("listitem");
   await expect(rows).toHaveCount(50);
-  await expect(page.getByText("Página 1")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Anterior" })).toHaveCount(0);
 
-  await page.getByRole("link", { name: "Siguiente" }).click();
+  // The control loads the rest by itself once it scrolls into view.
+  await page.getByRole("link", { name: "Cargar más" }).scrollIntoViewIfNeeded();
 
-  await expect(rows).toHaveCount(5);
-  await expect(page.getByText("Página 2")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Siguiente" })).toHaveCount(0);
-  // The filters survive the page change.
+  await expect(rows).toHaveCount(55);
+  await expect(page.getByRole("link", { name: "Cargar más" })).toHaveCount(0);
+  // The filters are kept: the rest are Bills of that Day, appended in place.
   await expect(page).toHaveURL(/dia=2026-09-30/);
-
-  await page.getByRole("link", { name: "Anterior" }).click();
-
-  await expect(rows).toHaveCount(50);
+  await expect(page).not.toHaveURL(/desde=/);
 });
 
 test("a Worker is refused Cuentas and sees no past Bills; an Admin sees Pagadas and Canceladas", async ({

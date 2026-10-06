@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect";
 
 import { ADJUSTMENT_REASONS, type AdjustmentReason } from "~/shared/adjustment";
+import type { Cursor } from "~/shared/cursor";
 import type { Instant } from "~/shared/day";
 import type { Centavos } from "~/shared/money";
 import type { PaymentMethod } from "~/shared/payment";
@@ -31,10 +32,7 @@ import { Db, type Param } from "./db";
 export const HISTORY_PAGE_SIZE = 50;
 
 /** Where the next page starts: the last entry of the page it follows. */
-export interface HistoryCursor {
-  readonly at: Instant;
-  readonly id: string;
-}
+export type HistoryCursor = Cursor;
 
 /** A Line an Admin or a Worker removed from a Bill (spec §5.7). */
 export interface RemovedLineEntry {

@@ -2,8 +2,10 @@ import { Form, Link, useNavigation, useSubmit } from "react-router";
 
 import { listOpenBills } from "~/backend/bills";
 import { run } from "~/backend/run.server";
+import { LoadMore, usePagedList } from "~/components/paged-list";
 import { requireUser } from "~/session.server";
 import { billStateLabel } from "~/shared/bill-state";
+import { CURSOR_PARAM, cursorOf, nextText } from "~/shared/cursor";
 import { formatDay } from "~/shared/day";
 import { formatMoney } from "~/shared/money";
 
@@ -11,21 +13,36 @@ import type { Route } from "./+types/open-bills";
 
 // Cuentas abiertas (spec §6.1): every Open Bill, newest first, with its
 // Customer or note, Day, total, paid and owed, and a search by Customer. One
-// index-driven read, so it stays cheap with 200 Open Bills (ticket 07).
+// index-driven read of a page of 50, so it stays cheap with any number of
+// Open Bills; the search is over all of them, not over the page.
 
 export const meta: Route.MetaFunction = () => [{ title: "Cuentas abiertas · Gamo Cafe" }];
 
 export async function loader({ context, request }: Route.LoaderArgs) {
   requireUser(context);
   const typed = (new URL(request.url).searchParams.get("q") ?? "").trim();
-  const bills = await run(context, listOpenBills(typed));
-  return { typed, bills };
+  const page = await run(context, listOpenBills(typed, cursorOf(request.url)));
+  return { typed, bills: page.bills, next: nextText(page.next) };
 }
+
+type Data = Route.ComponentProps["loaderData"];
+const pageOf = (data: Data) => ({ rows: data.bills, next: data.next });
 
 const field = "w-full rounded-xl border border-stone-300 bg-white px-4 py-3 text-lg";
 
 export default function OpenBills({ loaderData }: Route.ComponentProps) {
-  const { typed, bills } = loaderData;
+  const { typed } = loaderData;
+  const { rows: bills, more } = usePagedList({
+    id: "cuentas-abiertas",
+    data: loaderData,
+    pageOf,
+    hrefFor: (cursor) => {
+      const params = new URLSearchParams();
+      if (typed !== "") params.set("q", typed);
+      params.set(CURSOR_PARAM, cursor);
+      return `/cuentas-abiertas?${params}`;
+    },
+  });
   const submit = useSubmit();
   // The results are a round trip away; say so at once, so no tap looks lost.
   const searching = useNavigation().state !== "idle";
@@ -93,6 +110,8 @@ export default function OpenBills({ loaderData }: Route.ComponentProps) {
           ))}
         </ul>
       )}
+
+      <LoadMore more={more} />
     </>
   );
 }

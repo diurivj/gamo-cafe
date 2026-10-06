@@ -563,7 +563,7 @@ describe("voiding a Bill", () => {
         expect(after.lines.find((line) => line.id === secondLine)!.removal).not.toBeNull();
 
         // It left Cuentas abiertas and the Owed list, while its record stays.
-        expect((yield* listOpenBills()).map((row) => row.id)).not.toContain(bill.id);
+        expect((yield* listOpenBills()).bills.map((row) => row.id)).not.toContain(bill.id);
         const db = yield* Db;
         expect(yield* countIn("bill_voids", "bill_id", bill.id)).toBe(1);
         // Only the unremoved Line's units: the Item is back at 10, the
@@ -587,7 +587,7 @@ describe("voiding a Bill", () => {
         const after = yield* getBill(bill.id).pipe(as(ana));
         expect(after).toMatchObject({ state: "voided", total: 2000, paid: 2000 });
         expect(after.payments).toMatchObject([{ id: payment.id, amount: 2000, removal: null }]);
-        expect((yield* listOpenBills()).map((row) => row.id)).not.toContain(bill.id);
+        expect((yield* listOpenBills()).bills.map((row) => row.id)).not.toContain(bill.id);
         expect(yield* stockOf(item.id).pipe(as(ana))).toBe(3);
       }),
     ));
@@ -686,7 +686,7 @@ describe("voiding a Bill", () => {
         }).pipe(as(ana));
 
         expect(fresh.id).not.toBe(bill.id);
-        expect((yield* listOpenBills("Familia anulada")).map((row) => row.id)).toEqual([fresh.id]);
+        expect((yield* listOpenBills("Familia anulada")).bills.map((row) => row.id)).toEqual([fresh.id]);
       }),
     ));
 });

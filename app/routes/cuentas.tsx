@@ -7,10 +7,11 @@ import { CurrentUser } from "~/backend/current-user";
 import { run } from "~/backend/run.server";
 import { refuseRead, requireAdminUser } from "~/catalog-forms.server";
 import { CustomerPicker } from "~/components/customer-picker";
+import { LoadMore, usePagedList } from "~/components/paged-list";
 import { BILL_STATES, billStateLabel, type BillState } from "~/shared/bill-state";
+import { CURSOR_PARAM, cursorOf, nextText } from "~/shared/cursor";
 import { formatDay } from "~/shared/day";
 import { formatMoney } from "~/shared/money";
-import { pageFrom } from "~/shared/page";
 
 import type { Route } from "./+types/cuentas";
 
@@ -31,7 +32,6 @@ function filtersOf(params: URLSearchParams): Required<Omit<BillFilter, "settledO
     day: day !== null && DAY_TEXT.test(day) ? day : null,
     state: BILL_STATES.find((known) => known === state) ?? null,
     customerId: params.get("cliente") || null,
-    page: pageFrom(params.get("pagina")),
   };
 }
 
@@ -42,7 +42,7 @@ export async function loader({ context, request }: Route.LoaderArgs) {
   const { listed, customer } = await run(
     context,
     Effect.gen(function* () {
-      const listed = yield* listBills(filter);
+      const listed = yield* listBills(filter, cursorOf(request.url));
       // The chosen Customer's name, so the picker shows the filter that is on.
       const customer =
         filter.customerId === null
@@ -58,27 +58,34 @@ export async function loader({ context, request }: Route.LoaderArgs) {
   return {
     ...filter,
     bills: listed.bills,
-    hasMore: listed.hasMore,
+    next: nextText(listed.next),
     customer: customer === null ? null : { id: customer.id, name: customer.name },
   };
 }
 
-/** This page's URL for a page number, the filters kept. */
-function filtersUrl(filters: ReturnType<typeof filtersOf>, page: number) {
+/** This list's URL for the page after a cursor, the filters kept. */
+function filtersUrl(filters: ReturnType<typeof filtersOf>, cursor: string) {
   const params = new URLSearchParams();
   if (filters.day !== null) params.set("dia", filters.day);
   if (filters.state !== null) params.set("estado", filters.state);
   if (filters.customerId !== null) params.set("cliente", filters.customerId);
-  if (page > 1) params.set("pagina", String(page));
-  const query = params.toString();
-  return query === "" ? "/cuentas" : `/cuentas?${query}`;
+  params.set(CURSOR_PARAM, cursor);
+  return `/cuentas?${params}`;
 }
 
+type Data = Route.ComponentProps["loaderData"];
+const pageOf = (data: Data) => ({ rows: data.bills, next: data.next });
+
 const field = "w-full rounded-xl border border-stone-300 bg-white px-4 py-3 text-lg";
-const pageLink = "rounded-xl border border-stone-300 bg-white px-4 py-3 font-medium";
 
 export default function Cuentas({ loaderData }: Route.ComponentProps) {
-  const { day, state, customerId, page, hasMore, bills, customer } = loaderData;
+  const { day, state, customerId, customer } = loaderData;
+  const { rows: bills, more } = usePagedList({
+    id: "cuentas",
+    data: loaderData,
+    pageOf,
+    hrefFor: (cursor) => filtersUrl({ day, state, customerId }, cursor),
+  });
   const filtered = day !== null || state !== null || customerId !== null;
   const filtering = useNavigation().state !== "idle";
 
@@ -154,25 +161,7 @@ export default function Cuentas({ loaderData }: Route.ComponentProps) {
         </ul>
       )}
 
-      {page > 1 || hasMore ? (
-        <nav aria-label="Páginas" className="mt-4 flex items-center justify-between gap-3">
-          {page > 1 ? (
-            <Link to={filtersUrl({ day, state, customerId, page }, page - 1)} className={pageLink}>
-              Anterior
-            </Link>
-          ) : (
-            <span />
-          )}
-          <span aria-current="page" className="text-stone-600">{`Página ${page}`}</span>
-          {hasMore ? (
-            <Link to={filtersUrl({ day, state, customerId, page }, page + 1)} className={pageLink}>
-              Siguiente
-            </Link>
-          ) : (
-            <span />
-          )}
-        </nav>
-      ) : null}
+      <LoadMore more={more} />
     </>
   );
 }
