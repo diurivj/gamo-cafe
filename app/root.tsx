@@ -2,6 +2,11 @@ import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration }
 
 import type { Route } from "./+types/root";
 import "./app.css";
+import { sessionMiddleware } from "./session.server";
+
+// Runs before every loader and action of every route: nothing but the public
+// paths answers without a valid session (spec §10.1).
+export const middleware: Route.MiddlewareFunction[] = [sessionMiddleware];
 
 export const meta: Route.MetaFunction = () => [{ title: "Gamo Cafe" }];
 

@@ -36,9 +36,7 @@ describe("GET /healthz", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toContain("application/json");
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(await response.json()).toEqual({
-      ok: true,
-      day: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
-    });
+    // Answered without a session, so it says nothing but that the app is up.
+    expect(await response.json()).toEqual({ ok: true });
   });
 });

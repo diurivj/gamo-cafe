@@ -23,6 +23,20 @@ type AdapterEvent = Parameters<typeof requestHandler>[0];
 
 export default {
   async fetch(request, env, ctx) {
+    // A request that changes something must come from the app's own pages
+    // (spec §3.5). Browsers send `Origin` with every non-GET request, so one
+    // without it is not from the app either.
+    if (
+      request.method !== "GET" &&
+      request.method !== "HEAD" &&
+      request.headers.get("Origin") !== new URL(request.url).origin
+    ) {
+      return new Response("Origen no permitido.", {
+        status: 403,
+        headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" },
+      });
+    }
+
     const response = await requestHandler({
       request,
       env,

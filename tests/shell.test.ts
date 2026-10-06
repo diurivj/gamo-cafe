@@ -1,8 +1,8 @@
 import { exports } from "cloudflare:workers";
 import { expect, it } from "vitest";
 
-it("serves a Spanish page to a signed-out visitor", async () => {
-  const response = await exports.default.fetch("https://gamo.test/");
+it("serves a Spanish, installable page to a signed-out visitor", async () => {
+  const response = await exports.default.fetch("https://gamo.test/entrar");
 
   expect(response.status).toBe(200);
   expect(response.headers.get("Content-Type")).toContain("text/html");
