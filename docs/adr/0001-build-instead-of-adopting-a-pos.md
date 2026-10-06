@@ -1,0 +1,3 @@
+# Build a custom app instead of adopting an off-the-shelf POS
+
+The cafeteria needs every sale and payment attributed to the User who recorded it, physical Counts compared against Stock, and Bills that stay Open for days and are paid off in parts. In October 2026 we looked at Loyverse, the obvious free alternative: its free tier keeps 31 days of sales history, team performance and permissions are a US$25/month add-on, advanced inventory is another US$25/month, and we could not confirm that it handles a Bill left open for weeks with partial payments. We chose to build, because the features that are the point of this app are the paid ones there, and we accept that the developer becomes the support line for as long as the cafeteria uses it.
