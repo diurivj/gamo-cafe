@@ -149,13 +149,19 @@ export const cancelAdjustment = Effect.fn("cancelAdjustment")(function* (adjustm
       id, admin.id, yield* now, why, adjustmentId,
     ),
     // Reverses only the cancellation this batch wrote (`c.id = ?`), so a
-    // second, racing attempt cannot reverse the same Adjustment twice. Like
-    // `changeStock`, it does nothing while the Item is not stock-tracked.
+    // second, racing attempt cannot reverse the same Adjustment twice.
+    //
+    // It reverses the Adjustment's own effect whatever the Item's flag says
+    // now: the Adjustment fact only exists when the Item was stock-tracked
+    // when it was recorded, and its effect is in the Stock, so the
+    // cancellation has to take it out — the same rule a removed Line's units
+    // follow (ticket 04's trap, `lineRemovalStock`). Reading the flag at
+    // cancellation time would leave a recorded Stock change that no fact
+    // explains, which the rebuild (ticket 19) could not reproduce.
     statement(
       `INSERT INTO stock_levels (item_id, units)
        SELECT a.item_id, CASE a.reason WHEN 'restock' THEN -a.units ELSE a.units END
        FROM adjustments a
-       JOIN items i ON i.id = a.item_id AND i.stock_tracked = 1
        JOIN adjustment_cancellations c ON c.id = ? AND c.adjustment_id = a.id
        WHERE a.id = ?
        ON CONFLICT (item_id) DO UPDATE SET units = units + excluded.units`,

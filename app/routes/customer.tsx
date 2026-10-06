@@ -5,6 +5,7 @@ import {
   type ExpectedBillRevision,
   listCustomerHandovers,
   listCustomerOpenBills,
+  listCustomerPastBills,
   takeCustomerPayment,
 } from "~/backend/bills";
 import { CurrentUser } from "~/backend/current-user";
@@ -19,6 +20,7 @@ import { newId } from "~/shared/id";
 import { type Centavos, formatMoney, parsePesos } from "~/shared/money";
 import { PAYMENT_METHODS, paymentMethodLabel } from "~/shared/payment";
 import { paymentMessages } from "~/shared/payment-messages";
+import { pageFrom, pageUrl } from "~/shared/page";
 
 import type { Route } from "./+types/customer";
 
@@ -29,11 +31,12 @@ export const meta: Route.MetaFunction = ({ loaderData }) => [
 /**
  * One Customer: their Open Bills and what they owe, with **Abonar** to pay
  * across them (spec §6.1 Clientes, §8.3). Every User sees and collects; an
- * Admin also renames, retires and restores (spec §4.1). `canManage` only
- * decides what the page offers: the operations refuse a Worker themselves.
- * Past Bills are ticket 16's.
+ * Admin also renames, retires, restores and sees the Customer's past Bills —
+ * Pagadas and Canceladas, 50 per page — which a Worker is never sent
+ * (spec §4.1, §4.2). `canManage` only decides what the page offers: the
+ * operations refuse a Worker themselves.
  */
-export async function loader({ context, params }: Route.LoaderArgs) {
+export async function loader({ context, params, request }: Route.LoaderArgs) {
   const user = requireUser(context);
   const { customer, openBills, handovers } = await run(
     context,
@@ -51,7 +54,29 @@ export async function loader({ context, params }: Route.LoaderArgs) {
     },
   );
   const owed = openBills.reduce((sum, bill) => sum + bill.owed, 0);
-  return { customer, openBills, owed, handovers, canManage: user.role === "admin" };
+  const page = pageFrom(new URL(request.url).searchParams.get("pagina"));
+  const pastBills =
+    user.role === "admin"
+      ? await run(
+          context,
+          listCustomerPastBills(params.customerId, page).pipe(Effect.provideService(CurrentUser, user)),
+          (error) => {
+            switch (error._tag) {
+              case "AdminOnly":
+                throw data(null, { status: 403 });
+            }
+          },
+        )
+      : null;
+  return {
+    customer,
+    openBills,
+    owed,
+    handovers,
+    canManage: user.role === "admin",
+    pastBills,
+    page,
+  };
 }
 
 /** The intents the Customer page's forms ask for. */
@@ -162,7 +187,7 @@ const primaryButton =
   "block rounded-2xl bg-stone-900 px-4 py-4 text-center text-lg font-semibold text-white active:bg-stone-700 disabled:opacity-60";
 
 export default function Customer({ loaderData, actionData }: Route.ComponentProps) {
-  const { customer, openBills, owed, handovers, canManage } = loaderData;
+  const { customer, openBills, owed, handovers, canManage, pastBills, page } = loaderData;
   const busy = useNavigation().state !== "idle";
   const retired = customer.retiredAt !== null;
   const recordedAmount =
@@ -285,6 +310,63 @@ export default function Customer({ loaderData, actionData }: Route.ComponentProp
           </ul>
         )}
       </section>
+
+      {pastBills ? (
+        <section aria-labelledby="cuentas-pasadas" className="mt-6">
+          <h2 id="cuentas-pasadas" className="text-xl font-semibold">
+            Cuentas pasadas
+          </h2>
+          {pastBills.bills.length === 0 ? (
+            <p className="mt-3 text-stone-600">Todavía no hay cuentas pasadas.</p>
+          ) : (
+            <>
+              <ul aria-label="Cuentas pasadas" className="mt-3 flex flex-col gap-2">
+                {pastBills.bills.map((bill) => (
+                  <li key={bill.id} data-past-bill-id={bill.id}>
+                    <Link
+                      to={`/cuentas/${bill.id}`}
+                      className="block rounded-2xl border border-stone-300 bg-white p-4 active:bg-stone-100"
+                    >
+                      <span className="flex items-start justify-between gap-3">
+                        <span className="block text-stone-600">{formatDay(bill.day)}</span>
+                        <span className="shrink-0 rounded-full bg-stone-100 px-3 py-1 text-sm font-medium">
+                          {billStateLabel[bill.state]}
+                        </span>
+                      </span>
+                      <span className="mt-2 block tabular-nums text-stone-700">
+                        {bill.state === "voided"
+                          ? `Total ${formatMoney(bill.total)} · Pagado ${formatMoney(bill.paid)}`
+                          : `Total ${formatMoney(bill.total)} · Pagado ${formatMoney(bill.paid)} · Debe ${formatMoney(
+                              bill.owed,
+                            )}`}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+              {page > 1 || pastBills.hasMore ? (
+                <nav aria-label="Páginas de cuentas pasadas" className="mt-4 flex items-center justify-between gap-3">
+                  {page > 1 ? (
+                    <Link to={pageUrl(`/clientes/${customer.id}`, page - 1)} className={secondaryButton}>
+                      Anterior
+                    </Link>
+                  ) : (
+                    <span />
+                  )}
+                  <span aria-current="page" className="text-stone-600">{`Página ${page}`}</span>
+                  {pastBills.hasMore ? (
+                    <Link to={pageUrl(`/clientes/${customer.id}`, page + 1)} className={secondaryButton}>
+                      Siguiente
+                    </Link>
+                  ) : (
+                    <span />
+                  )}
+                </nav>
+              ) : null}
+            </>
+          )}
+        </section>
+      ) : null}
 
       {canManage ? (
         <section aria-label="Administrar cliente" className="mt-6 flex flex-col gap-4 border-t border-stone-200 pt-4">
