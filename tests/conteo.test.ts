@@ -118,6 +118,20 @@ describe("confirming", () => {
     expect(html).toContain("Conteo de la tarde");
   });
 
+  it("counts only the Items whose units were typed, leaving the rest of the shelf alone", async () => {
+    const { ana, cafe, pan } = await shelf();
+
+    const response = await post(ana, { intent: "confirm", [`units.${cafe.id}`]: "40" });
+
+    expect(response.status).toBe(302);
+    expect(await stockNow(ana, cafe.id)).toBe(40);
+    expect(await stockNow(ana, pan.id)).toBe(12);
+    const count = (await runTest(listCounts().pipe(as(ana.user)))).find(
+      (row) => row.lines.length === 1 && row.lines[0]!.itemId === cafe.id,
+    )!;
+    expect(count.lines[0]).toMatchObject({ expected: 47, found: 40, difference: -7 });
+  });
+
   it("answers 404 and writes nothing for an Item that does not exist", async () => {
     const { ana, cafe } = await shelf();
     const before = (await runTest(listCounts().pipe(as(ana.user)))).length;
