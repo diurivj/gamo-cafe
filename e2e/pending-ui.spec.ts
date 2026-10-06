@@ -195,12 +195,14 @@ test("a Customer's page shows no Abono before the answer; retiring and restoring
   await held.release();
   await expect(manage.getByRole("button", { name: "Restaurar cliente" })).toBeEnabled();
   await expect(retiredBadge).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText("Cliente retirado.");
 
   await tap(held, manage.getByRole("button", { name: "Restaurar cliente" }));
   await expect(retiredBadge).toHaveCount(0);
   await held.release();
   await expect(manage.getByRole("button", { name: "Retirar cliente" })).toBeEnabled();
   await expect(retiredBadge).toHaveCount(0);
+  await expect(page.getByRole("status")).toHaveText("Cliente restaurado.");
   expect(await query("SELECT retired_at FROM customers")).toEqual([{ retired_at: null }]);
 
   // Going back from the page leaves it: none of these added a history entry.
