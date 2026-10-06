@@ -114,10 +114,14 @@ describe("only an Admin", () => {
     expect(await (await landing(ana, renamed)).text()).toContain("Paga los viernes");
     expect((await pick(ana, "hugo m")).customers.map((customer) => customer.id)).toEqual([hugo.id]);
 
-    expect((await ana.fetch(page, form({ intent: "retire" }))).status).toBe(302);
+    const retired = await ana.fetch(page, form({ intent: "retire" }));
+    expect(retired.status).toBe(302);
+    expect(await (await landing(ana, retired)).text()).toContain("Cliente retirado.");
     expect((await pick(ana, "hugo")).customers).toEqual([]);
 
-    expect((await ana.fetch(page, form({ intent: "restore" }))).status).toBe(302);
+    const restored = await ana.fetch(page, form({ intent: "restore" }));
+    expect(restored.status).toBe(302);
+    expect(await (await landing(ana, restored)).text()).toContain("Cliente restaurado.");
     expect((await pick(ana, "hugo")).customers.map((customer) => customer.id)).toEqual([hugo.id]);
   });
 

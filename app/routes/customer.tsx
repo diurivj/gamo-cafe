@@ -196,7 +196,14 @@ export async function action({ context, params, request }: Route.ActionArgs) {
   if (outcome.recorded) {
     return redirectWithFlash(page, { message: `Abono de ${formatMoney(outcome.recorded.amount)} registrado.` });
   }
-  // `replace`, so the fetcher that retires or restores adds no history entry.
+  // A retirement and a restoration are harmless and reversible, and say so
+  // with the redirect like a User's role does. `redirectWithFlash` replaces,
+  // so the fetcher adds no history entry; the rename has nothing to say.
+  if (intent === "retire" || intent === "restore") {
+    return redirectWithFlash(page, {
+      message: intent === "retire" ? "Cliente retirado." : "Cliente restaurado.",
+    });
+  }
   return replace(page);
 }
 
