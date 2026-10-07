@@ -82,8 +82,7 @@ test("a code can be pasted, and a refused one stays to be corrected", async ({ p
   await page.goto("/entrar");
   const field = page.getByLabel("Código de acceso");
   await expect(field).toBeFocused();
-  await expect(field).toHaveAccessibleDescription(/Son 8 letras y números/);
-  await expect(page.getByRole("heading", { name: "¿No tienes un código?" })).toBeVisible();
+  await expect(field).toHaveAccessibleDescription(/Pídeselo a un administrador/);
 
   const paste = (text: string) =>
     field.evaluate((input, text) => {
@@ -132,6 +131,6 @@ test("a phone whose session ended is told so on Entrar", async ({ page, signInAs
   await goTo(page, "Mi día");
 
   await expect(page.getByRole("heading", { name: "Entrar" })).toBeVisible();
-  await expect(page.getByRole("status")).toContainText("Tu sesión terminó. Entra otra vez con un código nuevo.");
+  await expect(page.getByRole("status")).toHaveText("Tu sesión terminó. Entra con un código nuevo.");
   await expect(page.getByLabel("Código de acceso")).toBeVisible();
 });

@@ -18,15 +18,15 @@ export function ErrorScreen({ error }: { readonly error: unknown }) {
 
   let title = "Algo salió mal";
   let details =
-    "No pudimos mostrar esta pantalla. Si estabas registrando algo, puede que sí se haya guardado: revísalo antes de repetirlo.";
+    "No se pudo mostrar esta pantalla. Si estabas registrando algo, puede que sí se haya guardado: revísalo antes de repetirlo.";
   let retry = true;
   if (status === 403) {
     title = "No tienes acceso a esta página";
-    details = "Tu usuario no puede abrirla. Si la necesitas, pídele a un administrador que te dé acceso.";
+    details = "Si la necesitas, pídele acceso a un administrador.";
     retry = false;
   } else if (status === 404) {
     title = "No encontramos esta página";
-    details = "Puede que la dirección esté incompleta. Desde Vender puedes llegar a todo lo demás.";
+    details = "Revisa la dirección o vuelve a Vender.";
     retry = false;
   }
   const stack = import.meta.env.DEV && error instanceof Error ? error.stack : undefined;

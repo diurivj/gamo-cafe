@@ -4,7 +4,7 @@ import { data, Form, redirect } from "react-router";
 import { run } from "~/backend/run.server";
 import { useSignInCode } from "~/backend/sign-in";
 import { Notice } from "~/components/notice";
-import { fieldLabel, hint, pageTitle, primaryButton, sectionTitle, textField } from "~/components/styles";
+import { fieldLabel, hint, pageTitle, primaryButton, textField } from "~/components/styles";
 import { SubmitButton } from "~/components/submit-button";
 import { clearedSessionCookie, optionalUser, sessionCookie, sessionToken } from "~/session.server";
 
@@ -55,13 +55,12 @@ export default function SignIn({ loaderData, actionData }: Route.ComponentProps)
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-5 py-10">
-      <p className="font-display text-xl font-semibold text-ink-soft">Gamo Cafe</p>
+      <p className="font-bold">Gamo Cafe</p>
       <h1 className={`mt-1 ${pageTitle}`}>Entrar</h1>
 
       {loaderData.sessionEnded ? (
         <Notice tone="info" className="mt-6">
-          Tu sesión terminó. Entra otra vez con un código nuevo. Si estabas registrando algo, revísalo al entrar
-          antes de repetirlo.
+          Tu sesión terminó. Entra con un código nuevo.
         </Notice>
       ) : null}
 
@@ -70,7 +69,7 @@ export default function SignIn({ loaderData, actionData }: Route.ComponentProps)
           Código de acceso
         </label>
         <p id="code-help" className={hint}>
-          Son 8 letras y números, como ABCD 2345. Puedes escribirlo o pegarlo.
+          Pídeselo a un administrador. Sirve una sola vez y dura 10 minutos.
         </p>
         <input
           ref={field}
@@ -97,16 +96,6 @@ export default function SignIn({ loaderData, actionData }: Route.ComponentProps)
           Entrar
         </SubmitButton>
       </Form>
-
-      <section aria-labelledby="sin-codigo" className="mt-10 border-t border-rule pt-6">
-        <h2 id="sin-codigo" className={sectionTitle}>
-          ¿No tienes un código?
-        </h2>
-        <p className={`mt-2 ${hint}`}>
-          Pídeselo a un administrador: lo genera en Usuarios y te lo dicta. Cada código sirve una sola vez y dura 10
-          minutos.
-        </p>
-      </section>
     </main>
   );
 }

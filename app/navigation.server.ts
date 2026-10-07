@@ -29,36 +29,36 @@ const destinations: Readonly<Record<Role, ReadonlyArray<Destination>>> = {
   ],
 };
 
-const customers: MoreLink = { label: "Clientes", to: "/clientes", about: "Buscar un cliente, ver lo que debe y abonar." };
+const customers: MoreLink = { label: "Clientes", to: "/clientes" };
 
 const moreGroups: Readonly<Record<Role, ReadonlyArray<MoreGroup>>> = {
   admin: [
     {
       title: "Cuentas y clientes",
       links: [
-        { label: "Cuentas abiertas", to: "/cuentas-abiertas", about: "Las cuentas que todavía deben." },
-        { label: "Cuentas", to: "/cuentas", about: "Todas las cuentas, por fecha y estado." },
-        { label: "Por cobrar", to: "/por-cobrar", about: "Lo que debe cada cliente hoy." },
+        { label: "Cuentas abiertas", to: "/cuentas-abiertas" },
+        { label: "Cuentas", to: "/cuentas" },
+        { label: "Por cobrar", to: "/por-cobrar" },
         customers,
       ],
     },
     {
       title: "Revisar",
       links: [
-        { label: "Mi día", to: "/mi-dia", about: "Lo que tú vendiste y cobraste hoy." },
-        { label: "Diferencias", to: "/diferencias", about: "El resultado de cada conteo." },
-        { label: "Historial", to: "/historial", about: "Correcciones y ajustes, con su autor." },
+        { label: "Mi día", to: "/mi-dia" },
+        { label: "Diferencias", to: "/diferencias" },
+        { label: "Historial", to: "/historial" },
       ],
     },
     {
       title: "Catálogo y accesos",
       links: [
-        { label: "Productos", to: "/productos", about: "Precios, categorías y productos retirados." },
-        { label: "Usuarios", to: "/usuarios", about: "Códigos de acceso, permisos y sesiones." },
+        { label: "Productos", to: "/productos" },
+        { label: "Usuarios", to: "/usuarios" },
       ],
     },
   ],
-  worker: [{ title: "También puedes abrir", links: [customers] }],
+  worker: [{ title: "Cuentas y clientes", links: [customers] }],
 };
 
 /** The four destinations of a role, in order; Más is the last. */

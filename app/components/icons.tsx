@@ -79,7 +79,7 @@ export type Tone = "success" | "error" | "info";
 /** What a `Notice` of each tone shows beside its words. */
 export function ToneDrawing({ tone }: { readonly tone: Tone }) {
   return (
-    <Drawing>
+    <Drawing className="mt-0.5 size-6">
       <circle cx="12" cy="12" r="9" />
       {tone === "success" ? <path d="M8 12.5l3 3 5-6" /> : null}
       {tone === "error" ? <path d="M12 7v6M12 16.5v.5" /> : null}

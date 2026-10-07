@@ -15,10 +15,10 @@
  */
 
 /** A screen's `<h1>`. */
-export const pageTitle = "font-display text-3xl font-semibold tracking-tight text-balance";
+export const pageTitle = "text-3xl font-bold tracking-tight text-balance";
 
 /** The heading of a part of a screen. */
-export const sectionTitle = "font-display text-xl font-semibold";
+export const sectionTitle = "font-semibold text-ink-soft";
 
 /** Supporting text: an explanation, a hint under a label. Still 4.5:1. */
 export const hint = "text-ink-soft";
@@ -34,10 +34,10 @@ const button =
   "inline-flex min-h-14 items-center justify-center gap-2 rounded-lg px-5 py-3 text-center font-semibold disabled:opacity-60";
 
 /** The one action a step is for. */
-export const primaryButton = `${button} bg-accent text-white hover:bg-accent-strong`;
+export const primaryButton = `${button} bg-ink text-white hover:bg-black`;
 
 /** An action beside the primary one, or a link drawn as a button. */
 export const secondaryButton = `${button} border border-edge bg-raised text-ink hover:bg-paper`;
 
-/** A link inside text. Underlined, so it does not depend on its color. */
-export const textLink = "font-semibold text-accent underline underline-offset-4";
+/** A link inside text: told apart by its underline, not by a color. */
+export const textLink = "font-semibold underline underline-offset-4";

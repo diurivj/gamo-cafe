@@ -56,9 +56,9 @@ function Destinations({ destinations }: { readonly destinations: ReadonlyArray<D
               to={destination.to}
               // "page" on the destination's own screen, "true" on one under it.
               aria-current={pathname === destination.to ? "page" : destination === here ? "true" : undefined}
-              className={`flex min-h-16 flex-col items-center justify-center gap-1 border-t-4 px-1 py-2 text-center text-sm leading-tight font-semibold [overflow-wrap:anywhere] -outline-offset-4 lg:min-h-14 lg:flex-row lg:justify-start lg:gap-3 lg:rounded-lg lg:border-t-0 lg:border-l-4 lg:px-3 lg:text-lg ${
+              className={`flex min-h-16 flex-col items-center justify-center gap-1 border-t-[3px] px-1 py-2 text-center text-sm leading-tight font-semibold [overflow-wrap:anywhere] -outline-offset-4 lg:min-h-14 lg:flex-row lg:justify-start lg:gap-3 lg:border-t-0 lg:border-l-4 lg:px-3 lg:text-lg ${
                 destination === marked
-                  ? "border-accent bg-accent-wash text-accent"
+                  ? "border-ink text-ink"
                   : "border-transparent text-ink-soft hover:text-ink"
               }`}
             >
@@ -103,7 +103,7 @@ export default function Shell({ loaderData }: Route.ComponentProps) {
 
       <div className="lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-64 lg:flex-col lg:border-r lg:border-rule lg:bg-raised">
         <header className="flex flex-wrap items-baseline justify-between gap-x-4 border-b border-rule pt-[max(0.75rem,env(safe-area-inset-top))] pr-[max(1rem,env(safe-area-inset-right))] pb-3 pl-[max(1rem,env(safe-area-inset-left))] lg:flex-col lg:flex-nowrap lg:items-start lg:gap-1 lg:border-0 lg:px-6 lg:pt-8 lg:pb-4">
-          <p className="shrink-0 font-display text-xl font-semibold">Gamo Cafe</p>
+          <p className="shrink-0 font-bold">Gamo Cafe</p>
           <p className="max-w-full text-right wrap-break-word text-ink-soft lg:text-left">
             {user.name} · {roleLabel[user.role]}
           </p>

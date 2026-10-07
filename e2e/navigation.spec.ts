@@ -56,10 +56,6 @@ test("an Admin walks Vender, Día, Inventario and Más, and every screen Más ho
     "Productos",
     "Usuarios",
   ]);
-  await expect(more.getByRole("link", { name: "Cuentas", exact: true })).toHaveAccessibleDescription(
-    "Todas las cuentas, por fecha y estado.",
-  );
-  await expect(more).toContainText("Entraste como Ana.");
   await expect(more).toContainText("Administrador");
 
   for (const name of await more.getByRole("link").allTextContents()) {
@@ -94,7 +90,6 @@ test("a Worker walks Vender, Cuentas, Mi día and Más, and is offered nothing o
   await goTo(page, "Más");
   const more = page.getByRole("main");
   await expect(more.getByRole("link")).toHaveText(["Clientes"]);
-  await expect(more).toContainText("Entraste como Beto.");
   await expect(more).toContainText("Empleado");
   await expect(more.getByRole("button", { name: "Salir" })).toBeVisible();
   for (const name of ["Día", "Inventario", "Historial", "Productos", "Usuarios", "Por cobrar", "Diferencias"]) {
@@ -201,7 +196,7 @@ test("a path the app does not have, a record that is not there and a refused scr
   // An Admin's screen: refused, with the Worker's own navigation around it.
   expect((await page.goto("/inventario"))?.status()).toBe(403);
   await expect(heading(page, "No tienes acceso a esta página")).toBeVisible();
-  await expect(page.getByRole("main")).toContainText("pídele a un administrador");
+  await expect(page.getByRole("main")).toContainText("pídele acceso a un administrador");
   await expect(labels(page)).toHaveText(["Vender", "Cuentas", "Mi día", "Más"]);
   expect(await nothingSideways(page)).toBe(true);
   await page.getByRole("main").getByRole("link", { name: "Ir a Vender" }).click();

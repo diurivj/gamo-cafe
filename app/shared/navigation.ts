@@ -17,11 +17,10 @@ export interface Destination {
   readonly holds?: ReadonlyArray<string>;
 }
 
-/** A link on Más, with a few words about what is behind it. */
+/** A link on Más. */
 export interface MoreLink {
   readonly label: string;
   readonly to: string;
-  readonly about: string;
 }
 
 /** The links of Más that belong to one task. */

@@ -21,6 +21,7 @@
 ## Comments
 
 - 2026-10-06: Implemented. Review (standards and spec axes) left three things open, recorded under Answer.
+- 2026-10-06: The first look (serif headings on cream, a teal accent with tinted boxes, a sentence under every link) was rejected as generic. Replaced by "plain and quiet": the phone's own font, near-white, near-black text and buttons, hairline dividers, no accent color, labels without helper sentences.
 
 ## Answer
 
@@ -34,6 +35,6 @@ Results, 2026-10-06: `npm run verify` — 64 files, 630 tests passed. `npm run t
 
 Left open:
 
-- The bar's labels are 14px, not 18px: four 18px words do not fit side by side at 320px ("Inventario"). They are semibold, 7:1, and beside a drawing.
+- The bar's labels are 14px, not 18px: four 18px words do not fit side by side at 320px ("Inventario"). They are semibold, high contrast, and beside a drawing.
 - Paste is covered only by a synthetic event that shows nothing cancels it; the field is a plain text input with no handler.
 - The automated accessibility scan and the manual keyboard, screen-reader, real-device and safe-area passes are ticket 12's.

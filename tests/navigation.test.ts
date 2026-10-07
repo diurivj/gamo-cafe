@@ -152,7 +152,7 @@ describe("Entrar", () => {
     const html = await (await appFetch("/entrar")).text();
 
     expect(html).toMatch(/<label[^>]*for="code"[^>]*>Código de acceso<\/label>/);
-    expect(textOf(html)).toContain("Pídeselo a un administrador");
+    expect(textOf(html)).toContain("Pídeselo a un administrador. Sirve una sola vez y dura 10 minutos.");
     expect(html, "a placeholder is not a label").not.toContain("placeholder=");
     expect(textOf(html)).not.toContain("Tu sesión terminó");
   });
