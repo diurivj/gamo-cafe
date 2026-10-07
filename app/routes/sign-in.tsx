@@ -4,7 +4,10 @@ import { data, Form, redirect } from "react-router";
 import { run } from "~/backend/run.server";
 import { useSignInCode } from "~/backend/sign-in";
 import { Notice } from "~/components/notice";
-import { fieldLabel, hint, pageTitle, primaryButton, textField } from "~/components/styles";
+import { hint, pageTitle } from "~/components/styles";
+import { buttonClasses } from "~/components/ui/button";
+import { Input } from "~/components/ui/input";
+import { Label } from "~/components/ui/label";
 import { SubmitButton } from "~/components/submit-button";
 import { clearedSessionCookie, HOME_PATH, optionalUser, sessionCookie, sessionToken } from "~/session.server";
 
@@ -55,7 +58,7 @@ export default function SignIn({ loaderData, actionData }: Route.ComponentProps)
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-5 py-10">
-      <p className="text-xl font-black">Gamo Cafe</p>
+      <p className="font-heading text-xl font-semibold">Gamo Cafe</p>
       <h1 className={`mt-1 ${pageTitle}`}>Entrar</h1>
 
       {loaderData.sessionEnded ? (
@@ -65,13 +68,11 @@ export default function SignIn({ loaderData, actionData }: Route.ComponentProps)
       ) : null}
 
       <Form method="post" className="mt-8 flex flex-col gap-3">
-        <label htmlFor="code" className={fieldLabel}>
-          Código de acceso
-        </label>
+        <Label htmlFor="code">Código de acceso</Label>
         <p id="code-help" className={hint}>
           Pídeselo a un administrador. Sirve una sola vez y dura 10 minutos.
         </p>
-        <input
+        <Input
           ref={field}
           id="code"
           name="code"
@@ -85,14 +86,14 @@ export default function SignIn({ loaderData, actionData }: Route.ComponentProps)
           enterKeyHint="go"
           aria-describedby={actionData?.error ? "code-help code-error" : "code-help"}
           aria-invalid={actionData?.error ? true : undefined}
-          className={`${textField} text-center font-mono text-2xl tracking-widest uppercase`}
+          className="h-16 text-center font-mono text-2xl tracking-widest uppercase"
         />
         {actionData?.error ? (
           <Notice tone="error" id="code-error">
             {actionData.error}
           </Notice>
         ) : null}
-        <SubmitButton pendingLabel="Entrando…" className={`mt-2 ${primaryButton}`}>
+        <SubmitButton pendingLabel="Entrando…" className={buttonClasses({ size: "touch", className: "mt-2" })}>
           Entrar
         </SubmitButton>
       </Form>

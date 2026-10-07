@@ -73,13 +73,13 @@ During implementation, update the README and tests that prescribe the old intera
 - Preserve entered information through validation failures and ordinary backtracking.
 - Keep administrative screens as readable and approachable as selling screens.
 
-### 3.2 Neo-brutalist, with large cards
+### 3.2 shadcn/ui
 
-*Revised 2026-10-06 after prototyping eight styles (branch `prototype/ui-styles`, variant G); it replaces the earlier “warm, restrained” direction.*
+*Revised 2026-10-06, for the third time: after a hand-made warm look, a plain one and a neo-brutalist one (prototyped on branch `prototype/ui-styles`) were each rejected, the app uses shadcn/ui and the components it provides.*
 
-Use an off-white page, white cards with a thick black outline and a hard offset shadow, heavy titles, black text everywhere, one pink for the primary action and a few pale tints (yellow, mint, lilac, peach) to tell the cards of the home screen apart. A card or button that can be tapped goes down into its shadow; other motion is small and brief (a quantity or a total that changes). Use few words: a label says what a thing is, and a sentence is added only for a consequence the User could not guess.
+Use shadcn/ui in its Maia preset: neutral greys, soft rounded cards and controls, a dark primary button. Build screens from its components rather than styling by hand, and take colors from its variables. Where the preset is smaller or fainter than §8 allows, change the component, not the requirement: actions and fields are at least 48px tall with about 18px text, text is at least 4.5:1 and a control's edge at least 3:1. Use few words: a label says what a thing is, and a sentence is added only for a consequence the User could not guess.
 
-Avoid decorative gradients, faint text, soft shadow-only (neumorphic) surfaces, serif display type, and coffee-themed decoration without a purpose. Do not trade contrast or clarity for style: text stays black on every fill, and every control keeps its outline.
+Avoid a second visual language beside the components: no hand-made buttons, fields or cards, and no raw colors.
 
 Exact accent hue, font selection, spacing tokens and corner radii are implementation discretion within these constraints, not unresolved product decisions. Prefer a lightweight font strategy with legible fallbacks; text and controls must not wait for a decorative asset.
 
@@ -98,7 +98,7 @@ Exact accent hue, font selection, spacing tokens and corner radii are implementa
 
 *Revised 2026-10-06: a home screen, Inicio, is the first destination and where a User lands.*
 
-Replace the wrapping header link collection with four labeled destinations in a bar that floats over the bottom of the screen:
+Replace the wrapping header link collection with four labeled destinations in a bar at the bottom of the screen:
 
 | Role | Destinations, in order | Initial destination |
 | --- | --- | --- |
@@ -107,7 +107,6 @@ Replace the wrapping header link collection with four labeled destinations in a 
 
 - **Inicio** is a bento of large cards. Each is a figure worth knowing and the way into its screen; the first and largest starts a new sale. An Admin's cards: Nueva venta, Cobrado hoy (with Efectivo and Transferencia), Cuentas abiertas (how many, and what they owe), Inventario (how many Items to restock), Clientes, Mi día. A Worker's: Nueva venta, their own Cobrado for today, Cuentas abiertas, Clientes. A Worker's cards never carry the Day of everyone or Stock.
 - Vender keeps its address (`/`); Inicio is `/inicio`.
-- The bar is translucent, but opaque enough that its labels stay readable over whatever scrolls under it.
 - Icons supplement persistent text labels. The current destination is visually and programmatically identified.
 - Worker's **Cuentas** opens **Cuentas abiertas**, not the Admin-only all-Bills screen.
 - **Más** is a readable destination with grouped, explicitly labeled links, not an icon-only overflow menu.

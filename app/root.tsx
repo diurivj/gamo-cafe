@@ -19,7 +19,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-        <meta name="theme-color" content="#f4f1ea" />
+        <meta name="theme-color" content="#ffffff" />
         <meta name="robots" content="noindex" />
         <link rel="manifest" href="/manifest.webmanifest" />
         <link rel="icon" href="/icon.svg" type="image/svg+xml" />
@@ -27,7 +27,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Meta />
         <Links />
       </head>
-      <body className="min-h-dvh bg-paper text-lg text-ink antialiased">
+      <body className="min-h-dvh text-lg antialiased">
         {children}
         <ScrollRestoration />
         <Scripts />

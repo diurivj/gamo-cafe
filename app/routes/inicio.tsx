@@ -7,7 +7,8 @@ import { homeSummary } from "~/backend/home";
 import { run } from "~/backend/run.server";
 import { today } from "~/backend/time";
 import { ChevronDrawing, NavigationDrawing } from "~/components/icons";
-import { hint, outlined, pageTitle, press } from "~/components/styles";
+import { hint, pageTitle } from "~/components/styles";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { requireUser } from "~/session.server";
 import { formatDay } from "~/shared/day";
 import { formatMoney } from "~/shared/money";
@@ -44,30 +45,31 @@ function Tile({
   to,
   label,
   icon,
-  tint = "bg-raised",
   className = "",
   children,
 }: {
   readonly to: string;
   readonly label: string;
   readonly icon: NavigationIcon;
-  /** The card's fill: one of the tints of `app/app.css`. White without one. */
-  readonly tint?: string;
   readonly className?: string;
   readonly children?: ReactNode;
 }) {
   return (
-    <Link to={to} className={`${outlined} ${press} ${tint} flex flex-col justify-between gap-3 p-4 ${className}`}>
-      <span className="flex items-center justify-between gap-2">
-        <span className="leading-tight font-bold">{label}</span>
-        <NavigationDrawing icon={icon} />
-      </span>
-      {children}
+    <Link to={to} className={`rounded-2xl ${className}`}>
+      <Card size="sm" className="h-full justify-between transition-colors hover:bg-muted/60 active:bg-muted">
+        <CardHeader>
+          <CardTitle>{label}</CardTitle>
+          <CardAction>
+            <NavigationDrawing icon={icon} className="size-6 text-muted-foreground" />
+          </CardAction>
+        </CardHeader>
+        {children ? <CardContent>{children}</CardContent> : null}
+      </Card>
     </Link>
   );
 }
 
-const figure = "block text-3xl leading-none font-black tracking-tight tabular-nums";
+const figure = "block font-heading text-3xl leading-none font-semibold tracking-tight tabular-nums";
 
 export default function Inicio({ loaderData }: Route.ComponentProps) {
   const { name, day, summary } = loaderData;
@@ -82,56 +84,57 @@ export default function Inicio({ loaderData }: Route.ComponentProps) {
 
       {/* Two columns where two fit: one on a narrow phone, or with large text. */}
       <div className="mt-5 grid gap-4 min-[22rem]:grid-cols-2">
-        <Link to="/" className={`${outlined} ${press} flex min-h-32 min-[22rem]:col-span-2 flex-col justify-between gap-4 bg-action p-5`}>
-          <NavigationDrawing icon="bag" className="size-9" />
-          <span className="flex items-end justify-between gap-3">
-            <span>
-              <span className="block text-2xl leading-tight font-black tracking-tight">Nueva venta</span>
-              <span>Hoy llevas vendido {formatMoney(mine.sold)}</span>
-            </span>
-            <ChevronDrawing className="size-8" />
-          </span>
+        <Link to="/" className="rounded-2xl min-[22rem]:col-span-2">
+          <Card className="min-h-32 justify-between bg-primary text-primary-foreground transition-colors hover:bg-primary/90">
+            <CardHeader>
+              <NavigationDrawing icon="bag" className="size-8" />
+            </CardHeader>
+            <CardContent className="flex items-end justify-between gap-3">
+              <span>
+                <span className="block font-heading text-2xl leading-tight font-semibold tracking-tight">Nueva venta</span>
+                <span className="text-primary-foreground/90">Hoy llevas vendido {formatMoney(mine.sold)}</span>
+              </span>
+              <ChevronDrawing className="size-7" />
+            </CardContent>
+          </Card>
         </Link>
 
         <Tile
           to={everyone ? "/dia" : "/mi-dia"}
           label={everyone ? "Cobrado hoy" : "Cobraste hoy"}
           icon={everyone ? "calendar" : "person"}
-          tint="bg-sun"
           className="min-[22rem]:row-span-2"
         >
-          <span>
-            <span className={figure}>{formatMoney(collected.collected)}</span>
-            <span className="mt-3 block">
-              Efectivo <b className="tabular-nums">{formatMoney(collected.cash)}</b>
-            </span>
-            <span className="block">
-              Transferencia <b className="tabular-nums">{formatMoney(collected.transfer)}</b>
-            </span>
+          <span className={figure}>{formatMoney(collected.collected)}</span>
+          <span className="mt-3 block text-muted-foreground">
+            Efectivo <b className="font-medium text-foreground tabular-nums">{formatMoney(collected.cash)}</b>
+          </span>
+          <span className="block text-muted-foreground">
+            Transferencia <b className="font-medium text-foreground tabular-nums">{formatMoney(collected.transfer)}</b>
           </span>
         </Tile>
 
-        <Tile to="/cuentas-abiertas" label="Cuentas abiertas" icon="receipt" tint="bg-mint">
-          <span>
-            <span className={figure}>{openBills.count}</span>
-            {openBills.count > 0 ? <span className="mt-1 block">Deben {formatMoney(openBills.owed)}</span> : null}
-          </span>
+        <Tile to="/cuentas-abiertas" label="Cuentas abiertas" icon="receipt">
+          <span className={figure}>{openBills.count}</span>
+          {openBills.count > 0 ? (
+            <span className="mt-1 block text-muted-foreground">Deben {formatMoney(openBills.owed)}</span>
+          ) : null}
         </Tile>
 
         {toRestock === null ? (
-          <Tile to="/clientes" label="Clientes" icon="people" tint="bg-peach" />
+          <Tile to="/clientes" label="Clientes" icon="people" />
         ) : (
           <>
-            <Tile to="/inventario" label="Inventario" icon="box" tint="bg-lilac">
-              <span>
-                <span className={figure}>{toRestock}</span>
-                <span className="mt-1 block">{toRestock === 1 ? "producto por reponer" : "productos por reponer"}</span>
+            <Tile to="/inventario" label="Inventario" icon="box">
+              <span className={figure}>{toRestock}</span>
+              <span className="mt-1 block text-muted-foreground">
+                {toRestock === 1 ? "producto por reponer" : "productos por reponer"}
               </span>
             </Tile>
-            <Tile to="/clientes" label="Clientes" icon="people" tint="bg-peach" />
+            <Tile to="/clientes" label="Clientes" icon="people" />
             <Tile to="/mi-dia" label="Mi día" icon="person">
-              <span>
-                Cobraste <b className="tabular-nums">{formatMoney(mine.collected)}</b>
+              <span className="text-muted-foreground">
+                Cobraste <b className="font-medium text-foreground tabular-nums">{formatMoney(mine.collected)}</b>
               </span>
             </Tile>
           </>

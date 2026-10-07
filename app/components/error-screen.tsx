@@ -1,6 +1,8 @@
 import { isRouteErrorResponse, useLocation } from "react-router";
 
-import { hint, pageTitle, primaryButton, secondaryButton } from "./styles";
+import { buttonClasses } from "~/components/ui/button";
+
+import { hint, pageTitle } from "./styles";
 
 /**
  * What the app shows in place of a screen it cannot show (UI redesign §7):
@@ -39,16 +41,16 @@ export function ErrorScreen({ error }: { readonly error: unknown }) {
       <p className={hint}>{details}</p>
       <div className="mt-2 flex flex-col gap-3 sm:flex-row">
         {retry ? (
-          <a href={pathname + search} className={primaryButton}>
+          <a href={pathname + search} className={buttonClasses({ size: "touch" })}>
             Volver a intentar
           </a>
         ) : null}
-        <a href="/" className={retry ? secondaryButton : primaryButton}>
+        <a href="/" className={buttonClasses({ size: "touch", variant: retry ? "outline" : "default" })}>
           Ir a Vender
         </a>
       </div>
       {stack ? (
-        <pre className="mt-4 w-full overflow-x-auto rounded-lg bg-raised p-4 text-left text-xs">
+        <pre className="mt-4 w-full overflow-x-auto rounded-lg bg-muted p-4 text-left text-xs">
           <code>{stack}</code>
         </pre>
       ) : null}

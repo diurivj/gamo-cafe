@@ -12,6 +12,11 @@
     // A `switch` over typed errors that misses a case fails to compile.
     "noImplicitReturns": true,
     "noEmit": true,
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    // Also in tsconfig.cloudflare.json, which is what compiles the app; here
+    // because the shadcn CLI reads the alias from this file.
+    "paths": {
+      "~/*": ["./app/*"]
+    }
   }
 }

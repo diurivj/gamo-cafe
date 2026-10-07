@@ -1,7 +1,9 @@
 import { Form, Link } from "react-router";
 
 import { ChevronDrawing } from "~/components/icons";
-import { card, hint, pageTitle, press, secondaryButton, sectionTitle } from "~/components/styles";
+import { hint, pageTitle, sectionTitle } from "~/components/styles";
+import { buttonClasses } from "~/components/ui/button";
+import { Card } from "~/components/ui/card";
 import { SubmitButton } from "~/components/submit-button";
 import { moreGroupsFor } from "~/navigation.server";
 import { requireUser } from "~/session.server";
@@ -32,16 +34,21 @@ export default function Mas({ loaderData }: Route.ComponentProps) {
           <h2 id={`grupo-${index}`} className={sectionTitle}>
             {group.title}
           </h2>
-          <ul className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(8rem,1fr))] gap-4">
-            {group.links.map(({ label, to }) => (
-              <li key={to}>
-                <Link to={to} className={`${card} ${press} flex h-full min-h-16 items-center justify-between gap-2 px-4 py-3 leading-tight font-bold`}>
-                  <span className="min-w-0 [overflow-wrap:anywhere]">{label}</span>
-                  <ChevronDrawing className="size-5" />
-                </Link>
-              </li>
-            ))}
-          </ul>
+          <Card className="mt-3 py-0">
+            <ul className="divide-y">
+              {group.links.map(({ label, to }) => (
+                <li key={to}>
+                  <Link
+                    to={to}
+                    className="flex min-h-14 items-center justify-between gap-3 px-5 py-3 font-medium -outline-offset-2 hover:bg-muted/60"
+                  >
+                    {label}
+                    <ChevronDrawing className="size-5 text-muted-foreground" />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </Card>
         </section>
       ))}
 
@@ -49,11 +56,11 @@ export default function Mas({ loaderData }: Route.ComponentProps) {
         <h2 id="sesion" className={sectionTitle}>
           Tu sesión
         </h2>
-        <p className="mt-2 font-bold">{user.name}</p>
+        <p className="mt-2 font-medium">{user.name}</p>
         <p className={hint}>{roleLabel[user.role]}</p>
         <p className={`mt-4 ${hint}`}>Para volver a entrar necesitarás un código nuevo.</p>
         <Form method="post" action="/salir" className="mt-3">
-          <SubmitButton pendingLabel="Saliendo…" className={`w-full sm:w-auto ${secondaryButton}`}>
+          <SubmitButton pendingLabel="Saliendo…" className={buttonClasses({ size: "touch", variant: "outline", className: "w-full sm:w-auto" })}>
             Salir
           </SubmitButton>
         </Form>

@@ -2,7 +2,7 @@
 
 Sales and stock tracking for one cafeteria, in Spanish, on phones. The domain language is in [`CONTEXT.md`](CONTEXT.md), the decisions in [`docs/adr/`](docs/adr/).
 
-React Router 8 (framework mode) on Cloudflare Workers, D1 with hand-written SQL, Effect 4 on the backend, Tailwind 4. Two environments: local and production.
+React Router 8 (framework mode) on Cloudflare Workers, D1 with hand-written SQL, Effect 4 on the backend, Tailwind 4 with shadcn/ui components. Two environments: local and production.
 
 ## Scripts
 
@@ -80,7 +80,8 @@ app/
     item-fields.tsx  ItemFields, the fields of an Item's form, new or existing
     count-line.tsx  CountLineItem, one line of a Count as Conteo and Diferencias show it
     paged-list.tsx  usePagedList and LoadMore: a list's pages and its Cargar más
-    styles.ts      the shared patterns: headings, fields, buttons and links, over the tokens of app.css
+    ui/            shadcn/ui components, copied in by its CLI and adjusted here (see "The look and the navigation")
+    styles.ts      a screen's headings and supporting text, which shadcn has no component for
     notice.tsx     Notice, how the app says what happened: recorded, refused, or worth knowing
     icons.tsx      the app's few line drawings
     error-screen.tsx  ErrorScreen and ErrorPage, what stands in for a screen that cannot be shown
@@ -89,6 +90,7 @@ app/
   shell.server.ts  shellMiddleware: reloads the page of a phone whose shell shows a User as they no longer are
   navigation.server.ts  what each role's navigation holds: its four destinations and the groups of its Más
   catalog-forms.server.ts  the shared Admin gate (`requireAdminUser`, `refuseRead`) and the Productos forms' parsing and error messages
+  lib/utils.ts   cn, shadcn's class-name merge
   routes/      Route modules; resources/ holds routes without UI
     shell.tsx      the signed-in layout: who is signed in and the role's four destinations
     screen.tsx     the layout between the shell and its screens, where a screen's failure stops
@@ -207,10 +209,12 @@ export async function action({ context, params, request }: Route.ActionArgs) {
 
 The redesign's rules are in `.scratch/ui-redesign/spec.md` (§3, §4 and §8). Entrar, the shell, Más and the error pages follow them; the other screens are moved over one ticket at a time, and keep working meanwhile.
 
-- **Tokens** are in `app/app.css`. The look is neo-brutalist: the page `paper` (off-white), `raised` (white), the text `ink` (black) and `ink-soft`, the pink `action` for the one action of a step, the tints `sun`, `mint`, `lilac` and `peach` for cards, `danger` for what was refused, and `shadow-hard`, the offset shadow a card stands on. Text is black on every fill. The font is the phone's own; titles are `font-black`. Body text is 18px, set on `<body>`. Words are few: a label says what a thing is, and a sentence is added only for a consequence the User could not guess.
-- **Patterns** are class names in `~/components/styles` (`card`, `outlined`, `press`, `pageTitle`, `sectionTitle`, `hint`, `fieldLabel`, `textField`, `primaryButton`, `secondaryButton`, `textLink`) and `Notice` from `~/components/notice`. A screen composes these. A raised surface is `card` (white) or `outlined` plus a tint; one that can be tapped adds `press`, which sends it down into its shadow. Two fills on one element do not mix, which is why a tinted card is `outlined` and not `card`. A field has a visible `<label>` and no placeholder standing in for one; one `primaryButton` per step; anything tapped by itself is at least 48px in both directions; a `Notice` is a drawing and words with no box, tells its tone by the drawing as well as the color, and never disappears by itself.
-- **Focus** has one mark, in `app.css`, for every control. The shell moves the focus to `<main>` when the path changes, unless the new screen already took it.
-- **Navigation**: `app/navigation.server.ts` holds each role's four destinations and the groups of its Más. Inicio is the first destination and Más the last. Loaders send only the role's own, so a Worker's phone gets no Admin label or path; `tests/navigation.test.ts` and `tests/worker-visibility.test.ts` hold that. A destination `holds` the paths under it that are not its own, which is how the shell marks where the User is (`destinationAt`); a screen no destination holds is under Más. The bar floats over the bottom of a phone and stands at the side from `lg` up; `<main>` leaves room for it (`--bar-room`) and `scroll-padding-bottom` keeps a focused control out from under it. On a phone there is no header: who is signed in is said on Inicio and Más, and to a screen reader on every screen.
+- **The look is shadcn/ui's**, in its Maia preset over Base UI (`components.json`). Its components are copied into `app/components/ui/` and are this repo's code from then on. Add one with `npx shadcn@latest add <name>`, and build screens from them — `Card`, `Button`, `Input`, `Label`, `Alert`, `Badge` are there — instead of styling by hand. The colors are the variables the CLI wrote in `app/app.css` (`background`, `foreground`, `primary`, `muted`, `border`, …); use those names (`bg-muted`, `text-muted-foreground`), never a raw color. The font is Figtree, bundled by `@fontsource-variable/figtree`.
+- **What differs from the preset**, because the spec's §8 asks for it (18px text, 48px targets, contrast): `Button` has a `touch` size (56px tall, 18px text) for every action; `Input` is 56px tall with 18px text and a white fill; `Label`, `Card` and `Alert` text is 18px; the outline `Button` is white with the field's edge; and `--muted-foreground`, `--input` and `--ring` are darker. Each change is commented where it is made. A component added later starts at the preset's sizes: bring it to these.
+- **A form's submit control is still `SubmitButton`**, with a `Button`'s classes: `className={buttonClasses({ size: "touch" })}` from `~/components/ui/button`. A link drawn as a button takes the same. `Notice` from `~/components/notice` is an `Alert` with the role its tone needs. `~/components/styles` holds the three things shadcn has no component for: `pageTitle`, `sectionTitle` and `hint`.
+- A field has a visible `Label` and no placeholder standing in for one; one default (dark) `Button` per step, the rest `outline`; a `Notice` tells its tone by its drawing as well as its color and never disappears by itself. Words are few: a label says what a thing is, and a sentence is added only for a consequence the User could not guess.
+- **Focus**: a shadcn component draws its own ring; `app.css` gives everything else one outline. The shell moves the focus to `<main>` when the path changes, unless the new screen already took it.
+- **Navigation**: `app/navigation.server.ts` holds each role's four destinations and the groups of its Más. Inicio is the first destination and Más the last. Loaders send only the role's own, so a Worker's phone gets no Admin label or path; `tests/navigation.test.ts` and `tests/worker-visibility.test.ts` hold that. A destination `holds` the paths under it that are not its own, which is how the shell marks where the User is (`destinationAt`); a screen no destination holds is under Más. The bar is fixed at the bottom of a phone and stands at the side from `lg` up; `<main>` leaves room for it (`--bar-room`) and `scroll-padding-bottom` keeps a focused control out from under it. On a phone there is no header: who is signed in is said on Inicio and Más, and to a screen reader on every screen.
 - **Inicio** (`app/routes/inicio.tsx`, `/inicio`) is where a User lands after Entrar: cards that are a figure and the way into its screen. `homeSummary` in `~/backend/home.ts` reads them — the User's own Day and the Open Bills for everyone, the Day of everyone and what to restock only for an Admin. Vender stays at `/`.
 - **Salir** is on Más, away from any task's action.
 - **A screen that cannot be shown** — not there, not allowed, failed — is answered by the boundary of `app/routes/screen.tsx`, inside the navigation, with `ErrorScreen`. The root boundary answers what has no shell: a path the app does not have. A failure that may have interrupted a form says the form may have been recorded, never that it was not. A request without a live session is sent to Entrar, which says the session ended when the phone still carries a session's cookie.
