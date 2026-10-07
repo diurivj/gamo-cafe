@@ -7,6 +7,7 @@ export default [
   route("salir", "routes/resources/sign-out.ts"),
   route("healthz", "routes/resources/healthz.ts"),
   route("clientes/selector", "routes/resources/customer-picker.ts"),
+  route("vender/registrar", "routes/resources/record-sale.ts"),
 
   // The signed-in shell: screens go inside it.
   layout("routes/shell.tsx", [

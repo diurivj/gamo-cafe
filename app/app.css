@@ -18,6 +18,8 @@
 :root {
   /* The room the bar at the bottom of a phone takes; none where it stands at the side (`lg`). */
   --bar-room: calc(6rem + env(safe-area-inset-bottom));
+  /* Where what sticks to the bottom of a screen rests: just above that bar. */
+  --above-bar: calc(4.75rem + env(safe-area-inset-bottom));
   --background:
     oklch(1 0 0);
   --foreground:
@@ -87,6 +89,7 @@
 @media (width >= 64rem) {
   :root {
     --bar-room: 0rem;
+    --above-bar: 1rem;
   }
 }
 
@@ -96,6 +99,11 @@ html {
   touch-action: manipulation;
   /* What takes the keyboard's focus is never left under the bar at the bottom. */
   scroll-padding-bottom: var(--bar-room);
+}
+
+/* Vender's total sticks above the bar: what takes the focus stays clear of both. */
+html:has([data-sticky-total]) {
+  scroll-padding-bottom: calc(var(--bar-room) + 5.5rem);
 }
 
 /*

@@ -7,8 +7,7 @@ const field = "w-full rounded-xl border border-stone-300 bg-white px-4 py-3 text
 
 /**
  * The fields of taking a Payment (spec §5.5, §6.1): the method, an amount that
- * defaults to the selection's total (**Cobrar** on Vender) or to what the Bill
- * still owes (Cuenta) and may be less, and, for cash, the amount handed over
+ * defaults to what the Bill still owes (Cuenta) or the Customer owes (Abonar) and may be less, and, for cash, the amount handed over
  * with the change it makes.
  *
  * The amount handed over is not stored, so its field carries no name and the

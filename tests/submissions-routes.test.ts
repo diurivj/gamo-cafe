@@ -10,6 +10,7 @@ import { as, landing, signedIn, type SignedIn } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { savedCustomer } from "./support/customers";
 import { runTest } from "./support/effect";
+import { recordSale } from "./support/sales";
 
 // One submission per rendered form, through the Worker (spec §3.4): each page
 // renders its form with a key, and the same form sent twice — a double tap, a
@@ -33,43 +34,37 @@ async function answer(who: SignedIn, response: Response) {
   return { location, message: /role="status"[^>]*>([^<]*)</.exec(html)?.[1], html };
 }
 
-const billIdIn = (html: string) => /data-bill-id="([^"]+)"/.exec(html)![1]!;
 
 describe("a used key with changed content", () => {
-  it("records the changed sale a restored Vender document sends, not the earlier answer", async () => {
+  it("records the changed sale sent under a used key, not the earlier answer", async () => {
     const beto = await signedIn("worker", "Beto");
     const ana = await signedIn("admin", "Ana");
     const cafe = await runTest(seedItem({ price: 2500, startingStock: 10, by: ana.user }));
-    const key = keyIn(await (await beto.fetch("/")).text());
     const sale = {
       intent: "dejar-abierta",
       selection: JSON.stringify([{ itemId: cafe.id, quantity: 2 }]),
       note: "primera",
-      submissionKey: key,
+      submissionKey: "llave-usada",
     };
 
-    const first = await answer(beto, await post(beto, "/?index", sale));
-    // The browser's Back shows the recorded document again: it still carries
-    // its used key, and what it sends now is another selection.
-    const changed = await answer(
-      beto,
-      await post(beto, "/?index", {
-        ...sale,
-        selection: JSON.stringify([{ itemId: cafe.id, quantity: 3 }]),
-        note: "segunda",
-      }),
-    );
+    const first = await recordSale(beto, sale);
+    // Vender makes a key per sale, so only a hand-made request does this: the
+    // key is used, and what it carries now is another selection.
+    const changed = await recordSale(beto, {
+      ...sale,
+      selection: JSON.stringify([{ itemId: cafe.id, quantity: 3 }]),
+      note: "segunda",
+    });
 
-    expect(first.message).toBe("Se dejó abierta una cuenta por $50.00.");
-    expect(changed.message).toBe("Se dejó abierta una cuenta por $75.00.");
-    expect(billIdIn(changed.html)).not.toBe(billIdIn(first.html));
+    expect(first.sale).toMatchObject({ total: 5000 });
+    expect(changed.sale).toMatchObject({ total: 7500 });
+    expect(changed.sale!.billId).not.toBe(first.sale!.billId);
     expect(await runTest(stockOf(cafe.id).pipe(as(ana.user)))).toBe(5);
     expect((await runTest(listOpenBills().pipe(as(ana.user)))).bills).toHaveLength(2);
 
-    // The unchanged form sent twice is still one sale, answered alike.
-    const repeat = await answer(beto, await post(beto, "/?index", sale));
-    expect(repeat.message).toBe(first.message);
-    expect(billIdIn(repeat.html)).toBe(billIdIn(first.html));
+    // The unchanged sale sent twice is still one sale, answered alike.
+    const repeat = await recordSale(beto, sale);
+    expect(repeat.sale).toEqual(first.sale);
     expect(await runTest(stockOf(cafe.id).pipe(as(ana.user)))).toBe(5);
   });
 
@@ -184,37 +179,33 @@ describe("a used key with changed content", () => {
 });
 
 describe("Vender", () => {
-  it("records a Cobrar sent twice once, answers both alike, and gives the next form a new key", async () => {
+  it("records a Cobrar sent twice once and answers both alike: a retry is safe", async () => {
     const beto = await signedIn("worker", "Beto");
     const ana = await signedIn("admin", "Ana");
     const cafe = await runTest(seedItem({ price: 2500, startingStock: 10, by: ana.user }));
-    const key = keyIn(await (await beto.fetch("/")).text());
     const sale = {
       intent: "cobrar",
       selection: JSON.stringify([{ itemId: cafe.id, quantity: 2 }]),
       method: "cash",
-      amount: "",
-      submissionKey: key,
+      amount: "$50.00",
+      submissionKey: "venta-repetida",
     };
 
-    const first = await answer(beto, await post(beto, "/?index", sale));
-    const second = await answer(beto, await post(beto, "/?index", sale));
+    const first = await recordSale(beto, sale);
+    const second = await recordSale(beto, sale);
 
-    expect(first.location).toBe("/");
-    expect(first.message).toBe("Cuenta pagada: $50.00.");
-    expect([second.location, second.message]).toEqual([first.location, first.message]);
-    expect(billIdIn(second.html)).toBe(billIdIn(first.html));
-    const bill = await runTest(getBill(billIdIn(first.html)).pipe(as(ana.user)));
+    expect(first.response.status).toBe(200);
+    expect(first.sale).toMatchObject({ total: 5000, owed: 0, state: "paid" });
+    expect([second.response.status, second.sale]).toEqual([200, first.sale]);
+    const bill = await runTest(getBill(first.sale!.billId).pipe(as(ana.user)));
     expect(bill).toMatchObject({ total: 5000, paid: 5000, state: "paid" });
     expect(bill.lines).toHaveLength(1);
     expect(bill.payments).toHaveLength(1);
     expect(await runTest(stockOf(cafe.id).pipe(as(ana.user)))).toBe(8);
 
-    // The page the sale lands on renders a new form: the same Items sell again.
-    const nextKey = keyIn(first.html);
-    expect(nextKey).not.toBe(key);
-    const next = await answer(beto, await post(beto, "/?index", { ...sale, submissionKey: nextKey }));
-    expect(billIdIn(next.html)).not.toBe(billIdIn(first.html));
+    // The next sale carries a key of its own: the same Items sell again.
+    const next = await recordSale(beto, { ...sale, submissionKey: "venta-siguiente" });
+    expect(next.sale!.billId).not.toBe(first.sale!.billId);
     expect(await runTest(stockOf(cafe.id).pipe(as(ana.user)))).toBe(6);
   });
 
@@ -227,14 +218,13 @@ describe("Vender", () => {
       intent: "dejar-abierta",
       selection: JSON.stringify([{ itemId: cafe.id, quantity: 3 }]),
       customerId: lupita.id,
-      submissionKey: keyIn(await (await beto.fetch("/")).text()),
+      submissionKey: "dos-toques",
     };
 
-    const responses = await Promise.all([post(beto, "/?index", sale), post(beto, "/?index", sale)]);
-    const [first, second] = await Promise.all(responses.map((response) => answer(beto, response)));
+    const [first, second] = await Promise.all([recordSale(beto, sale), recordSale(beto, sale)]);
 
-    expect(first!.message).toBe("Se dejó abierta la cuenta de Lupita de dos toques por $75.00.");
-    expect(second!.message).toBe(first!.message);
+    expect(first.sale).toMatchObject({ customerName: "Lupita de dos toques", total: 7500 });
+    expect(second.sale).toEqual(first.sale);
     expect(await runTest(listCustomerOpenBills(lupita.id).pipe(as(ana.user)))).toMatchObject([{ total: 7500 }]);
     expect(await runTest(stockOf(cafe.id).pipe(as(ana.user)))).toBe(7);
   });

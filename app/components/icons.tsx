@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import type { CategoryDrawingName } from "~/shared/category-drawing";
 import type { NavigationIcon } from "~/shared/navigation";
 
 /**
@@ -78,6 +79,79 @@ export function ChevronDrawing({ className }: { readonly className?: string }) {
       <path d="M9 6l6 6-6 6" />
     </Drawing>
   );
+}
+
+/** Points back to the step before. */
+export function BackDrawing({ className }: { readonly className?: string }) {
+  return (
+    <Drawing className={className}>
+      <path d="M15 6l-6 6 6 6" />
+    </Drawing>
+  );
+}
+
+/** One more unit, or one less. The button that holds it says of what. */
+export function StepDrawing({ by }: { readonly by: 1 | -1 }) {
+  return <Drawing>{by === 1 ? <path d="M12 5v14M5 12h14" /> : <path d="M5 12h14" />}</Drawing>;
+}
+
+/** The mark of the choice that is on, beside its words. */
+export function CheckDrawing({ className }: { readonly className?: string }) {
+  return (
+    <Drawing className={className}>
+      <path d="M5 12.5l4.5 4.5L19 7.5" />
+    </Drawing>
+  );
+}
+
+const category: Readonly<Record<CategoryDrawingName, ReactNode>> = {
+  cup: (
+    <>
+      <path d="M5 9h11v5a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5V9z" />
+      <path d="M16 10h1.5a2.5 2.5 0 0 1 0 5H16M8 3v3M12 3v3" />
+    </>
+  ),
+  glass: (
+    <>
+      <path d="M6 4h12l-1.5 16h-9L6 4z" />
+      <path d="M6.6 10h10.8" />
+    </>
+  ),
+  bread: (
+    <>
+      <path d="M5 10.5A3.5 3.5 0 0 1 8.5 7h7a3.5 3.5 0 0 1 2 6.4V18a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-4.6A3.5 3.5 0 0 1 5 10.5z" />
+      <path d="M10 11v2M14 11v2" />
+    </>
+  ),
+  plate: (
+    <>
+      <circle cx="12" cy="12" r="8" />
+      <circle cx="12" cy="12" r="4" />
+    </>
+  ),
+  candy: (
+    <>
+      <circle cx="12" cy="12" r="4.5" />
+      <path d="M7.8 10.5L3 8v8l4.8-2.5M16.2 10.5L21 8v8l-4.8-2.5" />
+    </>
+  ),
+  snack: (
+    <>
+      <path d="M7 3h10l-1 3 2 12-1 3H7l-1-3L8 6 7 3z" />
+      <path d="M10 11h4" />
+    </>
+  ),
+  fruit: (
+    <>
+      <path d="M12 8c-3-2-7 0-7 5s3.5 8 7 6c3.5 2 7-1 7-6s-4-7-7-5z" />
+      <path d="M12 8c0-2 1-4 3-5" />
+    </>
+  ),
+};
+
+/** The drawing beside a Category's name on Vender (`categoryDrawing` chooses which). */
+export function CategoryDrawing({ name, className }: { readonly name: CategoryDrawingName; readonly className?: string }) {
+  return <Drawing className={className}>{category[name]}</Drawing>;
 }
 
 /** What a `Notice` says it is: recorded, refused, or worth knowing. */

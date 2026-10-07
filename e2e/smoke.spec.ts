@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { leaveOpen } from "./support/sell";
 
 test("a signed-out visitor loads the Spanish shell on a phone", async ({ page, request }) => {
   const errors: string[] = [];
@@ -47,9 +48,8 @@ test("an Admin's screens work on a laptop width too, with nothing scrolling side
   // A sale in a few taps, at the desk.
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Vender" })).toBeVisible();
-  await page.getByRole("button", { name: /Producto de laptop/ }).click();
-  await page.getByRole("button", { name: "Dejar abierta" }).click();
-  await expect(page.getByRole("status")).toContainText("Se dejó abierta");
+  await leaveOpen(page, { items: ["Producto de laptop"] });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
   for (const path of ["/cuentas", "/inventario", "/historial", "/usuarios", "/productos", "/por-cobrar"]) {
     await page.goto(path);

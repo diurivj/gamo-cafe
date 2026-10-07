@@ -26,6 +26,8 @@ const buttonVariants = cva(
         // Not in the preset: this app's size for anything tapped by itself,
         // 56px tall with 18px text (UI redesign §8). Use it for every action.
         touch: "min-h-14 gap-2 px-6 py-3 text-lg whitespace-normal",
+        // The same for a control that is only a drawing: 48px square.
+        "icon-touch": "size-12 text-lg [&_svg:not([class*='size-'])]:size-6",
         xs: "h-6 gap-1 px-2.5 text-xs has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2 [&_svg:not([class*='size-'])]:size-3",
         sm: "h-8 gap-1 px-3 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
         lg: "h-10 gap-1.5 px-4 has-data-[icon=inline-end]:pr-3 has-data-[icon=inline-start]:pl-3",

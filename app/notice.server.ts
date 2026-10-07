@@ -44,7 +44,6 @@ const Carried = Schema.fromJsonString(
     to: Schema.String,
     message: Schema.optional(Schema.String),
     form: Schema.optional(Schema.String),
-    billId: Schema.optional(Schema.String),
     code: Schema.optional(Schema.Struct({ name: Schema.String, code: Schema.String })),
   }),
 );
@@ -70,7 +69,7 @@ function redirectWithNoticeCookie(to: string, held: TakenNotice): Response {
  * router sent it, or a redirect carrying it in the cookie when the browser
  * posted the document (see the module comment).
  *
- *     return answerWithNotice(request, "/", { message, billId: result.id });
+ *     return answerWithNotice(request, `/clientes/${id}`, { message: "Abono de $20.00 registrado." });
  */
 export function answerWithNotice(
   request: Request,

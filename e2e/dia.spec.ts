@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { pay } from "./support/sell";
 
 // Día (spec §6.2, §5.9, §10.6): an Admin sees Sold, Collected in cash and by
 // transfer, the same per User, and Items sold with quantities and value, for a
@@ -18,12 +19,8 @@ test("an Admin sees the Day's figures, per User, and the Items sold", async ({
 
   // A walk-up sale: two waters and a sweet bread, paid in cash.
   await page.goto("/");
-  const menu = page.getByRole("region", { name: "Bebidas" });
-  await menu.getByRole("button", { name: /Agua mineral/ }).click();
-  await menu.getByRole("button", { name: /Agua mineral/ }).click();
-  await menu.getByRole("button", { name: /Pan dulce/ }).click();
-  await page.getByRole("region", { name: "Cobrar" }).getByRole("button", { name: "Cobrar" }).click();
-  await expect(page.getByRole("status")).toContainText("Cuenta pagada: $49.00.");
+  await pay(page, { items: [["Agua mineral", 2], "Pan dulce"] });
+  await expect(page.getByRole("status")).toHaveText("$49.00 en efectivo. Cuenta pagada.");
 
   await signInAs("admin", "Ana");
   await page.goto("/dia");

@@ -1,13 +1,12 @@
 import type { Page } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
+import * as sell from "./support/sell";
 
 // Cuentas abiertas and Cuenta (spec §6.1, §4.1, §4.2): every Open Bill with
 // what it owes, one Bill with its Lines and their authors, and **Agregar
 // productos** adding to any Open Bill. Both projects run a phone viewport
 // (playwright.config.ts).
-
-const menu = (page: Page, category = "Bebidas") => page.getByRole("region", { name: category });
 
 /** Builds a selection on Vender and leaves the Bill open, as §8.2 does. */
 async function leaveOpen(
@@ -21,16 +20,9 @@ async function leaveOpen(
     readonly category?: string;
   },
 ) {
-  for (const item of sale.items)
-    await menu(page, sale.category).getByRole("button", { name: new RegExp(item) }).click();
-  if (sale.customer) {
-    await page.getByLabel("Cliente", { exact: true }).pressSequentially(sale.customer.slice(0, 4));
-    await page.getByRole("list", { name: "Coincidencias" }).getByRole("button", { name: sale.customer }).click();
-  }
-  if (sale.note) await page.getByLabel("Nota (opcional)").fill(sale.note);
-  await page.getByRole("button", { name: "Dejar abierta" }).click();
+  await sell.leaveOpen(page, sale);
   // The answer for *this* sale: a previous one's message must not pass for it.
-  await expect(page.getByRole("status")).toContainText(`por ${sale.total}.`);
+  await expect(page.getByRole("status")).toContainText(`debe ${sale.total}.`);
 }
 
 test("Cuentas abiertas lists every Open Bill newest first with what it owes, and searches by Customer", async ({
@@ -116,19 +108,14 @@ test("Cuenta shows its Lines with who and when; Agregar productos adds to that B
 
   await expect(page).toHaveURL(new RegExp(`billId=${billId}`));
   await expect(page.getByRole("region", { name: "Cuenta destino" })).toContainText(
-    "Agregando productos a la cuenta de Familia Ruiz",
+    "Se agrega a la cuenta de Familia Ruiz",
   );
-  await expect(page.getByLabel("Cliente", { exact: true })).toHaveCount(0);
 
-  await menu(page).getByRole("button", { name: /Café de olla/ }).click();
-  await page.getByRole("button", { name: "Agregar a la cuenta" }).click();
-
-  await expect(page.getByRole("status")).toContainText(
-    "Se agregaron los productos a la cuenta. Total $43.50 · Debe $43.50.",
-  );
+  await sell.addToBill(page, ["Café de olla"]);
+  await expect(page.getByRole("status")).toContainText("La cuenta de Familia Ruiz debe $43.50.");
 
   // Back on Cuenta both Lines are there, by Beto.
-  await page.getByRole("link", { name: "Ver cuenta" }).click();
+  await page.getByRole("link", { name: "Volver a la cuenta" }).click();
 
   await expect(page.getByRole("heading", { name: "Cuenta", level: 1 })).toBeVisible();
   await expect(main).toContainText("1 × Agua mineral");
@@ -141,10 +128,8 @@ test("Cuenta shows its Lines with who and when; Agregar productos adds to that B
   await page.goto("/cuentas-abiertas");
   await page.getByRole("list", { name: "Cuentas abiertas" }).getByRole("link", { name: /Familia Ruiz/ }).click();
   await page.getByRole("link", { name: "Agregar productos" }).click();
-  await menu(page).getByRole("button", { name: /Agua mineral/ }).click();
-  await page.getByRole("button", { name: "Agregar a la cuenta" }).click();
-  await expect(page.getByRole("status")).toContainText("Se agregaron los productos a la cuenta.");
-  await page.getByRole("link", { name: "Ver cuenta" }).click();
+  await sell.addToBill(page, ["Agua mineral"]);
+  await page.getByRole("link", { name: "Volver a la cuenta" }).click();
 
   await expect(main).toContainText("Beto");
   await expect(main).toContainText("Ana");

@@ -1,12 +1,11 @@
 import type { Page } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
+import * as sell from "./support/sell";
 
 // Cuentas (spec §6.2) and a Customer's past Bills (§6.1): every Bill with its
 // state, filtered by Day, state or Customer, 50 per page; the Admin-only pages
 // a Worker is refused. Both projects run a phone viewport (playwright.config.ts).
-
-const menu = (page: Page, category = "Bebidas") => page.getByRole("region", { name: category });
 
 /** Builds a selection on Vender and leaves the Bill open, as §8.2 does. */
 async function leaveOpen(
@@ -20,16 +19,9 @@ async function leaveOpen(
     readonly category?: string;
   },
 ) {
-  for (const item of sale.items)
-    await menu(page, sale.category).getByRole("button", { name: new RegExp(item) }).click();
-  if (sale.customer) {
-    await page.getByLabel("Cliente", { exact: true }).pressSequentially(sale.customer.slice(0, 8));
-    await page.getByRole("list", { name: "Coincidencias" }).getByRole("button", { name: sale.customer }).click();
-  }
-  if (sale.note) await page.getByLabel("Nota (opcional)").fill(sale.note);
-  await page.getByRole("button", { name: "Dejar abierta" }).click();
+  await sell.leaveOpen(page, sale);
   // The answer for *this* sale: a previous one's message must not pass for it.
-  await expect(page.getByRole("status")).toContainText(`por ${sale.total}.`);
+  await expect(page.getByRole("status")).toContainText(`debe ${sale.total}.`);
 }
 
 test("Cuentas lists every Bill with its state and filters by Day, state and Customer", async ({

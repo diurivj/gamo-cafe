@@ -2,10 +2,12 @@ import type { Page } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
 import { destinations, goTo } from "./support/navigate";
+import { itemButton, newSale, pay } from "./support/sell";
 
 // Spec §3.4: what is not about money is reused in the browser. The Items on
 // Vender and the shell's navigation are not fetched again after every sale or
-// navigation; tests/reuse.test.ts counts what the requests seen here cost.
+// navigation; tests/reuse.test.ts counts what the requests seen here cost. A
+// sale refused for an Item retired meanwhile is in e2e/vender-recovery.spec.ts.
 
 /** The loaders each data request of the page asked for, from now on: `null` is all of them. */
 function loadersAskedFor(page: Page): Array<string | null> {
@@ -21,26 +23,29 @@ function loadersAskedFor(page: Page): Array<string | null> {
 const markDocument = (page: Page) => page.evaluate(() => void ((window as { marked?: boolean }).marked = true));
 const documentIsMarked = (page: Page) => page.evaluate(() => (window as { marked?: boolean }).marked === true);
 
-test("recording a sale, then another, asks only for Vender's own loader", async ({ page, signInAs, addItem, query }) => {
+test("recording a sale, then another, reads nothing again: no shell, no Items, no page data", async ({
+  page,
+  signInAs,
+  addItem,
+  query,
+}) => {
   await signInAs("worker", "Beto");
   await addItem({ name: "Café de olla", price: 2500, stockTracked: false });
   await page.goto("/");
   const asked = loadersAskedFor(page);
 
   for (const sales of [1, 2]) {
-    await page.getByRole("button", { name: /Café de olla/ }).click();
-    await page.getByRole("radio", { name: "Efectivo" }).check();
-    await page.getByRole("button", { name: "Cobrar" }).click();
+    await pay(page, { items: ["Café de olla"] });
 
-    await expect(page.getByRole("status")).toHaveText("Cuenta pagada: $25.00.");
-    // The selection is empty again and the Items are still offered.
-    await expect(page.getByRole("region", { name: "Selección" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /Café de olla/ })).toBeVisible();
-    await expect(page.getByText("Beto · Empleado")).toBeVisible();
+    await expect(page.getByRole("status")).toHaveText("$25.00 en efectivo. Cuenta pagada.");
     await expect.poll(() => query("SELECT COUNT(*) AS n FROM bills")).toEqual([{ n: sales }]);
-    // One request after each sale: no shell, no Items.
-    expect(asked).toEqual(Array.from({ length: sales }, () => "routes/home"));
+    // Starting the next one, the Items are still offered.
+    await newSale(page);
+    await expect(itemButton(page, "Café de olla")).toBeVisible();
+    await expect(page.getByText("Beto · Empleado")).toBeVisible();
   }
+  // Neither the two steps, nor a sale's answer, nor Nueva venta asked for anything.
+  expect(asked).toEqual([]);
 });
 
 test("an Item added, repriced or retired on Productos is right on Vender when it is opened again", async ({
@@ -54,8 +59,7 @@ test("an Item added, repriced or retired on Productos is right on Vender when it
   await addItem({ name: "Agua mineral", price: 1850, category: bebidas });
   await addItem({ name: "Jugo verde", price: 3000, category: bebidas });
   await page.goto("/");
-  const menu = page.getByRole("region", { name: "Bebidas" });
-  await expect(menu.getByRole("button", { name: /Agua mineral/ })).toContainText("$18.50");
+  await expect(itemButton(page, "Agua mineral")).toContainText("$18.50");
   await markDocument(page);
 
   // Added.
@@ -82,26 +86,11 @@ test("an Item added, repriced or retired on Productos is right on Vender when it
   await goTo(page, "Vender");
 
   await expect(page.getByRole("heading", { name: "Vender", level: 1 })).toBeVisible();
-  await expect(menu.getByRole("button", { name: /Té helado/ })).toContainText("$22.00");
-  await expect(menu.getByRole("button", { name: /Agua mineral/ })).toContainText("$19.50");
-  await expect(menu.getByRole("button", { name: /Jugo verde/ })).toHaveCount(0);
+  await expect(itemButton(page, "Té helado")).toContainText("$22.00");
+  await expect(itemButton(page, "Agua mineral")).toContainText("$19.50");
+  await expect(itemButton(page, "Jugo verde")).toHaveCount(0);
   // All of it without loading the document again.
   expect(await documentIsMarked(page)).toBe(true);
-});
-
-test("a sale refused for an Item retired meanwhile stops offering that Item", async ({ page, signInAs, addItem, query }) => {
-  await signInAs("worker");
-  const pan = await addItem({ name: "Pan dulce" });
-  await addItem({ name: "Galleta", category: pan.category });
-  await page.goto("/");
-
-  await page.getByRole("button", { name: /Pan dulce/ }).click();
-  await query("UPDATE items SET retired_at = ? WHERE id = ?", [Date.now(), pan.id]);
-  await page.getByRole("button", { name: "Dejar abierta" }).click();
-
-  await expect(page.getByRole("alert")).toContainText("ya no está disponible");
-  await expect(page.getByRole("region", { name: pan.category.name }).getByRole("button", { name: /Pan dulce/ })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /Galleta/ })).toBeVisible();
 });
 
 test("navigating between screens does not ask for the shell again", async ({ page, signInAs }) => {

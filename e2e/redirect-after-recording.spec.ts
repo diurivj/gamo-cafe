@@ -1,6 +1,7 @@
 import { expect, test } from "./fixtures";
 import { goTo } from "./support/navigate";
 import { holdSubmissions } from "./support/held";
+import { pay } from "./support/sell";
 
 // A recorded form answers the request that sent it with a notice, and the
 // screen that sent it shows the words once (spec §3.4, tickets 27, 33 and
@@ -8,7 +9,7 @@ import { holdSubmissions } from "./support/held";
 // anything again, and another tab cannot take the words. Both projects run a
 // phone viewport (playwright.config.ts).
 
-test("a recorded sale shows its message once: not on a reload, nor going back and forward", async ({
+test("a confirmed sale is not recorded again by a reload or by going back and forward", async ({
   page,
   signInAs,
   addItem,
@@ -20,24 +21,17 @@ test("a recorded sale shows its message once: not on a reload, nor going back an
   // Arrive at Vender from another screen, so there is somewhere to go back to.
   await page.goto("/cuentas-abiertas");
   await goTo(page, "Vender");
-  await expect(page.getByRole("heading", { name: "Vender", level: 1 })).toBeVisible();
-
-  await page.getByRole("button", { name: /Agua mineral/ }).click();
-  await expect(page.getByRole("region", { name: "Selección" })).toContainText("$18.50");
-  await page.getByRole("region", { name: "Cobrar" }).getByRole("button", { name: "Cobrar" }).click();
-
-  // The message, and a new form: the selection is empty.
-  await expect(page.getByRole("status")).toHaveText("Cuenta pagada: $18.50.");
-  await expect(page.getByRole("region", { name: "Selección" })).toHaveCount(0);
-  await expect(page).toHaveURL(/\/$/);
+  await pay(page, { items: ["Agua mineral"] });
+  await expect(page.getByRole("status")).toHaveText("$18.50 en efectivo. Cuenta pagada.");
   expect(await query("SELECT id FROM bills")).toHaveLength(1);
 
+  // The result is this screen's own: a reload starts from nothing and says nothing.
   await page.reload();
   await expect(page.getByRole("heading", { name: "Vender", level: 1 })).toBeVisible();
   await expect(page.getByRole("status")).toHaveCount(0);
+  await expect(page).not.toHaveURL(/paso=/);
 
   await page.goBack();
-  await expect(page.getByRole("heading", { name: "Cuentas abiertas", level: 1 })).toBeVisible();
   await page.goForward();
   await expect(page.getByRole("heading", { name: "Vender", level: 1 })).toBeVisible();
   await expect(page.getByRole("status")).toHaveCount(0);

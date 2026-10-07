@@ -1,5 +1,6 @@
 import { expect, test } from "./fixtures";
 import { goTo } from "./support/navigate";
+import { leaveOpen, pay } from "./support/sell";
 
 // Mi día (spec §6.1, §5.9, §10.6): what the signed-in User sold and collected
 // today, in cash and by transfer, with their Lines and Payments, and how a
@@ -13,11 +14,8 @@ test("a Worker sees what they sold and collected today", async ({ page, signInAs
 
   // A walk-up sale: two units, paid in cash.
   await page.goto("/");
-  const menu = page.getByRole("region", { name: "Bebidas" });
-  await menu.getByRole("button", { name: /Agua mineral/ }).click();
-  await menu.getByRole("button", { name: /Agua mineral/ }).click();
-  await page.getByRole("region", { name: "Cobrar" }).getByRole("button", { name: "Cobrar" }).click();
-  await expect(page.getByRole("status")).toContainText("Cuenta pagada: $37.00.");
+  await pay(page, { items: [["Agua mineral", 2]] });
+  await expect(page.getByRole("status")).toHaveText("$37.00 en efectivo. Cuenta pagada.");
 
   await goTo(page, "Mi día");
   await expect(page).toHaveURL(/\/mi-dia$/);
@@ -46,10 +44,7 @@ test("a removed Line drops out of Mi día", async ({ page, signInAs, addCategory
   await addItem({ name: "Café de olla", price: 2500, category: bebidas, stock: { units: 4, by: beto } });
 
   await page.goto("/");
-  await page.getByRole("region", { name: "Bebidas" }).getByRole("button", { name: /Café de olla/ }).click();
-  await page.getByRole("button", { name: "Dejar abierta" }).click();
-  await expect(page.getByRole("status")).toContainText("por $25.00.");
-  const billId = await page.getByRole("status").getAttribute("data-bill-id");
+  const billId = await leaveOpen(page, { items: ["Café de olla"] });
 
   await goTo(page, "Mi día");
   await expect(page.getByRole("region", { name: "Vendido" })).toContainText("1 × Café de olla");
@@ -71,10 +66,7 @@ test("a Voided Bill drops out of Mi día", async ({ page, signInAs, addCategory,
   await addItem({ name: "Pan dulce", price: 1200, category: bebidas, stock: { units: 3, by: ana } });
 
   await page.goto("/");
-  await page.getByRole("region", { name: "Bebidas" }).getByRole("button", { name: /Pan dulce/ }).click();
-  await page.getByRole("button", { name: "Dejar abierta" }).click();
-  await expect(page.getByRole("status")).toContainText("por $12.00.");
-  const billId = await page.getByRole("status").getAttribute("data-bill-id");
+  const billId = await leaveOpen(page, { items: ["Pan dulce"] });
 
   await goTo(page, "Mi día");
   await expect(page.getByRole("region", { name: "Vendido" })).toContainText("1 × Pan dulce");

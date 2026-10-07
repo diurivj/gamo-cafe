@@ -1,58 +1,83 @@
-import { type FormEvent, useEffect, useRef, useState } from "react";
-import { data, Form, Link, useFetcher, useOutletContext, useSubmit } from "react-router";
-import { Effect, Result, Schema } from "effect";
-
+import { type ReactNode, type RefObject, useEffect, useId, useReducer, useRef, useState } from "react";
 import {
-  type BillNotFound,
-  type BillNotOpen,
-  type BillSummary,
-  type CustomerUnavailable,
-  type EmptySelection,
-  getBill,
-  type InvalidQuantity,
-  type ItemUnavailable,
-  type NewSelection,
-  type NewSelectionPayment,
-  type NoteTooLong,
-  recordSelection,
-  type TargetConflict,
-} from "~/backend/bills";
+  Link,
+  type ShouldRevalidateFunctionArgs,
+  useBlocker,
+  useLocation,
+  useNavigate,
+  useOutletContext,
+  useRevalidator,
+} from "react-router";
+import { Effect } from "effect";
+
+import { getBill } from "~/backend/bills";
 import { CurrentUser } from "~/backend/current-user";
-import { type PaymentExceedsOwed, type PaymentNotPositive } from "~/backend/payments";
 import { run } from "~/backend/run.server";
-import { CustomerPicker, type PickedCustomer } from "~/components/customer-picker";
-import { PaymentFields } from "~/components/payment-fields";
-import { answerWithNotice, takeNotice } from "~/notice.server";
+import { ConfirmDialog } from "~/components/confirm-dialog";
+import { CustomerPicker } from "~/components/customer-picker";
+import { BackDrawing, CategoryDrawing, CheckDrawing, StepDrawing } from "~/components/icons";
+import { Notice } from "~/components/notice";
+import { PaymentEntry } from "~/components/payment-entry";
+import { hint, pageTitle, sectionTitle } from "~/components/styles";
+import { Button, buttonClasses } from "~/components/ui/button";
+import { Card, CardContent } from "~/components/ui/card";
+import { Input } from "~/components/ui/input";
+import { Label } from "~/components/ui/label";
 import { requireUser } from "~/session.server";
+import { categoryDrawing } from "~/shared/category-drawing";
 import { newId } from "~/shared/id";
-import { type Centavos, formatMoney, parsePesos } from "~/shared/money";
-import { type TakenNotice, useSaidNotice } from "~/shared/notice";
-import { PAYMENT_METHODS, type PaymentMethod } from "~/shared/payment";
+import { formatMoney } from "~/shared/money";
+import { normalizeName } from "~/shared/normalize-name";
+import { paymentMethodLabel } from "~/shared/payment";
+import { readPaymentDraft } from "~/shared/payment-draft";
 import { paymentMessages } from "~/shared/payment-messages";
+import { sendForRecord } from "~/shared/record-request";
+import {
+  isSaleAnswer,
+  linesOf,
+  NEW_SALE,
+  onlyStepChanged,
+  recordingText,
+  REVIEW_STEP,
+  saleAfter,
+  type SaleAnswer,
+  saleBody,
+  type SaleEvent,
+  type SaleIntent,
+  saleOutcome,
+  type SaleRefusal,
+  type SaleSnapshot,
+  type SaleState,
+  sameSale,
+  snapshotOf,
+  STEP_PARAM,
+  unitsText,
+} from "~/shared/sale";
 
 import type { Route } from "./+types/home";
 import type { SellItems } from "./sell-items";
 
-// Vender (spec §6.1): the Items as large buttons by Category, a selection the
-// browser holds until it is recorded, a Customer or a note, **Dejar abierta**
-// and **Cobrar** (ticket 08), which records the selection and a Payment in one
-// batch. With `?billId=`, Cuenta's **Agregar productos** turns it into the
-// same screen targeting one Open Bill (ticket 07). The Items come from the
-// layout around it, `./sell-items`, which a sale does not load again.
+// Vender (UI redesign §5, §6): one sale at a time, in two steps. Step 1
+// chooses the Items; step 2 (`?paso=cobrar`) reviews them and records a
+// Payment or leaves the Bill Open. The sale is then sent once, frozen, and the
+// screen keeps it until the server's own answer says what happened; only
+// **Nueva venta** starts another. With `?billId=`, Cuenta's **Agregar
+// productos** turns it into the same flow targeting one Open Bill.
+//
+// The sale's state and every rule about it are `~/shared/sale`. It is sent to
+// `/vender/registrar` (`./resources/record-sale`) with the browser's own
+// `fetch`, so a request that fails leaves this screen, and what a safe retry
+// needs, in place. The Items come from the layout around it, `./sell-items`.
 
 export const meta: Route.MetaFunction = () => [{ title: "Vender · Gamo Cafe" }];
+
+/** Where a sale is sent (`app/routes.ts`). */
+const RECORD_PATH = "/vender/registrar";
 
 export async function loader({ context, request }: Route.LoaderArgs) {
   const user = requireUser(context);
   const billId = new URL(request.url).searchParams.get("billId") ?? "";
-  // What the selection that redirected here recorded (spec §3.4).
-  const notice = takeNotice(context);
-  // The key of the form this page renders (spec §3.4): new every time the
-  // loader runs, so after each recorded sale, and the same for a double tap
-  // or a retry of one rendered form. It is why this loader, unlike the Items'
-  // in `./sell-items`, must run again after a sale.
-  const submissionKey = newId();
-  if (billId === "") return { target: null, notice, submissionKey };
+  if (billId === "") return { target: null };
 
   const bill = await run(
     context,
@@ -68,478 +93,665 @@ export async function loader({ context, request }: Route.LoaderArgs) {
   );
   // The screen shows the target's figures, not its Lines or Payments.
   const { lines: _lines, payments: _payments, ...target } = bill;
-  return { target, notice, submissionKey };
+  return { target };
 }
 
-/** The selection as the browser sends it, in the `selection` form field. */
-const SelectionField = Schema.fromJsonString(
-  Schema.Array(Schema.Struct({ itemId: Schema.String, quantity: Schema.Int })),
-);
-
-/** The Vender form's fields as `recordSelection` takes them. */
-function readSelection(form: FormData): NewSelection | { readonly error: string } {
-  const parsed = Schema.decodeUnknownResult(SelectionField)(String(form.get("selection") ?? ""));
-  if (!Result.isSuccess(parsed)) return { error: "No pudimos leer la selección. Recarga la página." };
-  return {
-    items: parsed.success,
-    customerId: String(form.get("customerId") ?? "") || null,
-    note: String(form.get("note") ?? "") || null,
-    billId: String(form.get("billId") ?? "") || null,
-    submissionKey: String(form.get("submissionKey") ?? "") || null,
-  };
+/**
+ * The target Bill is read when Vender is opened for it; the two steps of a
+ * sale differ only in `?paso=`. A sale is answered with the Bill as it left
+ * it, so nothing is read again after one, and no failed read can take a
+ * confirmed sale off the screen.
+ */
+export function shouldRevalidate({ currentUrl, defaultShouldRevalidate, nextUrl }: ShouldRevalidateFunctionArgs) {
+  return onlyStepChanged(currentUrl, nextUrl) ? false : defaultShouldRevalidate;
 }
 
-/** What **Cobrar** sends besides the selection: a method and an optional amount. */
-function readPayment(form: FormData): NewSelectionPayment | { readonly error: string } {
-  const decoded = Schema.decodeUnknownResult(Schema.Literals(PAYMENT_METHODS))(
-    String(form.get("method") ?? ""),
+type Target = NonNullable<Route.ComponentProps["loaderData"]["target"]>;
+type Heading = RefObject<HTMLHeadingElement | null>;
+
+/** The Open Bill the selection is added to, always in sight (UI redesign §5.3). */
+function TargetBill({ target }: { readonly target: Target }) {
+  return (
+    <Card size="sm" role="region" aria-label="Cuenta destino">
+      <CardContent className="flex flex-col gap-1">
+        <p className="font-medium">
+          {target.customer
+            ? `Se agrega a la cuenta de ${target.customer.name}`
+            : "Se agrega a una cuenta sin cliente"}
+        </p>
+        <p className={hint}>{`Total ${formatMoney(target.total)} · Debe ${formatMoney(target.owed)}`}</p>
+        <Link
+          to={`/cuentas/${target.id}`}
+          className="inline-flex min-h-12 items-center self-start font-medium underline underline-offset-4"
+        >
+          Ver cuenta
+        </Link>
+      </CardContent>
+    </Card>
   );
-  if (!Result.isSuccess(decoded)) return { error: paymentMessages.MethodMissing };
-
-  const method: PaymentMethod = decoded.success;
-  const typed = String(form.get("amount") ?? "").trim();
-  if (typed === "") return { method, amount: null };
-  const amount = parsePesos(typed);
-  if (amount === undefined) return { error: paymentMessages.InvalidAmount };
-  return { method, amount };
 }
 
-type SelectionError =
-  | BillNotFound
-  | BillNotOpen
-  | CustomerUnavailable
-  | EmptySelection
-  | InvalidQuantity
-  | ItemUnavailable
-  | NoteTooLong
-  | PaymentExceedsOwed
-  | PaymentNotPositive
-  | TargetConflict;
-
-/** What each rule violation of `recordSelection` answers, in Spanish. */
-function answerSelectionError(error: SelectionError): { readonly error: string } {
-  switch (error._tag) {
-    case "BillNotFound":
-      throw new Response(null, { status: 404 });
-    case "EmptySelection":
-      return { error: "Agrega al menos un producto." };
-    case "InvalidQuantity":
-      return { error: "Las cantidades deben ser números enteros mayores a cero." };
-    case "NoteTooLong":
-      return { error: "La nota no puede pasar de 80 caracteres." };
-    case "ItemUnavailable":
-      return { error: "Un producto de la selección ya no está disponible. Quítalo y vuelve a intentar." };
-    case "CustomerUnavailable":
-      return { error: "Ese cliente no existe o está retirado." };
-    case "TargetConflict":
-      return { error: "No se puede elegir cliente ni nota al agregar a una cuenta abierta." };
-    case "BillNotOpen":
-      return { error: "Esta cuenta ya no está abierta. Registra los productos en una cuenta nueva." };
-    case "PaymentNotPositive":
-      return { error: paymentMessages.PaymentNotPositive };
-    case "PaymentExceedsOwed":
-      return { error: paymentMessages.PaymentExceedsSelection };
-  }
+/** A selection's Lines and total: what step 2 reviews, and what a sent sale keeps showing. */
+function Selection({ snapshot }: { readonly snapshot: Pick<SaleSnapshot, "lines" | "total"> }) {
+  const id = useId();
+  return (
+    <Card size="sm" role="region" aria-labelledby={id}>
+      <CardContent className="flex flex-col gap-3">
+        <h2 id={id} className={sectionTitle}>
+          Selección
+        </h2>
+        <ul className="flex flex-col gap-2">
+          {snapshot.lines.map((line) => (
+            <li key={line.itemId} className="flex items-baseline justify-between gap-3">
+              <span className="min-w-0 wrap-break-word">
+                <span className="font-semibold tabular-nums">{line.quantity} ×</span> {line.name}
+              </span>
+              <span className="shrink-0 tabular-nums">{formatMoney(line.unitPrice * line.quantity)}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="flex items-baseline justify-between gap-3 border-t pt-3 text-xl font-semibold">
+          <span>Total</span>
+          <span className="tabular-nums">{formatMoney(snapshot.total)}</span>
+        </p>
+      </CardContent>
+    </Card>
+  );
 }
 
-export async function action({ context, request }: Route.ActionArgs) {
-  const user = requireUser(context);
-  const form = await request.formData();
-  const intent = String(form.get("intent") ?? "");
-  if (intent !== "dejar-abierta" && intent !== "cobrar") {
-    return data({ error: "No entendimos esa acción. Recarga la página e intenta de nuevo." }, { status: 400 });
-  }
-
-  const selection = readSelection(form);
-  if ("error" in selection) return data(selection, { status: 400 });
-
-  // Cobrar records the selection and a Payment together, in the one batch of
-  // `recordSelection` (spec §7.3.1).
-  let payment: NewSelectionPayment | null = null;
-  if (intent === "cobrar") {
-    const read = readPayment(form);
-    if ("error" in read) return data(read, { status: 400 });
-    payment = read;
-  }
-
-  const program = recordSelection({ ...selection, payment }).pipe(Effect.provideService(CurrentUser, user));
-  const result = await run(context, program, answerSelectionError);
-  if ("error" in result) return data(result, { status: 400 });
-  // Recorded: the screen that sent the form is answered with what it must say
-  // (spec §3.4). The browser's router gets the words in its own answer, so
-  // two sales on their way at once each get theirs (ticket 33); a document
-  // POST is answered with a redirect that carries them in the cookie, so a
-  // reload or the back button records nothing again (ticket 27). The page
-  // emptied the selection when the sale was sent.
-  const message =
-    intent === "cobrar" ? paidMessage(result) : selection.billId ? addedMessage(result) : recordedMessage(result);
-  return answerWithNotice(request, selection.billId ? `/?billId=${encodeURIComponent(selection.billId)}` : "/", {
-    message,
-    billId: result.id,
-  });
-}
-
-const tile =
-  "flex min-h-20 flex-col justify-between gap-2 rounded-2xl border border-stone-300 bg-white p-4 text-left active:bg-stone-100 disabled:opacity-60";
-const step = "h-11 w-11 shrink-0 rounded-full border border-stone-300 bg-white text-xl font-semibold";
-const field = "w-full rounded-xl border border-stone-300 bg-white px-4 py-3 text-lg";
-const quietButton = "rounded-xl border border-stone-300 bg-white px-4 py-2 font-medium disabled:opacity-60";
-const primaryButton = "rounded-2xl bg-stone-900 px-4 py-4 text-lg font-semibold text-white disabled:opacity-60";
-
-/** What the screen says after a selection was recorded and left Open. */
-const recordedMessage = (bill: BillSummary) =>
-  `Se dejó abierta ${bill.customer ? `la cuenta de ${bill.customer.name}` : "una cuenta"} por ${formatMoney(bill.total)}.`;
-
-/** What it says after Lines were added to the Bill Cuenta sent the User from. */
-const addedMessage = (bill: BillSummary) =>
-  `Se agregaron los productos a la cuenta. Total ${formatMoney(bill.total)} · Debe ${formatMoney(bill.owed)}.`;
-
-/** What it says after **Cobrar** recorded a Payment with the selection. */
-const paidMessage = (bill: BillSummary) =>
-  bill.owed === 0
-    ? `Cuenta pagada: ${formatMoney(bill.total)}.`
-    : `Abono registrado. Debe ${formatMoney(bill.owed)}.`;
-
-type Quantities = Readonly<Record<string, number>>;
-
-/** What the form held besides the selection when it was sent. */
-interface FormFields {
-  readonly customer: PickedCustomer | null;
-  readonly note: string;
-  readonly method: PaymentMethod;
-  readonly amount: string;
-}
-
-/** A sale the browser has sent and the server has not answered yet. */
-interface SentSale extends FormFields {
-  /** The key of the fetcher that carries it. */
-  readonly key: string;
-  readonly quantities: Quantities;
-  readonly total: Centavos;
-}
-
-/** How a sale that was sent ended. */
-type SaleAnswer =
-  | { readonly refusal: string }
-  /** Recorded. The action's answer carries this sale's own notice (ticket 33). */
-  | { readonly refusal: null; readonly notice: TakenNotice };
-
-/** One sale on its way. It says so, and tells the screen how it ended. */
-function SaleBeingRecorded({
+/** Step 1: the Items by Category, a search, and the total with the way forward. */
+function Catalog({
   sale,
-  onAnswer,
+  dispatch,
+  target,
+  heading,
+  onReview,
 }: {
-  sale: SentSale;
-  onAnswer: (sale: SentSale, answer: SaleAnswer) => void;
+  readonly sale: Extract<SaleState, { phase: "editing" }>;
+  readonly dispatch: (event: SaleEvent) => void;
+  readonly target: Target | null;
+  readonly heading: Heading;
+  readonly onReview: () => void;
 }) {
-  const fetcher = useFetcher<typeof action>({ key: sale.key });
-  const sent = useRef(false);
-  const answered = useRef(false);
-  useEffect(() => {
-    if (fetcher.state !== "idle") {
-      sent.current = true;
-      return;
-    }
-    // An answer that recorded something always carries the notice; no data at
-    // all is an error page, which the router renders instead of this screen.
-    if (!sent.current || answered.current || fetcher.data === undefined) return;
-    answered.current = true;
-    const answer = fetcher.data;
-    onAnswer(sale, "error" in answer ? { refusal: answer.error } : { refusal: null, notice: answer.notice });
-  }, [fetcher.state]);
+  const { categories } = useOutletContext<SellItems>();
+  const searchId = useId();
+  const [typed, setTyped] = useState("");
+  const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [clearing, setClearing] = useState(false);
 
-  return <li>{`Registrando venta de ${formatMoney(sale.total)}…`}</li>;
+  const { quantities } = sale.draft;
+  const offered = categories
+    .map((category) => ({ ...category, items: category.items.filter((item) => !sale.unavailable.includes(item.id)) }))
+    .filter((category) => category.items.length > 0);
+  const { total, units } = linesOf(quantities, offered.flatMap((category) => category.items));
+
+  const wanted = normalizeName(typed);
+  const shown = offered
+    .filter((category) => categoryId === null || category.id === categoryId)
+    .map((category) => ({
+      ...category,
+      items: category.items.filter((item) => normalizeName(item.name).includes(wanted)),
+    }))
+    .filter((category) => category.items.length > 0);
+
+  return (
+    <div data-sticky-total className="flex flex-col gap-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
+          Vender
+        </h1>
+        {units > 0 ? (
+          <Button type="button" variant="outline" size="touch" onClick={() => setClearing(true)}>
+            Vaciar
+          </Button>
+        ) : null}
+      </div>
+
+      {target ? <TargetBill target={target} /> : null}
+      {sale.refusal ? <Notice tone="error">{sale.refusal}</Notice> : null}
+
+      {offered.length === 0 ? (
+        <p className={hint}>Todavía no hay productos. Pídele a un administrador que agregue el menú.</p>
+      ) : (
+        <>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor={searchId}>Buscar producto</Label>
+            <Input
+              id={searchId}
+              type="search"
+              value={typed}
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              onChange={(event) => setTyped(event.target.value)}
+            />
+          </div>
+
+          {offered.length > 1 ? (
+            <div role="group" aria-label="Categoría" className="flex flex-wrap gap-2">
+              {[{ id: null, name: "Todas" }, ...offered].map((category) => {
+                const on = category.id === categoryId;
+                return (
+                  <Button
+                    key={category.id ?? ""}
+                    type="button"
+                    variant="outline"
+                    size="touch"
+                    aria-pressed={on}
+                    onClick={() => setCategoryId(category.id)}
+                    // The one that is on is told by its mark and weight, not only its fill.
+                    className="min-h-12 px-4 py-2 aria-pressed:border-foreground aria-pressed:bg-muted aria-pressed:font-semibold"
+                  >
+                    {on ? <CheckDrawing className="size-5" /> : null}
+                    {category.name}
+                  </Button>
+                );
+              })}
+            </div>
+          ) : null}
+
+          {shown.length === 0 ? <p className={hint}>Ningún producto coincide.</p> : null}
+
+          {shown.map((category) => {
+            const drawing = categoryDrawing(category.name);
+            return (
+              <section key={category.id} aria-labelledby={`categoria-${category.id}`} className="flex flex-col gap-3">
+                <h2 id={`categoria-${category.id}`} className="flex items-center gap-2 font-heading text-xl font-semibold">
+                  {drawing ? <CategoryDrawing name={drawing} className="size-7 text-muted-foreground" /> : null}
+                  {category.name}
+                </h2>
+                <ul className="grid gap-2 sm:grid-cols-2">
+                  {category.items.map((item) => {
+                    const quantity = quantities[item.id] ?? 0;
+                    return (
+                      // One cell: the Item, which adds a unit wherever it is
+                      // tapped, and over it the room its quantity takes, so
+                      // nothing moves when the first unit is added. That room
+                      // is at its end, or under the name where the two do not
+                      // fit side by side: a narrow phone with large text.
+                      <li key={item.id} className="@container grid">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="touch"
+                          onClick={() => dispatch({ type: "changed", itemId: item.id, by: 1 })}
+                          className={`col-start-1 row-start-1 min-h-16 flex-col items-start justify-center gap-0 rounded-2xl px-4 pt-2 pb-16 text-left @[17rem]:pr-40 @[17rem]:pb-2 ${
+                            quantity > 0 ? "border-foreground" : ""
+                          }`}
+                        >
+                          <span className="font-medium wrap-break-word">{item.name}</span>
+                          <span className="text-muted-foreground tabular-nums">{formatMoney(item.price)}</span>
+                        </Button>
+                        {quantity > 0 ? (
+                          <div className="z-1 col-start-1 row-start-1 flex items-center gap-1 self-end justify-self-end pr-2 pb-2 @[17rem]:self-center @[17rem]:pb-0">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon-touch"
+                              aria-label={`Quitar uno de ${item.name}`}
+                              onClick={() => dispatch({ type: "changed", itemId: item.id, by: -1 })}
+                            >
+                              <StepDrawing by={-1} />
+                            </Button>
+                            <span
+                              aria-label={`${quantity} de ${item.name}`}
+                              className="min-w-8 text-center text-xl font-semibold tabular-nums"
+                            >
+                              {quantity}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon-touch"
+                              aria-label={`Agregar uno de ${item.name}`}
+                              onClick={() => dispatch({ type: "changed", itemId: item.id, by: 1 })}
+                            >
+                              <StepDrawing by={1} />
+                            </Button>
+                          </div>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            );
+          })}
+        </>
+      )}
+
+      {/* What the selection adds up to, said when it changes. */}
+      <p aria-live="polite" className="sr-only">
+        {units > 0 ? `${unitsText(units)}, total ${formatMoney(total)}` : ""}
+      </p>
+      {units > 0 ? (
+        // Rests just above the navigation bar, never under it.
+        <div className="sticky bottom-(--above-bar) z-2">
+          <Card size="sm" role="region" aria-label="Total" className="shadow-lg ring-foreground/25">
+            <CardContent className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+              <p className="min-w-0">
+                <span className={`block ${hint}`}>{unitsText(units)}</span>
+                <span className="block font-heading text-2xl leading-tight font-semibold tabular-nums">
+                  {formatMoney(total)}
+                </span>
+              </p>
+              <Button type="button" size="touch" onClick={onReview}>
+                {target ? "Continuar" : "Cobrar"}
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      ) : offered.length > 0 ? (
+        <p className={hint}>Toca un producto para agregarlo.</p>
+      ) : null}
+
+      {units === 0 ? (
+        // After a phone restart nothing here knows what the last sale became.
+        <div>
+          <p className={hint}>¿No sabes si una venta se registró?</p>
+          <Link
+            to="/mi-dia"
+            className="inline-flex min-h-12 items-center font-medium underline underline-offset-4"
+          >
+            Revísala en Mi día
+          </Link>
+        </div>
+      ) : null}
+
+      <ConfirmDialog
+        open={clearing}
+        title="¿Vaciar la selección?"
+        description={`Se ${units === 1 ? "quitará" : "quitarán"} ${unitsText(units)} y lo escrito para esta venta.`}
+        confirm="Vaciar"
+        cancel="Conservar"
+        onConfirm={() => {
+          setClearing(false);
+          dispatch({ type: "cleared" });
+        }}
+        onCancel={() => setClearing(false)}
+      />
+    </div>
+  );
 }
 
-export default function Home({ loaderData, actionData }: Route.ComponentProps) {
-  const { target, notice, submissionKey } = loaderData;
+/** Step 2: the selection, who it is for, and the Payment or leaving it Open. */
+function Review({
+  sale,
+  dispatch,
+  target,
+  heading,
+  onBack,
+  onSend,
+}: {
+  readonly sale: Extract<SaleState, { phase: "editing" }>;
+  readonly dispatch: (event: SaleEvent) => void;
+  readonly target: Target | null;
+  readonly heading: Heading;
+  readonly onBack: () => void;
+  readonly onSend: (intent: SaleIntent) => void;
+}) {
   const { categories } = useOutletContext<SellItems>();
-  const submit = useSubmit();
-  // The last thing a recorded sale said, whichever way it arrived: in this
-  // screen's own answer when the browser's router sent the sale (ticket 33),
-  // or in the loader's notice after a document POST.
-  const [said, setSaid] = useSaidNotice(notice);
-  const [quantities, setQuantities] = useState<Quantities>({});
-  // Every sale sent starts the form over under a new key, so the picker, the
-  // note and the Payment are empty for the next one. A refused sale starts it
-  // over once more, with what it held. The key is also the form's submission
-  // key (spec §3.4, ticket 28): the first form has the one the loader made,
-  // and each later one is made here, because the next sale can be sent before
-  // the loader has run again. A sale sent with the key of the one before it
-  // would be taken for its repeat and not recorded.
-  const [form, setForm] = useState<{ readonly key: string; readonly fields: FormFields | null }>({
-    key: submissionKey,
-    fields: null,
-  });
-  const [customer, setCustomer] = useState<PickedCustomer | null>(null);
-  const [sent, setSent] = useState<ReadonlyArray<SentSale>>([]);
-  const [refusal, setRefusal] = useState<string | null>(null);
-  // What is selected now, for an answer that arrives later.
-  const selectedNow = useRef(quantities);
-  selectedNow.current = quantities;
+  const noteId = useId();
+  // Whether a tap on the Payment's action found it could not be recorded yet.
+  const [insist, setInsist] = useState(false);
 
-  const items = categories.flatMap((category) => category.items);
-  const selected = items.filter((item) => (quantities[item.id] ?? 0) > 0);
-  const total = selected.reduce((sum, item) => sum + item.price * quantities[item.id]!, 0);
-  // Without JavaScript the refusal comes back as the page's action data.
-  const error = refusal ?? (actionData && "error" in actionData ? actionData.error : null);
+  const { fields } = sale.draft;
+  const selection = linesOf(sale.draft.quantities, categories.flatMap((category) => category.items));
+  const paying = readPaymentDraft(fields.payment, selection.total, paymentMessages.PaymentExceedsSelection);
+  const send = (intent: SaleIntent) => {
+    // The field says what is missing; nothing is sent until it can be read.
+    if (intent === "cobrar" && paying.amount === null) setInsist(true);
+    else onSend(intent);
+  };
 
-  function change(itemId: string, by: number) {
-    setQuantities((current) => {
-      const next = { ...current };
-      const quantity = (next[itemId] ?? 0) + by;
-      if (quantity > 0) next[itemId] = quantity;
-      else delete next[itemId];
-      return next;
-    });
-  }
-
-  const selection = JSON.stringify(selected.map((item) => ({ itemId: item.id, quantity: quantities[item.id] })));
-  const formAction = target ? `/?index&billId=${target.id}` : "/?index";
-
-  // A tap on Dejar abierta or Cobrar is acknowledged at once (spec §3.4): the
-  // sale travels in a fetcher of its own, the selection empties and the next
-  // one can start while the server records this one. The screen says what was
-  // recorded only when this sale's own answer brings the words.
-  function send(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const fields = new FormData(event.currentTarget, (event.nativeEvent as SubmitEvent).submitter);
-    const key = form.key;
-    void submit(fields, { method: "post", action: formAction, navigate: false, fetcherKey: key });
-    setSent((sales) => [
-      ...sales,
-      {
-        key,
-        quantities,
-        total,
-        customer,
-        note: String(fields.get("note") ?? ""),
-        method: fields.get("method") === "transfer" ? "transfer" : "cash",
-        amount: String(fields.get("amount") ?? ""),
-      },
-    ]);
-    setQuantities({});
-    setCustomer(null);
-    setRefusal(null);
-    setForm({ key: newId(), fields: null });
-  }
-
-  function answered(sale: SentSale, answer: SaleAnswer) {
-    setSent((sales) => sales.filter((other) => other.key !== sale.key));
-    if (answer.refusal === null) {
-      // The answer carried this sale's own words; nothing to fetch (ticket 33).
-      setSaid(answer.notice);
-      return;
-    }
-    // Refused: the selection comes back with the message. If another one was
-    // started meanwhile, the units join it and its form is left as it is.
-    setRefusal(answer.refusal);
-    const startedAnother = Object.keys(selectedNow.current).length > 0;
-    setQuantities((current) => {
-      const next = { ...current };
-      for (const [itemId, quantity] of Object.entries(sale.quantities)) next[itemId] = (next[itemId] ?? 0) + quantity;
-      return next;
-    });
-    if (startedAnother) return;
-    setCustomer(sale.customer);
-    // Nothing was recorded under its key, and a new one costs nothing.
-    setForm({ key: newId(), fields: sale });
-  }
+  const pay = (
+    <Button key="pay" type="button" size="touch" variant={target ? "outline" : "default"} onClick={() => send("cobrar")}>
+      {paying.amount === null ? "Registrar pago" : `Registrar pago de ${formatMoney(paying.amount)}`}
+    </Button>
+  );
+  const leaveOpen = (
+    <div key="open" className="flex flex-col gap-2">
+      <Button type="button" size="touch" variant={target ? "default" : "outline"} onClick={() => send("dejar-abierta")}>
+        {target ? "Agregar a la cuenta" : "Dejar abierta"}
+      </Button>
+      <p className={hint}>
+        {target ? "Sin pago." : "Sin pago: la cuenta queda abierta."}
+      </p>
+    </div>
+  );
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-3xl font-semibold tracking-tight">Vender</h1>
+      <Button type="button" variant="outline" size="touch" onClick={onBack} className="self-start">
+        <BackDrawing />
+        Cambiar productos
+      </Button>
+      <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
+        {target ? "Agregar a la cuenta" : "Cobrar"}
+      </h1>
 
-      {target ? (
-        <section aria-label="Cuenta destino" className="rounded-2xl border border-amber-300 bg-amber-50 p-4">
-          <p className="font-medium">
-            {target.customer
-              ? `Agregando productos a la cuenta de ${target.customer.name}`
-              : "Agregando productos a una cuenta sin cliente"}
-          </p>
-          <p className="mt-1 text-stone-600">{`Total ${formatMoney(target.total)} · Debe ${formatMoney(target.owed)}`}</p>
-          <Link to={`/cuentas/${target.id}`} className="mt-2 inline-block font-medium underline">
-            Ver cuenta
-          </Link>
-        </section>
-      ) : null}
+      {target ? <TargetBill target={target} /> : null}
+      {sale.refusal ? <Notice tone="error">{sale.refusal}</Notice> : null}
 
-      {items.length === 0 ? (
-        <p className="text-lg text-stone-600">
-          Todavía no hay productos. Pídele a un administrador que agregue el menú.
-        </p>
-      ) : null}
+      <Selection snapshot={selection} />
 
-      {/* `?index` aims the POST at this index route's action, not the layout's.
-          A target Bill rides in the same query, so the action answers for the
-          same page the loader rendered. */}
-      <Form
-        method="post"
-        action={formAction}
-        key={form.key}
-        onSubmit={send}
-        className="flex flex-col gap-6"
-      >
-        <input type="hidden" name="selection" value={selection} />
-        {/* Set when Cuenta's Agregar productos sent the User here. */}
-        <input type="hidden" name="billId" value={target?.id ?? ""} />
-        {/* One sale per rendered form, however many times it is sent. */}
-        <input type="hidden" name="submissionKey" value={form.key} />
-
-        {selected.length > 0 ? (
-          <section aria-labelledby="seleccion" className="rounded-2xl border border-stone-200 bg-white p-4">
-            <div className="flex items-center justify-between gap-3">
-              <h2 id="seleccion" className="text-lg font-semibold">
-                Selección
-              </h2>
-              <button type="button" onClick={() => setQuantities({})} className={quietButton}>
-                Limpiar
-              </button>
-            </div>
-            <ul className="mt-2 divide-y divide-stone-200">
-              {selected.map((item) => (
-                <li key={item.id} className="flex items-center gap-2 py-2">
-                  <span className="min-w-0 flex-1 truncate font-medium">{item.name}</span>
-                  <button
-                    type="button"
-                    aria-label={`Quitar uno de ${item.name}`}
-                    onClick={() => change(item.id, -1)}
-                    className={step}
-                  >
-                    −
-                  </button>
-                  <span className="w-6 text-center text-lg font-semibold tabular-nums">{quantities[item.id]}</span>
-                  <button
-                    type="button"
-                    aria-label={`Agregar uno de ${item.name}`}
-                    onClick={() => change(item.id, 1)}
-                    className={step}
-                  >
-                    +
-                  </button>
-                  <span className="w-20 shrink-0 text-right tabular-nums">
-                    {formatMoney(item.price * quantities[item.id]!)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            <p className="mt-3 flex items-center justify-between text-xl font-semibold">
-              <span>Total</span>
-              <span className="tabular-nums">{formatMoney(total)}</span>
-            </p>
-          </section>
-        ) : null}
-
-        {categories.map((category) => (
-          <section key={category.id} aria-labelledby={`categoria-${category.id}`} className="flex flex-col gap-3">
-            <h2 id={`categoria-${category.id}`} className="text-xl font-semibold">
-              {category.name}
-            </h2>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {category.items.map((item) => (
-                <button key={item.id} type="button" onClick={() => change(item.id, 1)} className={tile}>
-                  <span className="font-medium">{item.name}</span>
-                  <span className="flex items-center justify-between gap-2 text-stone-600">
-                    <span>{formatMoney(item.price)}</span>
-                    {quantities[item.id] ? (
-                      <span className="rounded-full bg-stone-900 px-2 py-0.5 text-sm font-semibold text-white">
-                        {quantities[item.id]}
-                      </span>
-                    ) : null}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </section>
-        ))}
-
-        <section
-          aria-labelledby="terminar"
-          className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-4"
-        >
-          <h2 id="terminar" className="text-xl font-semibold">
-            {target ? "Agregar a la cuenta" : "Cliente y nota"}
+      {/* A Bill's Customer and note are set when it is opened, or on Cuenta. */}
+      {target ? null : (
+        <section aria-labelledby="cliente-y-nota" className="flex flex-col gap-4">
+          <h2 id="cliente-y-nota" className={sectionTitle}>
+            Cliente y nota (opcionales)
           </h2>
-
-          {/* A Bill's Customer and note are set on Cuenta (ticket 10); when
-              adding to one, the picker and the note stay out of the way. */}
-          {target ? null : (
-            <CustomerPicker name="customerId" defaultValue={form.fields?.customer} onChange={setCustomer} />
-          )}
-
-          {target ? null : (
-            <label className="flex flex-col gap-1">
-              <span className="font-medium">Nota (opcional)</span>
-              <input
-                name="note"
-                maxLength={80}
-                defaultValue={form.fields?.note}
-                autoComplete="off"
-                className={field}
-              />
-              <span className="text-sm text-stone-600">Quién se lo lleva o cualquier detalle. Hasta 80 caracteres.</span>
-            </label>
-          )}
-
-          {sent.length > 0 ? (
-            <ul
-              aria-label="Ventas que se están registrando"
-              aria-live="polite"
-              className="flex flex-col gap-1 rounded-xl bg-stone-100 p-3 text-stone-700"
-            >
-              {sent.map((sale) => (
-                <SaleBeingRecorded key={sale.key} sale={sale} onAnswer={answered} />
-              ))}
-            </ul>
-          ) : null}
-          {error ? (
-            <p role="alert" className="rounded-xl bg-red-50 p-3 text-red-700">
-              {error}
-            </p>
-          ) : null}
-          {said?.message ? (
-            <p role="status" data-bill-id={said.billId} className="rounded-xl bg-green-50 p-3">
-              {said.message}
-            </p>
-          ) : null}
-
-          <button
-            type="submit"
-            name="intent"
-            value="dejar-abierta"
-            disabled={selected.length === 0}
-            className={primaryButton}
-          >
-            {target ? "Agregar a la cuenta" : "Dejar abierta"}
-          </button>
-        </section>
-
-        {/* Cobrar records the selection and a Payment together, in one batch
-            (spec §6.1, §7.3.1, §8.1). */}
-        <section
-          aria-labelledby="cobrar"
-          className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-4"
-        >
-          <h2 id="cobrar" className="text-xl font-semibold">
-            Cobrar
-          </h2>
-          <PaymentFields
-            defaultAmount={total}
-            initialAmount={form.fields?.amount}
-            initialMethod={form.fields?.method}
-            amountHint="Déjalo vacío para cobrar todo el total; también puedes cobrar menos."
+          <CustomerPicker
+            defaultValue={fields.customer}
+            onChange={(customer) => dispatch({ type: "fields", fields: { customer } })}
           />
-          <button
-            type="submit"
-            name="intent"
-            value="cobrar"
-            disabled={selected.length === 0}
-            className={primaryButton}
-          >
-            Cobrar
-          </button>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor={noteId}>Nota (opcional)</Label>
+            <Input
+              id={noteId}
+              maxLength={80}
+              autoComplete="off"
+              value={fields.note}
+              onChange={(event) => dispatch({ type: "fields", fields: { note: event.target.value } })}
+            />
+          </div>
         </section>
-      </Form>
+      )}
+
+      <section aria-labelledby="pago" className="flex flex-col gap-4">
+        <h2 id="pago" className={sectionTitle}>
+          Pago
+        </h2>
+        <PaymentEntry
+          value={fields.payment}
+          onChange={(payment) => dispatch({ type: "fields", fields: { payment } })}
+          full={selection.total}
+          tooMuch={paymentMessages.PaymentExceedsSelection}
+          insist={insist}
+        />
+      </section>
+
+      {/* The usual action leads: paying a new sale, adding to a Bill that is already Open. */}
+      <div className="flex flex-col gap-4">{target ? [leaveOpen, pay] : [pay, leaveOpen]}</div>
     </div>
   );
+}
+
+/** What a sale that was sent carried, and the Bill it targets, for as long as it is on screen. */
+function Sent({ snapshot, target }: { readonly snapshot: SaleSnapshot; readonly target: Target | null }) {
+  return (
+    <>
+      <Selection snapshot={snapshot} />
+      {target || snapshot.customer || snapshot.note || snapshot.payment ? (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+          {target ? (
+            <SentField label="Cuenta">{target.customer ? `De ${target.customer.name}` : "Sin cliente"}</SentField>
+          ) : null}
+          {snapshot.customer ? <SentField label="Cliente">{snapshot.customer.name}</SentField> : null}
+          {snapshot.note ? <SentField label="Nota">{snapshot.note}</SentField> : null}
+          {snapshot.payment ? (
+            <SentField label="Pago">
+              {`${formatMoney(snapshot.payment.amount)} · ${paymentMethodLabel[snapshot.payment.method]}`}
+            </SentField>
+          ) : null}
+        </dl>
+      ) : null}
+    </>
+  );
+}
+
+function SentField({ label, children }: { readonly label: string; readonly children: ReactNode }) {
+  return (
+    <>
+      <dt className={hint}>{label}</dt>
+      <dd className="min-w-0 font-medium wrap-break-word">{children}</dd>
+    </>
+  );
+}
+
+/** A sale on its way, or one nobody knows the outcome of: frozen, with only safe ways on. */
+function Pending({
+  sale,
+  target,
+  heading,
+  onRetry,
+}: {
+  readonly sale: Extract<SaleState, { phase: "recording" | "unknown" }>;
+  readonly target: Target | null;
+  readonly heading: Heading;
+  readonly onRetry: () => void;
+}) {
+  const recording = sale.phase === "recording";
+  return (
+    <div className="flex flex-col gap-6" aria-busy={recording}>
+      <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
+        {recording ? recordingText(sale.snapshot) : "No sabemos si se registró"}
+      </h1>
+      {recording ? (
+        <Notice tone="info">Espera la confirmación.</Notice>
+      ) : (
+        <>
+          <Notice tone="info">
+            {sale.sessionEnded
+              ? "Tu sesión terminó antes de saberlo. Entra de nuevo y revisa Mi día antes de repetir la venta."
+              : "La venta pudo registrarse o no. Volver a intentar no la registra dos veces."}
+          </Notice>
+          <div className="flex flex-col gap-3">
+            {sale.sessionEnded ? (
+              // A document load: the way out of a session that ended.
+              <a href="/entrar" className={buttonClasses({ size: "touch" })}>
+                Entrar de nuevo
+              </a>
+            ) : (
+              <Button type="button" size="touch" onClick={onRetry}>
+                Volver a intentar
+              </Button>
+            )}
+            <Link to="/mi-dia" className={buttonClasses({ variant: "outline", size: "touch" })}>
+              Revisar en Mi día
+            </Link>
+          </div>
+        </>
+      )}
+      <Sent snapshot={sale.snapshot} target={target} />
+    </div>
+  );
+}
+
+/** What the server confirmed, kept until **Nueva venta** (UI redesign §5.4). */
+function Confirmed({
+  sale,
+  target,
+  heading,
+  onNewSale,
+}: {
+  readonly sale: Extract<SaleState, { phase: "confirmed" }>;
+  readonly target: Target | null;
+  readonly heading: Heading;
+  readonly onNewSale: () => void;
+}) {
+  const { snapshot, result } = sale;
+  const outcome = saleOutcome(snapshot, result);
+
+  return (
+    // The Bill, for what follows the sale: a test, or a tool, reads it here.
+    <div data-bill-id={result.billId} className="flex flex-col gap-6">
+      <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
+        {outcome.title}
+      </h1>
+      <Notice tone="success">{outcome.details}</Notice>
+
+      {outcome.change !== null ? (
+        <Card size="sm" role="region" aria-label="Cambio">
+          <CardContent className="flex items-baseline justify-between gap-3">
+            <span className="text-xl font-medium">Cambio</span>
+            <span className="font-heading text-4xl font-semibold tabular-nums">{outcome.change}</span>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <div className="flex flex-col gap-3">
+        <Button type="button" size="touch" onClick={onNewSale}>
+          Nueva venta
+        </Button>
+        {/* Only a Bill this User may open: a Worker is not sent to a Paid one. */}
+        {result.canOpen ? (
+          <Link to={`/cuentas/${result.billId}`} className={buttonClasses({ variant: "outline", size: "touch" })}>
+            {target ? "Volver a la cuenta" : "Ver cuenta"}
+          </Link>
+        ) : null}
+      </div>
+
+      <Sent snapshot={snapshot} target={target} />
+    </div>
+  );
+}
+
+function Sale({ target }: { readonly target: Target | null }) {
+  const { categories } = useOutletContext<SellItems>();
+  const [sale, dispatch] = useReducer(saleAfter, NEW_SALE);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { revalidate } = useRevalidator();
+
+  const items = categories.flatMap((category) => category.items);
+  const selecting = sale.phase === "editing" && linesOf(sale.draft.quantities, items).units > 0;
+  const atReview = new URLSearchParams(location.search).get(STEP_PARAM) === REVIEW_STEP;
+  const view = sale.phase !== "editing" ? sale.phase : atReview && selecting ? "review" : "catalog";
+
+  const stepAddress = (review: boolean) => {
+    const search = new URLSearchParams(location.search);
+    if (review) search.set(STEP_PARAM, REVIEW_STEP);
+    else search.delete(STEP_PARAM);
+    return { pathname: location.pathname, search: search.toString() };
+  };
+
+  // The review step of an empty selection is step 1: after Nueva venta, after
+  // a reload, after the last Item was refused. The address follows.
+  const stray = sale.phase === "editing" && atReview && !selecting;
+  useEffect(() => {
+    if (stray) void navigate(stepAddress(false), { replace: true });
+  }, [stray]);
+
+  // A snapshot is sent once per attempt, and only its own answer is heard.
+  const attempt = sale.phase === "recording" ? sale.attempt : 0;
+  useEffect(() => {
+    if (sale.phase !== "recording") return;
+    const { snapshot } = sale;
+    let heard = true;
+    void sendForRecord<SaleAnswer, SaleRefusal>(RECORD_PATH, saleBody(snapshot), isSaleAnswer).then((outcome) => {
+      if (!heard) return;
+      dispatch({ type: "answered", key: snapshot.key, outcome });
+      // The total the screen showed may not be today's: read the Items again.
+      if (outcome.outcome === "refused" && outcome.answer.stalePrices) void revalidate();
+    });
+    return () => {
+      heard = false;
+    };
+  }, [attempt]);
+
+  // A new view takes the keyboard and the screen reader to its heading, which
+  // says what happened: the step, that the sale is on its way, how it ended.
+  const heading = useRef<HTMLHeadingElement>(null);
+  const shown = useRef(view);
+  useEffect(() => {
+    if (shown.current === view) return;
+    shown.current = view;
+    window.scrollTo(0, 0);
+    heading.current?.focus({ preventScroll: true });
+  }, [view]);
+
+  // Unfinished work is not left by accident (UI redesign §6.2). Moving
+  // between the two steps is not leaving; a confirmed sale has nothing to lose.
+  const unfinished = selecting || sale.phase === "recording" || sale.phase === "unknown";
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) => unfinished && !sameSale(currentLocation, nextLocation),
+  );
+  // Confirmed while the question was on screen: there is nothing left to
+  // ask about, and the result is what the User has to see.
+  const asking = blocker.state === "blocked";
+  useEffect(() => {
+    if (asking && !unfinished) blocker.reset();
+  }, [asking, unfinished]);
+  useEffect(() => {
+    if (!unfinished) return;
+    // The browser decides whether to ask; a phone often does not.
+    const ask = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", ask);
+    return () => window.removeEventListener("beforeunload", ask);
+  }, [unfinished]);
+
+  // Whether step 2 was reached from step 1 in this history, so Back is one step back.
+  const cameFromCatalog = useRef(false);
+
+  function send(intent: SaleIntent) {
+    if (sale.phase !== "editing") return;
+    // Frozen at the tap, with a key of its own: a second tap finds the sale
+    // already sent and changes nothing.
+    const snapshot = snapshotOf({ draft: sale.draft, items, billId: target?.id ?? null, intent, key: newId() });
+    if (!("problem" in snapshot)) dispatch({ type: "submitted", snapshot });
+  }
+
+  function newSale() {
+    // The next sale is a new one, not more for the Bill this one was added
+    // to: without the target, the screen starts over by itself.
+    if (target) void navigate("/", { replace: true });
+    else dispatch({ type: "started" });
+  }
+
+  const draft = sale.phase === "editing";
+  return (
+    <>
+      {sale.phase === "confirmed" ? (
+        <Confirmed sale={sale} target={target} heading={heading} onNewSale={newSale} />
+      ) : sale.phase !== "editing" ? (
+        <Pending sale={sale} target={target} heading={heading} onRetry={() => dispatch({ type: "retried" })} />
+      ) : view === "review" ? (
+        <Review
+          sale={sale}
+          dispatch={dispatch}
+          target={target}
+          heading={heading}
+          onSend={send}
+          onBack={() => {
+            if (cameFromCatalog.current) void navigate(-1);
+            else void navigate(stepAddress(false), { replace: true });
+          }}
+        />
+      ) : (
+        <Catalog
+          sale={sale}
+          dispatch={dispatch}
+          target={target}
+          heading={heading}
+          onReview={() => {
+            cameFromCatalog.current = true;
+            void navigate(stepAddress(true));
+          }}
+        />
+      )}
+
+      <ConfirmDialog
+        open={asking && unfinished}
+        title={draft ? "¿Salir sin registrar la venta?" : "La venta puede estarse registrando"}
+        description={
+          draft
+            ? "La selección no se ha registrado y se perderá."
+            : "Salir no cancela el registro. Antes de repetir la venta, revisa Mi día."
+        }
+        confirm={draft ? "Salir y descartar" : "Salir"}
+        cancel={draft ? "Seguir con la venta" : "Quedarme aquí"}
+        onConfirm={() => blocker.proceed?.()}
+        onCancel={() => {
+          if (blocker.state === "blocked") blocker.reset();
+        }}
+      />
+    </>
+  );
+}
+
+export default function Home({ loaderData }: Route.ComponentProps) {
+  const { target } = loaderData;
+  // Another target Bill, or none, is another sale: it starts from nothing.
+  return <Sale key={target?.id ?? ""} target={target} />;
 }

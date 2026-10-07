@@ -3,6 +3,7 @@ import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { holdSubmissions } from "./support/held";
 import { destinations, goTo } from "./support/navigate";
+import { itemButton, leaveOpen, review, select, totalBar } from "./support/sell";
 
 // UI redesign §4 and §7–§8: each role's four destinations, Más, the links
 // that open a screen directly, and the pages shown in place of a screen.
@@ -143,9 +144,7 @@ test("a link that opens a screen directly still works, and says where the User i
 
   // A Bill, to have one to open by its address.
   await page.goto("/");
-  await page.getByRole("button", { name: /Café de olla/ }).click();
-  await page.getByRole("button", { name: "Dejar abierta" }).click();
-  const billId = await page.getByRole("status").getAttribute("data-bill-id");
+  const billId = await leaveOpen(page, { items: ["Café de olla"] });
 
   await page.goto(`/cuentas/${billId}`);
   await expect(page.getByRole("main")).toContainText("Café de olla");
@@ -303,13 +302,36 @@ test("on a 320px phone nothing scrolls sideways, every target is large and the b
   await expect(salir).toBeFocused();
   expect(await clearOfTheBar(page, salir)).toBe(true);
 
-  // Vender's last control too, under a long list of Items.
+  // Vender, under a long list of Items: its total sticks above the bar, and
+  // an Item that takes the focus is clear of both.
   await page.goto("/");
-  await page.getByRole("button", { name: /Producto de nombre largo 12/ }).click();
-  const last = page.getByRole("main").getByRole("button", { name: "Cobrar" });
+  expect(await nothingSideways(page)).toBe(true);
+  await select(page, ["Producto de nombre largo 12"]);
+  const forward = totalBar(page).getByRole("button", { name: "Cobrar" });
+  expect(await clearOfTheBar(page, forward)).toBe(true);
+  expect((await forward.boundingBox())!.height).toBeGreaterThanOrEqual(48);
+  for (const step of [/^Quitar uno de/, /^Agregar uno de/]) {
+    const box = (await page.getByRole("button", { name: step }).boundingBox())!;
+    expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(48);
+  }
+  const lastItem = itemButton(page, "Producto de nombre largo 9");
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await lastItem.focus();
+  await expect(lastItem).toBeFocused();
+  const total = (await totalBar(page).boundingBox())!;
+  const focused = (await lastItem.boundingBox())!;
+  expect(focused.y + focused.height).toBeLessThanOrEqual(total.y);
+  expect(await nothingSideways(page)).toBe(true);
+
+  // The review step, with its Payment and both actions.
+  await review(page);
+  expect(await nothingSideways(page)).toBe(true);
+  const last = page.getByRole("button", { name: "Dejar abierta" });
   await last.focus();
-  await expect(last).toBeFocused();
   expect(await clearOfTheBar(page, last)).toBe(true);
+  for (const control of await page.getByRole("main").getByRole("button").all()) {
+    expect((await control.boundingBox())!.height).toBeGreaterThanOrEqual(48);
+  }
 });
 
 test("with text twice as large the navigation keeps its words and nothing scrolls sideways", async ({
@@ -329,6 +351,35 @@ test("with text twice as large the navigation keeps its words and nothing scroll
   const salir = page.getByRole("button", { name: "Salir" });
   await salir.focus();
   expect(await clearOfTheBar(page, salir)).toBe(true);
+});
+
+test("with text twice as large Vender's two steps keep every word and action, and nothing scrolls sideways", async ({
+  page,
+  signInAs,
+  addItem,
+}) => {
+  await signInAs("worker", "Beto");
+  const jugo = await addItem({ name: "Jugo de naranja natural grande", price: 123450 });
+  await addItem({ name: "Agua mineral", price: 1850, category: jugo.category });
+  await page.goto("/");
+  await page.addStyleTag({ content: "html { font-size: 200% }" });
+
+  await select(page, [["Jugo de naranja natural grande", 2], "Agua mineral"]);
+  expect(await nothingSideways(page)).toBe(true);
+  await expect(page.getByLabel("2 de Jugo de naranja natural grande")).toBeVisible();
+  await expect(totalBar(page)).toContainText("$2,487.50");
+  expect(await clearOfTheBar(page, totalBar(page).getByRole("button", { name: "Cobrar" }))).toBe(true);
+
+  await review(page);
+  expect(await nothingSideways(page)).toBe(true);
+  await page.getByLabel("Efectivo que te entregan (opcional)").fill("3000");
+  await expect(page.getByText("Cambio: $512.50")).toBeVisible();
+  const record = page.getByRole("button", { name: "Registrar pago de $2,487.50" });
+  await record.focus();
+  expect(await clearOfTheBar(page, record)).toBe(true);
+  await record.click();
+  await expect(heading(page, "Pago registrado")).toBeVisible();
+  expect(await nothingSideways(page)).toBe(true);
 });
 
 test("on a laptop the same destinations stand at the side", async ({ page, signInAs }) => {

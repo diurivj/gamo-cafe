@@ -1,6 +1,7 @@
 import { expect, test } from "./fixtures";
+import { pay } from "./support/sell";
 
-// Payments (spec §5.5, §5.6, §6.1, §8.1, §10.2, §10.3): **Cobrar** on Vender
+// Payments (spec §5.5, §5.6, §6.1, §8.1, §10.2, §10.3): Vender's review step
 // records the selection and a Payment in one batch, and Cuenta takes a
 // Payment with what the Bill still owes by default. Both projects run a phone
 // viewport (playwright.config.ts).
@@ -17,20 +18,10 @@ test("a walk-up sale is cobrada: one Paid Bill whose Lines and Payment carry the
   const agua = await addItem({ name: "Agua mineral", price: 1850, category: bebidas, stock: { units: 6, by: beto } });
 
   await page.goto("/");
-  const menu = page.getByRole("region", { name: "Bebidas" });
-  await menu.getByRole("button", { name: /Agua mineral/ }).click();
-  await menu.getByRole("button", { name: /Agua mineral/ }).click();
-  await expect(page.getByRole("region", { name: "Selección" })).toContainText("$37.00");
-
-  // Cobrar: the method, and for cash the amount handed over with the change.
-  const cobrar = page.getByRole("region", { name: "Cobrar" });
-  await expect(cobrar.getByRole("radio", { name: "Efectivo" })).toBeChecked();
-  await cobrar.getByLabel("Efectivo entregado (opcional)").fill("50");
-  await expect(cobrar).toContainText("Cambio: $13.00");
-
-  await cobrar.getByRole("button", { name: "Cobrar" }).click();
-
-  await expect(page.getByRole("status")).toContainText("Cuenta pagada: $37.00.");
+  // Cash by default, and the cash handed over with the change it makes.
+  await pay(page, { items: [["Agua mineral", 2]], handed: "50" });
+  await expect(page.getByRole("status")).toHaveText("$37.00 en efectivo. Cuenta pagada.");
+  await expect(page.getByRole("region", { name: "Cambio" })).toContainText("$13.00");
 
   // One Bill, Paid, with its Lines and its Payment carrying the signed-in User.
   const bills = (await query("SELECT id, day, total, paid, state FROM bills")) as Array<Record<string, unknown>>;
@@ -47,9 +38,8 @@ test("a walk-up sale is cobrada: one Paid Bill whose Lines and Payment carry the
 
   // The day's sale is done: a second selection with the Payment makes a second,
   // separate Bill.
-  await menu.getByRole("button", { name: /Agua mineral/ }).click();
-  await page.getByRole("region", { name: "Cobrar" }).getByRole("button", { name: "Cobrar" }).click();
-  await expect(page.getByRole("status")).toContainText("Cuenta pagada: $18.50.");
+  await pay(page, { items: ["Agua mineral"] });
+  await expect(page.getByRole("status")).toHaveText("$18.50 en efectivo. Cuenta pagada.");
   expect(await query("SELECT state FROM bills")).toHaveLength(2);
 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -67,12 +57,9 @@ test("a partial sale leaves Pago parcial, and Cuenta lists its Payments and coll
   await addItem({ name: "Café de olla", price: 2500, category: bebidas, stock: { units: 4, by: beto } });
 
   await page.goto("/");
-  await page.getByRole("region", { name: "Bebidas" }).getByRole("button", { name: /Café de olla/ }).click();
-  const cobrar = page.getByRole("region", { name: "Cobrar" });
-  await cobrar.getByLabel("Monto").fill("10.00");
-  await cobrar.getByRole("button", { name: "Cobrar" }).click();
+  await pay(page, { items: ["Café de olla"], amount: "10.00" });
 
-  await expect(page.getByRole("status")).toContainText("Abono registrado. Debe $15.00.");
+  await expect(page.getByRole("status")).toHaveText("$10.00 en efectivo. La cuenta todavía debe $15.00.");
   const [{ id: billId }] = (await query("SELECT id FROM bills")) as Array<{ id: string }>;
   expect(await query("SELECT paid, state FROM bills WHERE id = ?", [billId])).toMatchObject([
     { paid: 1000, state: "partial" },

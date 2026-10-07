@@ -114,8 +114,8 @@ export interface NewSelection {
    */
   readonly billId?: string | null;
   /**
-   * The Payment taken together with the selection (**Cobrar** on Vender,
-   * spec §6.1, §7.3.1). Its amount defaults to the selection's total and may
+   * The Payment taken together with the selection (**Registrar pago** on
+   * Vender, spec §6.1, §7.3.1). Its amount defaults to the selection's total and may
    * be less, and it is never more than the selection's total: a Vender
    * payment settles what is being sold now, and prior debt is paid from
    * Cuenta. The amount handed over for cash is not stored, so it is not here.

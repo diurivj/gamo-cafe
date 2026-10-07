@@ -1,11 +1,19 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { useFetcher } from "react-router";
 
-import type { action, loader } from "~/routes/resources/customer-picker";
+import { Notice } from "~/components/notice";
+import { hint } from "~/components/styles";
+import { Button } from "~/components/ui/button";
+import { Input } from "~/components/ui/input";
+import { Label } from "~/components/ui/label";
+import type { loader } from "~/routes/resources/customer-picker";
 import { normalizeName } from "~/shared/normalize-name";
 
 /** Where the picker's resource route lives (app/routes.ts). */
 const PICKER_PATH = "/clientes/selector";
+
+/** What that route answers a search and an addition with. */
+type Found = Awaited<ReturnType<typeof loader>>;
+type Added = { readonly customer: PickedCustomer } | { readonly error: string };
 
 export interface PickedCustomer {
   readonly id: string;
@@ -36,8 +44,10 @@ export interface CustomerPickerProps {
  *
  *     const customerId = String(form.get("customerId") ?? "") || null;
  *
- * It talks to its own resource route, so the host route needs no loader or
- * action for it, and it renders no `<form>` of its own, so it can sit inside
+ * It talks to its own resource route with the browser's own `fetch`, so the
+ * host route needs no loader or action for it, and a search that gets no
+ * answer says so here instead of replacing the screen it sits on and
+ * whatever that screen holds unsent. It renders no `<form>` of its own, so it can sit inside
  * one. Retired Customers are never offered. The host's action still has to
  * check the id it receives.
  */
@@ -48,12 +58,16 @@ export function CustomerPicker({
   onChange,
 }: CustomerPickerProps) {
   const id = useId();
-  const search = useFetcher<typeof loader>();
-  const add = useFetcher<typeof action>();
   const [picked, setPicked] = useState<PickedCustomer | null>(defaultValue);
   const [typed, setTyped] = useState("");
-  // The name last sent to be added, so its refusal is shown only while it is still what is typed.
-  const [sent, setSent] = useState<string | null>(null);
+  // The last search that was answered, and whether one is on its way.
+  const [found, setFound] = useState<Found | null>(null);
+  const [searching, setSearching] = useState(false);
+  // What was typed when a search got no answer: asked again only when told to.
+  const [unanswered, setUnanswered] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  // Why the name last sent to be added was not, shown while it is still what is typed.
+  const [refused, setRefused] = useState<{ readonly name: string; readonly error: string } | null>(null);
 
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -61,54 +75,58 @@ export function CustomerPicker({
   function choose(customer: PickedCustomer | null) {
     setPicked(customer);
     setTyped("");
-    setSent(null);
+    setRefused(null);
     onChangeRef.current?.(customer);
   }
 
-  // The Customer just added is the one chosen.
-  const added = add.data && "customer" in add.data ? add.data.customer : null;
-  useEffect(() => {
-    if (added) choose({ id: added.id, name: added.name });
-    // Keyed by the id: each answer is acted on once, when it arrives.
-  }, [added?.id]);
-
   const wanted = normalizeName(typed);
   // An answer counts only if it is for what is typed now.
-  const answered = search.data?.q;
-  const matches = wanted !== "" && answered === wanted ? search.data!.customers : null;
+  const matches = wanted !== "" && found?.q === wanted ? found.customers : null;
 
   // One search in flight at a time: when it lands and is not for what is typed
-  // by then, ask again. Loads started together can land in any order, so
+  // by then, ask again. Searches started together can land in any order, so
   // asking on every keystroke would let an older answer be the last one.
-  const searching = search.state !== "idle";
-  const load = search.load;
   useEffect(() => {
-    if (picked || wanted === "" || searching || answered === wanted) return;
-    void load(`${PICKER_PATH}?q=${encodeURIComponent(wanted)}`);
-  }, [picked, wanted, searching, answered, load]);
+    if (picked || wanted === "" || searching || found?.q === wanted || unanswered === wanted) return;
+    setSearching(true);
+    fetch(`${PICKER_PATH}?q=${encodeURIComponent(wanted)}`)
+      .then((response) => (response.ok ? (response.json() as Promise<Found>) : Promise.reject(response)))
+      .then(setFound, () => setUnanswered(wanted))
+      .finally(() => setSearching(false));
+  }, [picked, wanted, searching, found, unanswered]);
+
+  async function add() {
+    const name = typed;
+    setAdding(true);
+    setRefused(null);
+    try {
+      const response = await fetch(PICKER_PATH, { method: "POST", body: new URLSearchParams({ name }) });
+      const answer = (await response.json()) as Added;
+      // The Customer just added is the one chosen.
+      if ("customer" in answer) choose({ id: answer.customer.id, name: answer.customer.name });
+      else setRefused({ name, error: answer.error });
+    } catch {
+      setRefused({ name, error: "No se pudo agregar. Revisa la conexión e intenta de nuevo." });
+    } finally {
+      setAdding(false);
+    }
+  }
 
   const taken = matches?.some((customer) => normalizeName(customer.name) === wanted) ?? false;
-  const adding = add.state !== "idle";
-  const refusal = add.data && "error" in add.data && sent === typed && !adding ? add.data.error : null;
+  const refusal = refused && refused.name === typed && !adding ? refused.error : null;
 
   if (picked) {
     return (
       <div role="group" aria-labelledby={`${id}-label`} className="flex flex-col gap-2">
-        <span id={`${id}-label`} className="font-medium">
+        <span id={`${id}-label`} className="text-lg font-medium">
           {label}
         </span>
         <input type="hidden" name={name} value={picked.id} />
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-stone-300 bg-white py-2 pl-4 pr-2">
-          <span className="min-w-0 truncate text-lg font-medium">
-            {picked.name}
-          </span>
-          <button
-            type="button"
-            onClick={() => choose(null)}
-            className="shrink-0 rounded-lg border border-stone-300 px-4 py-3 font-medium"
-          >
+        <div className="flex items-center justify-between gap-3 rounded-2xl border border-input bg-background py-1 pr-1 pl-5">
+          <span className="min-w-0 text-lg font-medium wrap-break-word">{picked.name}</span>
+          <Button type="button" variant="outline" size="touch" onClick={() => choose(null)} className="shrink-0 px-4">
             Quitar
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -116,11 +134,9 @@ export function CustomerPicker({
 
   return (
     <div className="flex flex-col gap-2">
-      <label htmlFor={id} className="font-medium">
-        {label}
-      </label>
+      <Label htmlFor={id}>{label}</Label>
       <input type="hidden" name={name} value="" />
-      <input
+      <Input
         id={id}
         type="search"
         value={typed}
@@ -135,46 +151,54 @@ export function CustomerPicker({
         onKeyDown={(event) => {
           if (event.key === "Enter") event.preventDefault();
         }}
-        className="w-full rounded-xl border border-stone-300 bg-white px-4 py-3 text-lg"
       />
 
       {wanted !== "" ? (
         <ul aria-label="Coincidencias" className="flex flex-col gap-2">
           {matches?.map((customer) => (
             <li key={customer.id}>
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                size="touch"
                 onClick={() => choose({ id: customer.id, name: customer.name })}
-                className="w-full rounded-xl border border-stone-300 bg-white px-4 py-3 text-left"
+                className="w-full flex-col items-start gap-0 text-left"
               >
-                <span className="block truncate text-lg font-medium">{customer.name}</span>
-                {customer.note ? <span className="block truncate text-stone-600">{customer.note}</span> : null}
-              </button>
+                <span className="font-medium wrap-break-word">{customer.name}</span>
+                {customer.note ? <span className="text-muted-foreground wrap-break-word">{customer.note}</span> : null}
+              </Button>
             </li>
           ))}
-          {matches === null ? <li className="px-1 text-stone-600">Buscando…</li> : null}
+          {matches === null && unanswered !== wanted ? <li className={`px-1 ${hint}`}>Buscando…</li> : null}
+          {matches === null && unanswered === wanted ? (
+            <li className="flex flex-col gap-2">
+              <Notice tone="error">No se pudo buscar. Revisa la conexión.</Notice>
+              <Button type="button" variant="outline" size="touch" onClick={() => setUnanswered(null)}>
+                Buscar de nuevo
+              </Button>
+            </li>
+          ) : null}
           {matches !== null && !taken ? (
             <li>
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                size="touch"
                 disabled={adding}
-                onClick={() => {
-                  setSent(typed);
-                  void add.submit({ name: typed }, { method: "post", action: PICKER_PATH });
-                }}
-                className="w-full rounded-xl border border-dashed border-stone-400 px-4 py-3 text-left text-lg font-medium disabled:opacity-60"
+                onClick={() => void add()}
+                className="w-full justify-start border-dashed text-left"
               >
                 {adding ? "Agregando…" : `Agregar «${typed.trim()}»`}
-              </button>
+              </Button>
             </li>
           ) : null}
         </ul>
       ) : null}
 
       {refusal ? (
-        <p id={`${id}-error`} role="alert" className="text-red-700">
+        <Notice tone="error" id={`${id}-error`}>
           {refusal}
-        </p>
+        </Notice>
       ) : null}
     </div>
   );

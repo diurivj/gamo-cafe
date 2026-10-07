@@ -12,6 +12,7 @@ import { appFetch, as, landing, seedUser, type SignedIn, signedIn } from "./supp
 import { seedItem } from "./support/catalog";
 import { seedCustomer } from "./support/customers";
 import { runTest } from "./support/effect";
+import { recordSale, saleForm } from "./support/sales";
 
 /**
  * Spec §4.1 and §10.6: the server enforces the permissions matrix in every
@@ -75,21 +76,23 @@ interface RouteRule {
   readonly get: { readonly worker: number; readonly admin: number };
   /**
    * POST carrying a body that names no known form. A route without an action
-   * is answered 405 by the router. `postTo` is where the action lives when
-   * that is not the route's own path: the home page is an index route, so its
-   * action is `/?index`, as its forms submit.
+   * is answered 405 by the router.
    */
-  readonly post?:
-    | { readonly worker: number; readonly admin: number; readonly postTo?: string }
-    | undefined;
+  readonly post?: { readonly worker: number; readonly admin: number } | undefined;
 }
 
 const routes: Readonly<Record<string, RouteRule>> = {
   "/": {
-    about: "Vender: record a sale, leave it open or pay it",
+    about: "Vender: choose the Items of a sale and review it",
     signedOut: "redirect",
     get: { worker: 200, admin: 200 },
-    post: { worker: 400, admin: 400, postTo: "/?index" },
+  },
+  "/vender/registrar": {
+    about: "Where Vender sends a sale: leave it open or pay it",
+    signedOut: "redirect",
+    // An action and no loader: there is nothing to read here.
+    get: { worker: 400, admin: 400 },
+    post: { worker: 400, admin: 400 },
   },
   "/entrar": {
     about: "Entrar: the one public screen, and the code exchange",
@@ -263,8 +266,7 @@ describe("the route classification", () => {
     "POST $path — $rule.about",
     async ({ path, rule }) => {
       // Without a session: Entrar, or the way to it (§10.1).
-      const target = rule.post?.postTo ?? path;
-      const signedOut = await appFetch(target, form());
+      const signedOut = await appFetch(path, form());
       if (rule.signedOut === "public") {
         expect(signedOut.status, `${path} signed out`).not.toBe(302);
       } else {
@@ -283,10 +285,10 @@ describe("the route classification", () => {
 
       // Fresh callers: POST /salir ends the session it is sent with.
       const worker = await caller("worker");
-      expect((await worker.fetch(target, form())).status, `${path} as a Worker`).toBe(rule.post.worker);
+      expect((await worker.fetch(path, form())).status, `${path} as a Worker`).toBe(rule.post.worker);
 
       const admin = await caller("admin");
-      expect((await admin.fetch(target, form())).status, `${path} as an Admin`).toBe(rule.post.admin);
+      expect((await admin.fetch(path, form())).status, `${path} as an Admin`).toBe(rule.post.admin);
     },
   );
 });
@@ -358,13 +360,6 @@ function seedBill(options: {
   );
 }
 
-/** The Bill a Vender response recorded, from the status message it renders. */
-function billIdOf(html: string): string {
-  const found = /data-bill-id="([^"]+)"/.exec(html);
-  expect(found, "the response carries the new Bill's id").not.toBeNull();
-  return found![1]!;
-}
-
 /** The value of a hidden field, as a response renders it. */
 function fieldOf(html: string, name: string): string {
   const found = new RegExp(`name="${name}" value="([^"]+)"`).exec(html);
@@ -405,25 +400,18 @@ const rows: ReadonlyArray<MatrixRow> = [
       const item = await seedItemFor();
       const openElsewhere = await seedBill({ itemId: item.id });
 
-      const sale = await who.fetch(
-        "/?index",
-        form({ intent: "dejar-abierta", selection: JSON.stringify([{ itemId: item.id, quantity: 1 }]) }),
-      );
-      const salePage = await landed(sale, who, label);
-      expect(await salePage.text(), label).toContain("Se dejó abierta");
+      const sale = await recordSale(who, saleForm({ itemId: item.id }));
+      expect(sale.response.status, label).toBe(200);
+      expect(sale.sale, label).toMatchObject({ state: "open", total: 1000, canOpen: true });
 
       // Any User adds to any Open Bill, not only the one they opened.
-      const added = await who.fetch(
-        `/?index&billId=${openElsewhere.id}`,
-        form({
-          intent: "dejar-abierta",
-          billId: openElsewhere.id,
-          selection: JSON.stringify([{ itemId: item.id, quantity: 1 }]),
-        }),
-      );
-      const addedPage = await landed(added, who, label);
-      expect(await addedPage.text(), label).toContain("Se agregaron los productos a la cuenta.");
-      return added;
+      const added = await recordSale(who, {
+        intent: "dejar-abierta",
+        billId: openElsewhere.id,
+        selection: JSON.stringify([{ itemId: item.id, quantity: 1 }]),
+      });
+      expect(added.sale, label).toMatchObject({ billId: openElsewhere.id, total: 2000 });
+      return added.response;
     },
   },
   {
@@ -503,16 +491,13 @@ const rows: ReadonlyArray<MatrixRow> = [
       // Today's records come through the Worker; the test clock cannot set the
       // real clock the Worker reads.
       const item = await seedItemFor();
-      const sale = await who.fetch(
-        "/?index",
-        form({
-          intent: "cobrar",
-          method: "cash",
-          amount: "10.00",
-          selection: JSON.stringify([{ itemId: item.id, quantity: 1 }]),
-        }),
-      );
-      expect(sale.status, label).toBe(302);
+      const sale = await recordSale(who, {
+        intent: "cobrar",
+        method: "cash",
+        amount: "10.00",
+        selection: JSON.stringify([{ itemId: item.id, quantity: 1 }]),
+      });
+      expect(sale.response.status, label).toBe(200);
 
       const mine = await who.fetch("/mi-dia");
       expect(mine.status, label).toBe(200);

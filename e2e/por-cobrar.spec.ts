@@ -3,13 +3,12 @@ import type { Page } from "@playwright/test";
 import { dayOf } from "../app/shared/day.ts";
 import { expect, test } from "./fixtures";
 import { goTo } from "./support/navigate";
+import * as sell from "./support/sell";
 
 // Por cobrar (spec §6.2, §4.1): each Customer with what they owe and the Day
 // of their oldest Open Bill, then the Open Bills with no Customer, flagged
 // when from an earlier Day, and the overall Owed at the top. Both projects run
 // a phone viewport (playwright.config.ts).
-
-const menu = (page: Page, category: string) => page.getByRole("region", { name: category });
 
 /** Builds a selection on Vender and leaves the Bill open, as §8.2 does. */
 async function leaveOpen(
@@ -23,16 +22,9 @@ async function leaveOpen(
     readonly category: string;
   },
 ) {
-  for (const item of sale.items)
-    await menu(page, sale.category).getByRole("button", { name: new RegExp(item) }).click();
-  if (sale.customer) {
-    await page.getByLabel("Cliente", { exact: true }).pressSequentially(sale.customer.slice(0, 4));
-    await page.getByRole("list", { name: "Coincidencias" }).getByRole("button", { name: sale.customer }).click();
-  }
-  if (sale.note) await page.getByLabel("Nota (opcional)").fill(sale.note);
-  await page.getByRole("button", { name: "Dejar abierta" }).click();
+  await sell.leaveOpen(page, sale);
   // The answer for *this* sale: a previous one's message must not pass for it.
-  await expect(page.getByRole("status")).toContainText(`por ${sale.total}.`);
+  await expect(page.getByRole("status")).toContainText(`debe ${sale.total}.`);
 }
 
 test("an Admin sees what each Customer owes, then the Open Bills with no Customer, the ones from an earlier Day flagged", async ({

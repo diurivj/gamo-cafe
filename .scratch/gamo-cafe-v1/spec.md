@@ -143,6 +143,7 @@ See ADR 0006.
 - A form that creates a Bill, a Payment, an Adjustment or a Count carries a key made when the form was rendered. The server records one submission per key, so a double tap or a retry on a bad connection creates nothing twice.
 - A paged list shows its first page and a **Cargar más** control that appends the next one, and loads it by itself when it scrolls into view. Paging is by cursor, not by offset, wherever the order allows it.
 - Optimistic UI is for what is harmless to take back: the selection empties the moment it is submitted and comes back if the server refuses it. Money is never shown as recorded before the server confirms it; until then the screen says it is being recorded.
+  - *Superseded for Vender by the [UI redesign](../ui-redesign/spec.md) §2.2, §5 and §6:* the selection no longer empties at the tap. A sale stays on screen, frozen, until the server's own answer; the next one starts only from **Nueva venta**; and a sale is answered by its own route in JSON, not with a redirect. The key is made at the tap. Everything else in this section stands.
 - What is not about money may be reused in the browser: the Items on Vender and the shell's navigation are not fetched again after every sale or navigation. Bills, Payments and Stock are always fetched fresh, and no response about them may be stored by a cache.
 
 ### 3.5 Sign-in and sessions
@@ -296,7 +297,7 @@ Titles are the Spanish shown on screen. Navigation and URLs are implementation d
 ### 6.1 For every User
 
 - **Entrar.** One field for the sign-in code.
-- **Vender.** The home screen. Items are large buttons grouped by Category. Tapping an Item adds one unit to the selection, which shows quantities, the running total, and controls to add, subtract and clear. The User may choose a Customer, with search as they type and "add new", or type a note. There are two ways to finish:
+- **Vender.** The home screen. Items are large buttons grouped by Category. Tapping an Item adds one unit to the selection, which shows quantities, the running total, and controls to add, subtract and clear. The User may choose a Customer, with search as they type and "add new", or type a note. There are two ways to finish: *Its two steps, its Payment entry and its result are now the [UI redesign](../ui-redesign/spec.md) §5; the rules of what is recorded are unchanged.*
   - **Cobrar** records the selection and a Payment together: method, optional amount handed over with the change shown, and optionally an amount lower than the total.
   - **Dejar abierta** records the selection and leaves the Bill Open.
 - **Cuentas abiertas.** Every Open Bill, newest first, with its Customer or note, Day, total, paid and owed. Searchable by Customer.

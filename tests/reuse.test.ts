@@ -9,15 +9,13 @@ import { seedItem } from "./support/catalog";
 import { savedCustomer } from "./support/customers";
 import { measured } from "./support/d1";
 import { runTest } from "./support/effect";
-import { saleForm } from "./support/sales";
+import { recordSale, saleForm } from "./support/sales";
 
 // Spec §3.4: what is not about money is not fetched again after every sale.
-// These are the requests the browser's router sends (e2e/reuse.spec.ts checks
-// that it sends exactly these): a page's data lives at its path plus `.data`,
-// and `_routes` names the loaders to run when some are skipped.
+// These are the requests the browser sends (e2e/reuse.spec.ts checks that it
+// sends exactly these): a page's data lives at its path plus `.data`, and
+// `_routes` names the loaders to run when some are skipped.
 
-/** The loaders of Vender that run after a sale: the page's own, nothing above it. */
-const AFTER_A_SALE = "/_.data?_routes=routes%2Fhome";
 /** Every loader of Vender, as when it is opened. */
 const OPENING_VENDER = "/_.data";
 
@@ -31,24 +29,15 @@ function cookies(sent: string, response: Response): string {
   return [...jar.values()].join("; ");
 }
 
-/** One sale as Vender's form sends it from the browser, and what its own answer said. */
-async function sell(who: Pick<SignedIn, "cookie" | "fetch">, itemId: string, message: string) {
-  const sale = await measured(() =>
-    who.fetch("/_.data?index", {
-      method: "POST",
-      headers: { Cookie: who.cookie },
-      body: saleForm({ itemId, intent: "cobrar" }),
-    }),
-  );
-  // The screen that sent the sale is answered with its words (ticket 33),
-  // and no cookie is set for a later load to read.
-  expect(sale.body, "the sale answered the screen that sent it").toContain(message);
-  expect(sale.response.headers.getSetCookie()).toEqual([]);
-  return { ...sale, cookie: cookies(who.cookie, sale.response) };
-}
+/** One sale as Vender sends it, measured. */
+const sell = (who: Pick<SignedIn, "cookie" | "fetch">, itemId: string) =>
+  measured(async () => {
+    const { response } = await recordSale(who, saleForm({ itemId, intent: "cobrar" }), { headers: { Cookie: who.cookie } });
+    return response;
+  });
 
-describe("after a sale on Vender", () => {
-  it("runs no catalog read and no shell loader: the session's read is the only statement", async () => {
+describe("a sale on Vender", () => {
+  it("is one request that reads no catalog and no shell, and asks for nothing after it", async () => {
     const beto = await signedIn("worker", "Beto");
     const cafe = await runTest(seedItem({ name: "Café que no se vuelve a leer", price: 2500 }));
 
@@ -59,15 +48,15 @@ describe("after a sale on Vender", () => {
     const phone = { ...beto, cookie: cookies(beto.cookie, opened.response) };
 
     for (const _sale of ["first", "second"]) {
-      const { cookie } = await sell(phone, cafe.id, "Cuenta pagada: $25.00.");
-      const after = await measured(() => beto.fetch(AFTER_A_SALE, { headers: { Cookie: cookie } }));
+      const sale = await sell(phone, cafe.id);
 
-      expect(after.response.status).toBe(200);
-      expect(after.body, "the words are not fetched again").not.toContain("Cuenta pagada: $25.00.");
-      expect(after.body, "the catalog").not.toContain("Café que no se vuelve a leer");
-      expect(after.body, "the shell").not.toContain("Beto");
-      expect(after.statements).toBe(1);
-      expect(after.rowsWritten).toBe(0);
+      // The answer is the Bill as the sale left it: the screen needs no load
+      // after it (e2e/reuse.spec.ts checks the browser sends none).
+      expect(sale.response.status).toBe(200);
+      expect(JSON.parse(sale.body)).toMatchObject({ sale: { total: 2500, owed: 0, state: "paid" } });
+      expect(sale.body, "the catalog").not.toContain("Café que no se vuelve a leer");
+      expect(sale.body, "the shell").not.toContain("Beto");
+      expect(sale.response.headers.getSetCookie()).toEqual([]);
     }
   });
 
@@ -173,18 +162,19 @@ describe("what is about Bills, Payments or Stock", () => {
     for (const page of pages) {
       const [path, search = ""] = page.split("?");
       const data = `${path === "/" ? "/_" : path}.data${search ? `?${search}` : ""}`;
-      for (const url of [page, data, AFTER_A_SALE]) {
+      for (const url of [page, data]) {
         const response = await ana.fetch(url, { headers: { Cookie: phone } });
         expect(response.status, url).toBe(200);
         expect(response.headers.get("Cache-Control"), url).toBe("no-store");
       }
     }
 
-    // A recorded form's redirect, and a refused one.
-    const sale = await sell({ ...ana, cookie: phone }, item.id, "Cuenta pagada: $20.00.");
+    // A recorded sale's answer, and a refused one.
+    const sale = await sell({ ...ana, cookie: phone }, item.id);
+    expect(sale.response.status).toBe(200);
     expect(sale.response.headers.get("Cache-Control")).toBe("no-store");
-    const refused = await ana.fetch("/?index", { method: "POST", body: new URLSearchParams({ intent: "cobrar" }) });
-    expect(refused.status).toBe(400);
-    expect(refused.headers.get("Cache-Control")).toBe("no-store");
+    const refused = await recordSale(ana, { intent: "cobrar" });
+    expect(refused.response.status).toBe(400);
+    expect(refused.response.headers.get("Cache-Control")).toBe("no-store");
   });
 });

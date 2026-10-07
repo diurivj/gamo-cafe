@@ -2,12 +2,13 @@ import type { Locator } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
 
-// A form that creates a Bill or a Payment carries a key made when it was
-// rendered, and the server records one submission per key and content (spec
-// §3.4, tickets 28 and 32): a double tap records once, the form the page
-// renders next carries a new key, and a changed form sent with a used key —
-// from a document the browser restored, say — is never answered as the repeat
-// of what that key first recorded.
+// A form that creates a Payment, an Adjustment or a Count carries a key made
+// when it was rendered, and the server records one submission per key and
+// content (spec §3.4, tickets 28 and 32): a double tap records once, the form
+// the page renders next carries a new key, and a changed form sent with a
+// used key — from a document the browser restored, say — is never answered as
+// the repeat of what that key first recorded. Vender's sale makes its key at
+// the tap; its double tap and its retry are in e2e/vender-recovery.spec.ts.
 
 /**
  * Sends a form twice in the same instant, the way a double tap does before
@@ -19,38 +20,6 @@ const submitTwice = (button: Locator) =>
     submit.form!.requestSubmit(submit);
     submit.form!.requestSubmit(submit);
   });
-
-test("a double tap on Cobrar records one sale, and the same Items sell again afterwards", async ({
-  page,
-  signInAs,
-  addItem,
-  query,
-}) => {
-  const beto = await signInAs("worker", "Beto");
-  const agua = await addItem({ name: "Agua mineral", price: 1850, stock: { units: 6, by: beto } });
-  const cobrar = page.getByRole("region", { name: "Cobrar" }).getByRole("button", { name: "Cobrar" });
-
-  await page.goto("/");
-  await page.getByRole("button", { name: /Agua mineral/ }).click();
-  await expect(page.getByRole("region", { name: "Selección" })).toContainText("$18.50");
-  await submitTwice(cobrar);
-
-  await expect(page.getByRole("status")).toHaveText("Cuenta pagada: $18.50.");
-  await expect(page.getByRole("region", { name: "Selección" })).toHaveCount(0);
-  expect(await query("SELECT id FROM bills")).toHaveLength(1);
-  expect(await query("SELECT id FROM lines")).toHaveLength(1);
-  expect(await query("SELECT id FROM payments")).toHaveLength(1);
-  expect(await query("SELECT units FROM stock_levels WHERE item_id = ?", [agua.id])).toEqual([{ units: 5 }]);
-
-  // The next sale of the same Item, from the form the page rendered after it.
-  await page.getByRole("button", { name: /Agua mineral/ }).click();
-  await expect(page.getByRole("region", { name: "Selección" })).toContainText("$18.50");
-  await cobrar.click();
-
-  await expect.poll(() => query("SELECT id FROM bills")).toHaveLength(2);
-  expect(await query("SELECT id FROM payments")).toHaveLength(2);
-  expect(await query("SELECT units FROM stock_levels WHERE item_id = ?", [agua.id])).toEqual([{ units: 4 }]);
-});
 
 test("a double tap on a Bill's Cobrar records one Payment, and the next one is recorded too", async ({
   page,

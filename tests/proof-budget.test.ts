@@ -177,9 +177,9 @@ const REQUESTS: ReadonlyArray<RequestCase> = [
   },
   {
     name: "Record a ten-Item selection with Payment",
-    status: 302,
+    status: 200,
     cap: 2_000,
-    request: (cookie) => post("/?index", cookie, selectionForm()),
+    request: (cookie) => post("/vender/registrar", cookie, selectionForm()),
   },
   {
     name: "Cuentas abiertas with 200 Open Bills",

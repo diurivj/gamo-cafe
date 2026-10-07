@@ -13,13 +13,13 @@ const sources: Record<string, string> = import.meta.glob("../app/**/*.tsx", {
 });
 
 /**
- * The two submit buttons of Vender are the exception: a sale is acknowledged
- * by emptying the selection and listing it as being recorded, and the buttons
- * stay free for the next one (e2e/vender-pending.spec.ts).
+ * Only the component itself writes one. Vender has no form to submit: a sale
+ * is sent by the screen's own state (`~/shared/sale`), which freezes it at the
+ * tap and takes its actions off the screen until the answer
+ * (e2e/vender-recovery.spec.ts).
  */
 const BY_HAND: Readonly<Record<string, number>> = {
   "../app/components/submit-button.tsx": 1,
-  "../app/routes/home.tsx": 2,
 };
 
 it("every submit control of the app is a SubmitButton", () => {

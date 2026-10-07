@@ -3,6 +3,7 @@ import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { holdSubmissions } from "./support/held";
 import { goTo } from "./support/navigate";
+import { pay } from "./support/sell";
 
 // Every tap is acknowledged at once (spec §3.4, ticket 30). Each test holds
 // the server's answer back and looks at the screen meanwhile:
@@ -13,7 +14,7 @@ import { goTo } from "./support/navigate";
 // - a harmless, reversible change (retiring a Customer, a User's role and
 //   active state) shows its result at once and goes back if it is refused.
 //
-// Vender's own pending state is in vender-pending.spec.ts.
+// Vender's own pending state is in vender-recovery.spec.ts.
 
 type Held = Awaited<ReturnType<typeof holdSubmissions>>;
 
@@ -94,12 +95,7 @@ test("Cuenta shows no Payment and no correction as recorded before the server an
   await addItem({ name: "Café de olla", price: 2500, category: agua.category });
 
   await page.goto("/");
-  await page.getByRole("button", { name: /^Agua mineral/ }).click();
-  await page.getByRole("button", { name: /^Café de olla/ }).click();
-  await page.getByRole("region", { name: "Cobrar" }).getByLabel("Monto").fill("10.00");
-  await page.getByRole("region", { name: "Cobrar" }).getByRole("button", { name: "Cobrar" }).click();
-  await expect(page.getByRole("status")).toHaveText("Abono registrado. Debe $33.50.");
-  await page.goto(`/cuentas/${await page.getByRole("status").getAttribute("data-bill-id")}`);
+  await page.goto(`/cuentas/${await pay(page, { items: ["Agua mineral", "Café de olla"], amount: "10.00" })}`);
 
   const held = await holdSubmissions(page);
   const [total, paid, owed] = [0, 1, 2].map((index) => page.locator("dl dd").nth(index));

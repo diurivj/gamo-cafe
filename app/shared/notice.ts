@@ -13,8 +13,6 @@ export interface Notice {
   readonly message?: string;
   /** Which form of the page was recorded, for a page with several. */
   readonly form?: string;
-  /** The Bill a selection was recorded on, for Vender. */
-  readonly billId?: string;
   /** A one-time sign-in code to read out, for Usuarios. */
   readonly code?: { readonly name: string; readonly code: string };
 }

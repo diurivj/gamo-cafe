@@ -1,5 +1,6 @@
 import { expect, test } from "./fixtures";
 import { goTo } from "./support/navigate";
+import { leaveOpen } from "./support/sell";
 
 // Historial (spec §6.2, §8.4, §8.5, §8.6, §10.4): every correction and
 // Adjustment appears with who, when and why, newest first, and the records it
@@ -25,9 +26,7 @@ test("§10.4: each correction and Adjustment appears in Historial with its autho
   // A sale left open, then paid in full; a Worker would be sent to the list
   // after paying, so the Admin continues on Cuenta.
   await page.goto("/");
-  await page.getByRole("region", { name: "Bebidas" }).getByRole("button", { name: /Agua mineral/ }).click();
-  await page.getByRole("button", { name: "Dejar abierta" }).click();
-  const billId = await page.getByRole("status").getAttribute("data-bill-id");
+  const billId = await leaveOpen(page, { items: ["Agua mineral"] });
 
   await signInAs("admin", "Ana");
   await page.goto(`/cuentas/${billId}`);

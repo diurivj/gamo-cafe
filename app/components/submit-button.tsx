@@ -26,7 +26,7 @@ interface Props extends Omit<ComponentProps<"button">, "type"> {
  * router, which every `<Form>` and `<fetcher.Form>` is: a form whose own
  * `onSubmit` cancels the submission and sends nothing would leave the button
  * pending. `tests/submit-controls.test.ts` fails on any submit button
- * written by hand except Vender's two (see the README).
+ * written by hand. Vender has none: its sale is not a form (see the README).
  */
 export function SubmitButton({ fetcher, pendingLabel, disabled, className = "", children, ...rest }: Props) {
   const button = useRef<HTMLButtonElement>(null);

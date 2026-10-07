@@ -8,6 +8,7 @@ import { as, landing, signedIn, type SignedIn } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { savedCustomer } from "./support/customers";
 import { runTest } from "./support/effect";
+import { recordSale } from "./support/sales";
 
 // Cuentas abiertas and Cuenta through the Worker: what the routes let in, how
 // they read a form, and what they answer. The rules themselves are tested in
@@ -86,12 +87,12 @@ describe("Cuenta", () => {
     expect(html).toContain("Debe");
     expect(html).toContain('href="/?billId=' + bill.id + '"');
 
-    // Vender, targeting this Bill: the form carries it and the Customer/note
-    // fields step aside (spec §6.1, "Agregar productos").
+    // Vender, targeting this Bill: it says which one, with the way back to it
+    // (UI redesign §5.3).
     const vender = await (await beto.fetch(`/?billId=${bill.id}`)).text();
-    expect(vender).toContain("Agregando productos");
-    expect(vender).toContain("Agregar a la cuenta");
-    expect(vender).toContain(`value="${bill.id}"`);
+    expect(vender).toContain("Se agrega a una cuenta sin cliente");
+    expect(vender).toContain("Debe $18.50");
+    expect(vender).toContain(`href="/cuentas/${bill.id}"`);
   });
 
   it("puts Lines added from Cuenta on that Bill, for any User, each with its own author", async () => {
@@ -100,16 +101,13 @@ describe("Cuenta", () => {
     const item = await runTest(seedItem({ name: "Agregable a la cuenta", price: 1000, by: ana.user }));
     const bill = await leaveOpen(beto.user, item.id);
 
-    // The same URL the form carries: `?index` for the index action, and the
-    // target Bill so the loader answers for the page the User was on.
-    const response = await post(ana, `/?index&billId=${bill.id}`, {
+    const added = await recordSale(ana, {
       intent: "dejar-abierta",
       selection: selection(item.id, 2),
       billId: bill.id,
     });
 
-    expect(response.headers.get("Location")).toBe(`/?billId=${bill.id}`);
-    expect(await (await landing(ana, response)).text()).toContain("Se agregaron los productos a la cuenta");
+    expect(added.sale).toMatchObject({ billId: bill.id, total: 3000, owed: 3000, state: "open" });
 
     const updated = await runTest(getBill(bill.id).pipe(as(beto.user)));
     expect(updated.total).toBe(3000);
@@ -139,17 +137,17 @@ describe("Cuenta", () => {
       billId: pagada.id,
     };
 
-    const asAdmin = await post(ana, "/?index", fields);
-    expect(asAdmin.status).toBe(400);
-    expect(await asAdmin.text()).toContain("Esta cuenta ya no está abierta.");
+    const asAdmin = await recordSale(ana, fields);
+    expect(asAdmin.response.status).toBe(400);
+    expect(asAdmin.error).toContain("Esta cuenta ya no está abierta.");
 
-    const asWorker = await post(beto, "/?index", fields);
-    expect(asWorker.status).toBe(400);
+    const asWorker = await recordSale(beto, fields);
+    expect(asWorker.response.status).toBe(400);
 
     // A Customer or a note cannot be smuggled in with a target Bill either.
-    const conflicted = await post(ana, "/?index", { ...fields, customerId: "", note: "otra" });
-    expect(conflicted.status).toBe(400);
-    expect(await conflicted.text()).toContain("No se puede elegir cliente ni nota");
+    const conflicted = await recordSale(ana, { ...fields, customerId: "", note: "otra" });
+    expect(conflicted.response.status).toBe(400);
+    expect(conflicted.error).toContain("No se puede elegir cliente ni nota");
 
     expect((await runTest(getBill(pagada.id).pipe(as(ana.user)))).lines).toHaveLength(1);
   });

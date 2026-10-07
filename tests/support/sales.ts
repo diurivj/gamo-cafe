@@ -1,11 +1,35 @@
+import type { SaleRefusal, SaleResult } from "~/shared/sale";
+
+import type { SignedIn } from "./auth";
+
+/** Where Vender sends a sale (`app/routes/resources/record-sale.ts`). */
+export const SALE_PATH = "/vender/registrar";
+
 /**
- * One sale's fields as Vender's form sends them:
+ * Sends one sale as Vender does and reads the route's JSON answer: the Bill
+ * as the sale left it, or the refusal.
  *
- *     await beto.fetch("/?index", { method: "POST", body: saleForm({ itemId }) });
+ *     const { sale } = await recordSale(beto, saleForm({ itemId }));
+ *     const { response, error } = await recordSale(beto, { intent: "cobrar" });
+ */
+export async function recordSale(
+  who: Pick<SignedIn, "fetch">,
+  fields: URLSearchParams | Record<string, string>,
+  init: RequestInit = {},
+) {
+  const response = await who.fetch(SALE_PATH, { ...init, method: "POST", body: new URLSearchParams(fields) });
+  const answer = (await response.clone().json()) as Partial<{ sale: SaleResult } & SaleRefusal>;
+  return { response, sale: answer.sale, error: answer.error, unavailable: answer.unavailable };
+}
+
+/**
+ * One sale's fields as Vender sends them:
  *
- * `intent` defaults to `dejar-abierta`; `cobrar` adds the Payment fields its
- * action reads. `submissionKey` is the key of the rendered form (ticket 28),
- * which a browser makes; a test that sends the same form twice passes one.
+ *     await recordSale(beto, saleForm({ itemId }));
+ *
+ * `intent` defaults to `dejar-abierta`; `cobrar` adds the Payment fields the
+ * action reads. `submissionKey` is the key of the sale (ticket 28), which the
+ * browser makes at the tap; a test that sends the same sale twice passes one.
  */
 export function saleForm(sale: {
   readonly itemId: string;

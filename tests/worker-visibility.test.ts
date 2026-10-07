@@ -1,9 +1,10 @@
 import { Effect } from "effect";
 import { expect, it } from "vitest";
 
-import { as, landing, seedUser, signedIn, type SignedIn } from "./support/auth";
+import { as, seedUser, signedIn, type SignedIn } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { runTest } from "./support/effect";
+import { recordSale } from "./support/sales";
 
 /**
  * Spec §4.2: what a Worker never sees. Stock numbers, another User's totals,
@@ -20,29 +21,19 @@ const form = (fields: Record<string, string>) => ({
   body: new URLSearchParams(fields),
 });
 
-/** The Bill a Vender response recorded, from the status message it renders. */
-function billIdOf(html: string, label: string): string {
-  const found = /data-bill-id="([^"]+)"/.exec(html);
-  expect(found, label).not.toBeNull();
-  return found![1]!;
-}
-
-/** One sale through Vender, by this phone. */
+/** One sale through Vender, by this phone: the Bill it recorded. */
 async function sell(
   who: SignedIn,
   itemId: string,
   options: { intent: "dejar-abierta" | "cobrar"; amount?: string },
 ): Promise<string> {
-  const response = await who.fetch(
-    "/?index",
-    form({
-      intent: options.intent,
-      selection: JSON.stringify([{ itemId, quantity: 1 }]),
-      ...(options.amount ? { method: "cash", amount: options.amount } : {}),
-    }),
-  );
-  // Recorded sales answer with a redirect; the page it lands on names the Bill.
-  return billIdOf(await (await landing(who, response)).text(), "the sale response carries the Bill");
+  const { sale } = await recordSale(who, {
+    intent: options.intent,
+    selection: JSON.stringify([{ itemId, quantity: 1 }]),
+    ...(options.amount ? { method: "cash", amount: options.amount } : {}),
+  });
+  expect(sale, "the sale answers with its Bill").toBeDefined();
+  return sale!.billId;
 }
 
 /** The distinctive words of the screens §4.1 keeps for Admins. */

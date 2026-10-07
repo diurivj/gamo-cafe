@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { addToBill, leaveOpen } from "./support/sell";
 
 // Corrections on Cuenta (spec §5.7, §8.4, §8.5, §10.4): removing a Line,
 // removing a Payment and voiding a Bill, each with its author, its moment and
@@ -22,10 +23,7 @@ test("§8.4: a Worker removes the wrong Line on an unpaid Bill; the Line is reco
   });
 
   await page.goto("/");
-  await page.getByRole("region", { name: "Bebidas" }).getByRole("button", { name: /Agua mineral/ }).click();
-  await page.getByRole("button", { name: "Dejar abierta" }).click();
-  await expect(page.getByRole("status")).toContainText("por $18.50.");
-  const billId = await page.getByRole("status").getAttribute("data-bill-id");
+  const billId = await leaveOpen(page, { items: ["Agua mineral"] });
 
   await page.goto(`/cuentas/${billId}`);
 
@@ -74,14 +72,11 @@ test("§8.5: an Admin removes the Payment and then voids, each with a reason; St
   // Two Lines of the same Item, left open: one will be removed before the
   // void, so voiding must not return its units a second time.
   await page.goto("/");
-  await page.getByRole("region", { name: "Bebidas" }).getByRole("button", { name: /Agua mineral/ }).click();
-  await page.getByRole("button", { name: "Dejar abierta" }).click();
-  const billId = await page.getByRole("status").getAttribute("data-bill-id");
+  const billId = await leaveOpen(page, { items: ["Agua mineral"] });
   await page.goto(`/cuentas/${billId}`);
   await page.getByRole("link", { name: "Agregar productos" }).click();
-  await page.getByRole("region", { name: "Bebidas" }).getByRole("button", { name: /Agua mineral/ }).click();
-  await page.getByRole("button", { name: "Agregar a la cuenta" }).click();
-  await page.getByRole("link", { name: "Ver cuenta" }).click();
+  await addToBill(page, ["Agua mineral"]);
+  await page.getByRole("link", { name: "Volver a la cuenta" }).click();
 
   // An Admin pays it in full from Cuenta, so the Payment is on a Paid Bill
   // (ticket 08); a Worker would be sent to the list instead (§4.1).
@@ -156,9 +151,7 @@ test("a reason typed right after a correction's status is not wiped by the reval
   await addItem({ name: "Chocolate", price: 2000, category: bebidas, stock: { units: 10, by: ana } });
 
   await page.goto("/");
-  await page.getByRole("region", { name: "Bebidas" }).getByRole("button", { name: /Chocolate/ }).click();
-  await page.getByRole("button", { name: "Dejar abierta" }).click();
-  const billId = await page.getByRole("status").getAttribute("data-bill-id");
+  const billId = await leaveOpen(page, { items: ["Chocolate"] });
 
   // One Line and a partial Payment, so the Payment can be removed.
   await page.goto(`/cuentas/${billId}`);

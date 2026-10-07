@@ -1,20 +1,17 @@
 import type { Page } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
+import * as sell from "./support/sell";
 
 // Changing a Bill's Customer or note on Cuenta (spec §5.3, §4.1, §6.1,
 // §7.3.4): any User while the Bill has no Payment, an Admin afterwards. Every
 // change leaves a `bill_edits` fact. Both projects run a phone viewport
 // (playwright.config.ts).
 
-const menu = (page: Page, category = "Bebidas") => page.getByRole("region", { name: category });
-
 /** Builds a one-Item selection on Vender and leaves the Bill open. */
 async function leaveOpen(page: Page, item: string, sale: { note?: string; total: string }) {
-  await menu(page).getByRole("button", { name: new RegExp(item) }).click();
-  if (sale.note) await page.getByLabel("Nota (opcional)").fill(sale.note);
-  await page.getByRole("button", { name: "Dejar abierta" }).click();
-  await expect(page.getByRole("status")).toContainText(`por ${sale.total}.`);
+  await sell.leaveOpen(page, { items: [item], note: sale.note });
+  await expect(page.getByRole("status")).toContainText(`debe ${sale.total}.`);
 }
 
 /** The one Bill the test has made so far. */
