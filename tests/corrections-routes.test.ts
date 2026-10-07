@@ -7,6 +7,7 @@ import { stockOf } from "~/backend/stock";
 import { as, seedUser, signedIn } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { runTest } from "./support/effect";
+import { recordPayment } from "./support/sales";
 
 // Cuenta's corrections through the Worker (spec §5.7, §8.4, §8.5, §10.4).
 // The server must refuse what the screen hides: a Worker removing a Line from
@@ -251,19 +252,11 @@ describe("an Admin's corrections through Cuenta", () => {
         revision: String(voided.revision),
       }),
     );
-    const pay = await ana.fetch(
-      `/cuentas/${bill.id}`,
-      post({
-        intent: "pagar",
-        method: "cash",
-        amount: "5.00",
-        revision: String(voided.revision),
-      }),
-    );
+    const pay = await recordPayment(ana, bill.id, { method: "cash", amount: "5.00", revision: String(voided.revision) });
 
     expect(line.status).toBe(400);
     expect(await line.text()).toContain("cancelada");
-    expect(pay.status).toBe(400);
-    expect(await pay.text()).toContain("cancelada");
+    expect(pay.response.status).toBe(400);
+    expect(pay.error).toContain("cancelada");
   });
 });

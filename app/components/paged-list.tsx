@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useFetcher, useLocation } from "react-router";
 
+import { hint } from "~/components/styles";
+import { buttonClasses } from "~/components/ui/button";
+
 // A paged list (spec §3.4): the first page comes from the route's loader, and
 // **Cargar más** asks the same loader for the page after it and appends it.
 // `usePagedList` holds the rows; `LoadMore` is the control. Every list that
@@ -207,14 +210,12 @@ export function LoadMore({ more, label = "Cargar más" }: { more: More; label?: 
             byHand.current = true;
             more.load();
           }}
-          className={`rounded-xl border border-stone-300 bg-white px-4 py-3 text-center font-medium active:bg-stone-100 ${
-            loading ? "opacity-60" : ""
-          }`}
+          className={`${buttonClasses({ size: "touch", variant: "outline" })} ${loading ? "opacity-60" : ""}`}
         >
           {label}
         </Link>
       )}
-      <p ref={status} role="status" tabIndex={-1} className="min-h-6 text-center text-stone-600 outline-none">
+      <p ref={status} role="status" tabIndex={-1} className={`min-h-7 text-center outline-none ${hint}`}>
         {loading ? "Cargando…" : ended ? "No hay más." : ""}
       </p>
     </div>

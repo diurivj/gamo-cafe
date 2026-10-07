@@ -4,11 +4,11 @@ import { describe, expect, it } from "vitest";
 import { getBill, recordSelection } from "~/backend/bills";
 import { Db } from "~/backend/db";
 
-import { as, landing, signedIn, type SignedIn } from "./support/auth";
+import { as, signedIn, type SignedIn } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { savedCustomer } from "./support/customers";
 import { runTest } from "./support/effect";
-import { recordSale } from "./support/sales";
+import { recordPayment, recordSale } from "./support/sales";
 
 // Cuentas abiertas and Cuenta through the Worker: what the routes let in, how
 // they read a form, and what they answer. The rules themselves are tested in
@@ -186,13 +186,16 @@ describe("Cobrar on Cuenta", () => {
     const bill = await leaveOpen(beto.user, item.id);
 
     // A Worker takes a partial Payment: the amount may be less than owed.
-    const partial = await post(beto, `/cuentas/${bill.id}`, {
-      intent: "pagar",
+    const partial = await recordPayment(beto, bill.id, {
       method: "cash",
       amount: "5.00",
       revision: String(bill.revision),
     });
-    expect(await (await landing(beto, partial)).text()).toContain("Abono de $5.00 registrado. Debe $13.50.");
+    expect(partial.response.status).toBe(200);
+    // Answered to the request that sent it, and nothing left in a cookie.
+    expect(partial.response.headers.getSetCookie()).toEqual([]);
+    expect(partial.response.headers.get("Cache-Control")).toBe("no-store");
+    expect(partial.payment).toEqual({ amount: 500, total: 1850, owed: 1350, paid: false, canOpen: true });
 
     const page = await (await beto.fetch(`/cuentas/${bill.id}`)).text();
     expect(page).toContain("Pago parcial");
@@ -202,16 +205,10 @@ describe("Cobrar on Cuenta", () => {
     expect(page).toContain("$13.50");
     expect(page).toContain("$5.00");
 
-    // An empty amount pays everything still owed; an Admin stays to see it
-    // Pagada.
+    // An empty amount pays everything still owed; an Admin may open it Pagada.
     const fresh = await runTest(getBill(bill.id).pipe(as(beto.user)));
-    const paid = await post(ana, `/cuentas/${bill.id}`, {
-      intent: "pagar",
-      method: "transfer",
-      amount: "",
-      revision: String(fresh.revision),
-    });
-    expect(await (await landing(ana, paid)).text()).toContain("Cuenta pagada: $18.50.");
+    const paid = await recordPayment(ana, bill.id, { method: "transfer", amount: "", revision: String(fresh.revision) });
+    expect(paid.payment).toEqual({ amount: 1350, total: 1850, owed: 0, paid: true, canOpen: true });
 
     const after = await runTest(getBill(bill.id).pipe(as(ana.user)));
     expect(after).toMatchObject({ paid: 1850, owed: 0, state: "paid" });
@@ -226,16 +223,32 @@ describe("Cobrar on Cuenta", () => {
     const item = await runTest(seedItem({ name: "Revisión en Cuenta", price: 1000 }));
     const bill = await leaveOpen(beto.user, item.id);
 
-    const response = await post(beto, `/cuentas/${bill.id}`, {
-      intent: "pagar",
-      method: "cash",
-      amount: "",
-      revision: String(bill.revision + 1),
-    });
+    const stale = await recordPayment(beto, bill.id, { method: "cash", amount: "", revision: String(bill.revision + 1) });
 
-    expect(response.status).toBe(400);
-    expect(await response.text()).toContain("La cuenta cambió mientras registrabas el pago.");
+    expect(stale.response.status).toBe(400);
+    expect(stale.error).toBe("La cuenta cambió mientras registrabas el pago. Revisa el monto y vuelve a intentar.");
+    // The Bill is still Open, so the Worker's screen may read it again.
+    expect(stale.changed).toEqual({ canOpen: true });
     expect((await runTest(getBill(bill.id).pipe(as(beto.user)))).payments).toEqual([]);
+  });
+
+  it("tells a Worker whose Bill was paid from another phone that it is no longer theirs to open", async () => {
+    const beto = await signedIn("worker", "Beto");
+    const ana = await signedIn("admin", "Ana");
+    const item = await runTest(seedItem({ name: "Pagada en otro teléfono", price: 1000, by: ana.user }));
+    const bill = await leaveOpen(beto.user, item.id);
+    const payment = { method: "cash", amount: "$10.00", revision: String(bill.revision) };
+
+    expect((await recordPayment(ana, bill.id, payment)).payment).toMatchObject({ paid: true });
+    const late = await recordPayment(beto, bill.id, payment);
+    const lateAdmin = await recordPayment(ana, bill.id, { ...payment, method: "transfer" });
+
+    expect(late.response.status).toBe(400);
+    expect(late.error).toContain("La cuenta cambió mientras registrabas el pago.");
+    expect(late.changed).toEqual({ canOpen: false });
+    // An Admin opens a Paid Bill, so theirs is read again.
+    expect(lateAdmin.changed).toEqual({ canOpen: true });
+    expect((await runTest(getBill(bill.id).pipe(as(ana.user)))).payments).toHaveLength(1);
   });
 
   it("refuses a Payment of zero, larger than owed or unreadable, in Spanish", async () => {
@@ -243,42 +256,62 @@ describe("Cobrar on Cuenta", () => {
     const item = await runTest(seedItem({ name: "Rechazo en Cuenta", price: 1000 }));
     const bill = await leaveOpen(beto.user, item.id);
     const fields = (extra: Record<string, string>) => ({
-      intent: "pagar",
       method: "cash",
       amount: "",
       revision: String(bill.revision),
       ...extra,
     });
 
-    const requests = [
-      await post(beto, `/cuentas/${bill.id}`, fields({ amount: "0" })),
-      await post(beto, `/cuentas/${bill.id}`, fields({ amount: "10.01" })),
-      await post(beto, `/cuentas/${bill.id}`, fields({ amount: "mucho" })),
-      await post(beto, `/cuentas/${bill.id}`, { ...fields({}), method: "" }),
+    const refused = [
+      await recordPayment(beto, bill.id, fields({ amount: "0" })),
+      await recordPayment(beto, bill.id, fields({ amount: "10.01" })),
+      await recordPayment(beto, bill.id, fields({ amount: "mucho" })),
+      await recordPayment(beto, bill.id, fields({ method: "" })),
+      await recordPayment(beto, bill.id, fields({ revision: "" })),
     ];
 
-    expect(requests.map((response) => response.status)).toEqual([400, 400, 400, 400]);
-    const messages = await Promise.all(requests.map((response) => response.text()));
-    expect(messages[0]).toContain("El pago debe ser mayor que cero.");
-    expect(messages[1]).toContain("El pago no puede ser mayor que lo que debe la cuenta.");
-    expect(messages[2]).toContain("El monto no es válido. Escríbelo como 18.50.");
-    expect(messages[3]).toContain("Elige cómo se pagó.");
+    expect(refused.map(({ response }) => response.status)).toEqual([400, 400, 400, 400, 400]);
+    expect(refused.map(({ error }) => error)).toEqual([
+      "El pago debe ser mayor que cero.",
+      "El pago no puede ser mayor que lo que debe la cuenta.",
+      "El monto no es válido. Escríbelo como 18.50.",
+      "Elige cómo se pagó.",
+      "Recarga la página e intenta de nuevo.",
+    ]);
+    // Only the one about what the Bill owes asks the screen to read it again.
+    expect(refused.map(({ changed }) => changed)).toEqual([undefined, { canOpen: true }, undefined, undefined, undefined]);
     expect((await runTest(getBill(bill.id).pipe(as(beto.user)))).payments).toEqual([]);
   });
 
-  it("sends a Worker to Cuentas abiertas after a Payment that makes the Bill Pagada", async () => {
+  it("answers a Worker whose Payment makes the Bill Pagada without sending them into it", async () => {
     const beto = await signedIn("worker", "Beto");
     const item = await runTest(seedItem({ name: "Pagada por empleado", price: 1200 }));
     const bill = await leaveOpen(beto.user, item.id);
 
-    const response = await post(beto, `/cuentas/${bill.id}`, {
+    const paid = await recordPayment(beto, bill.id, { method: "cash", amount: "", revision: String(bill.revision) });
+
+    expect(paid.response.status).toBe(200);
+    expect(paid.payment).toEqual({ amount: 1200, total: 1200, owed: 0, paid: true, canOpen: false });
+    expect((await beto.fetch(`/cuentas/${bill.id}`)).status).toBe(403);
+  });
+
+  it("answers a Bill that does not exist as a refusal, and takes no Payment through Cuenta's own forms", async () => {
+    const beto = await signedIn("worker", "Beto");
+    const item = await runTest(seedItem({ name: "Sin formulario de pago", price: 1200 }));
+    const bill = await leaveOpen(beto.user, item.id);
+
+    const missing = await recordPayment(beto, "nadie", { method: "cash", amount: "", revision: "0" });
+    expect(missing.response.status).toBe(404);
+    expect(missing.changed).toEqual({ canOpen: false });
+
+    // The Payment has one way in: the page's action no longer knows it.
+    const old = await post(beto, `/cuentas/${bill.id}`, {
       intent: "pagar",
       method: "cash",
       amount: "",
       revision: String(bill.revision),
     });
-
-    expect(response.status).toBe(302);
-    expect(response.headers.get("Location")).toBe("/cuentas-abiertas");
+    expect(old.status).toBe(400);
+    expect((await runTest(getBill(bill.id).pipe(as(beto.user)))).payments).toEqual([]);
   });
 });

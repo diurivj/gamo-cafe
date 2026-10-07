@@ -12,7 +12,7 @@ import { appFetch, as, landing, seedUser, type SignedIn, signedIn } from "./supp
 import { seedItem } from "./support/catalog";
 import { seedCustomer } from "./support/customers";
 import { runTest } from "./support/effect";
-import { recordSale, saleForm } from "./support/sales";
+import { recordPayment, recordSale, saleForm } from "./support/sales";
 
 /**
  * Spec §4.1 and §10.6: the server enforces the permissions matrix in every
@@ -130,9 +130,16 @@ const routes: Readonly<Record<string, RouteRule>> = {
     get: { worker: 403, admin: 200 },
   },
   "/cuentas/x": {
-    about: "Cuenta: one Bill, its corrections and Payment; unknown id",
+    about: "Cuenta: one Bill, its Customer and note and its corrections; unknown id",
     signedOut: "redirect",
     get: { worker: 404, admin: 404 },
+    post: { worker: 400, admin: 400 },
+  },
+  "/cuentas/x/cobrar": {
+    about: "Where Cuenta sends a Payment",
+    signedOut: "redirect",
+    // An action and no loader: there is nothing to read here.
+    get: { worker: 400, admin: 400 },
     post: { worker: 400, admin: 400 },
   },
   "/clientes": {
@@ -424,12 +431,13 @@ const rows: ReadonlyArray<MatrixRow> = [
       const customer = await seedCustomerFor();
       const theirs = await seedBill({ itemId: item.id, quantities: [2], customerId: customer.id });
 
-      const onBill = await who.fetch(
-        `/cuentas/${bill.id}`,
-        form({ intent: "pagar", method: "cash", amount: "5.00", revision: String(bill.revision) }),
-      );
-      const onBillPage = await landed(onBill, who, label);
-      expect(await onBillPage.text(), label).toContain("Abono de $5.00 registrado.");
+      const onBill = await recordPayment(who, bill.id, {
+        method: "cash",
+        amount: "5.00",
+        revision: String(bill.revision),
+      });
+      expect(onBill.response.status, label).toBe(200);
+      expect(onBill.payment, label).toMatchObject({ amount: 500, owed: 1500, paid: false, canOpen: true });
 
       // For a Customer: one amount over their Open Bills, oldest first.
       const forCustomer = await who.fetch(

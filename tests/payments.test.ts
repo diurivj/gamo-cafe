@@ -7,6 +7,7 @@ import { Db } from "~/backend/db";
 import { as, seedUser, signedIn } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { advanceClock, runTest, setClock } from "./support/effect";
+import { recordPayment } from "./support/sales";
 
 // Payments (spec §2.3, §5.5, §5.6, §7.3.2, §10.3). Tests in one file share a
 // D1, and active Item names are unique, so each test names its own.
@@ -234,23 +235,15 @@ describe("two phones paying the same Bill at once", () => {
 
     // The same page, the same revision: one submission wins.
     const pay = (who: typeof ana) =>
-      who.fetch(`/cuentas/${seeded.bill.id}`, {
-        method: "POST",
-        body: new URLSearchParams({
-          intent: "pagar",
-          amount: "30.00",
-          method: "cash",
-          revision: String(seeded.bill.revision),
-        }),
-      });
-    const responses = await Promise.all([pay(ana), pay(beto)]);
-    const bodies = await Promise.all(responses.map((response) => response.text()));
+      recordPayment(who, seeded.bill.id, { amount: "30.00", method: "cash", revision: String(seeded.bill.revision) });
+    const answers = await Promise.all([pay(ana), pay(beto)]);
 
     // Whichever request lands first records the Payment and the other is
-    // refused. The winner is Ana (200) or Beto: a Worker who paid the Bill in
-    // full is sent to Cuentas abiertas, because they may not open a Paid Bill.
-    expect([[200, 400], [302, 400]]).toContainEqual(responses.map((response) => response.status).sort());
-    expect(bodies.filter((body) => body.includes("La cuenta cambió"))).toHaveLength(1);
+    // refused, visibly: told the Bill changed, and nothing more is written.
+    expect(answers.map(({ response }) => response.status).sort()).toEqual([200, 400]);
+    expect(answers.filter(({ error }) => error?.includes("La cuenta cambió"))).toHaveLength(1);
+    // A Worker is never told they may open the Bill it left Paid (§4.1).
+    expect(answers[1].payment?.canOpen ?? answers[1].changed?.canOpen).toBe(false);
 
     const after = await runTest(getBill(seeded.bill.id).pipe(as(seeded.ana)));
     expect(after).toMatchObject({ paid: 3000, owed: 0, state: "paid" });

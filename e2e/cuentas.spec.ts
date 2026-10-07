@@ -58,9 +58,10 @@ test("Cuentas abiertas lists every Open Bill newest first with what it owes, and
   await expect(rows.nth(1)).toContainText("Familia Ruiz");
   await expect(rows.nth(2)).toContainText("Se lo llevó Sofía");
   // Total, paid and owed, and the state.
-  await expect(rows.nth(1)).toContainText("Total $62.00 · Pagado $0.00 · Debe $62.00");
+  await expect(rows.nth(1)).toContainText("Debe $62.00");
+  await expect(rows.nth(1)).toContainText("Total $62.00 · Pagado $0.00");
   await expect(rows.nth(1)).toContainText("Abierta");
-  await expect(rows.nth(0)).toContainText("Total $25.00 · Pagado $0.00 · Debe $25.00");
+  await expect(rows.nth(0)).toContainText("Debe $25.00");
 
   // Search by Customer, as the name is typed (a prefix, as on Clientes).
   await page.getByLabel("Buscar por cliente").fill("familia p");

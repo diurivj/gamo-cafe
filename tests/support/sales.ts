@@ -1,3 +1,4 @@
+import type { BillPaymentRefusal, BillPaymentResult } from "~/shared/bill-payment";
 import type { SaleRefusal, SaleResult } from "~/shared/sale";
 
 import type { SignedIn } from "./auth";
@@ -53,4 +54,24 @@ export function saleForm(sale: {
     form.set("amount", "");
   }
   return form;
+}
+
+/** Where Cuenta sends a Payment (`app/routes/resources/record-payment.ts`). */
+export const paymentPath = (billId: string) => `/cuentas/${billId}/cobrar`;
+
+/**
+ * Sends one Payment as Cuenta does and reads the route's JSON answer: the
+ * Bill as the Payment left it, or the refusal. An empty `amount` pays
+ * everything the Bill owes.
+ *
+ *     const { payment } = await recordPayment(beto, bill.id, { method: "cash", amount: "5.00", revision: "0" });
+ */
+export async function recordPayment(
+  who: Pick<SignedIn, "fetch">,
+  billId: string,
+  fields: { readonly method: string; readonly amount: string; readonly revision: string; readonly submissionKey?: string },
+) {
+  const response = await who.fetch(paymentPath(billId), { method: "POST", body: new URLSearchParams(fields) });
+  const answer = (await response.clone().json()) as Partial<{ payment: BillPaymentResult } & BillPaymentRefusal>;
+  return { response, payment: answer.payment, error: answer.error, changed: answer.changed };
 }

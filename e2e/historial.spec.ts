@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { payBill, seeBill } from "./support/bill";
 import { goTo } from "./support/navigate";
 import { leaveOpen } from "./support/sell";
 
@@ -30,8 +31,9 @@ test("§10.4: each correction and Adjustment appears in Historial with its autho
 
   await signInAs("admin", "Ana");
   await page.goto(`/cuentas/${billId}`);
-  await page.getByRole("region", { name: "Cobrar" }).getByRole("button", { name: "Cobrar" }).click();
+  await payBill(page);
   await expect(page.getByRole("status")).toContainText("Cuenta pagada");
+  await seeBill(page);
 
   // Remove the Payment: an Admin, with a reason (spec §5.7).
   const pagos = page.getByRole("list", { name: "Pagos" });

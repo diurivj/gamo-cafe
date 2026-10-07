@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { payBill, seeBill } from "./support/bill";
 import { pay } from "./support/sell";
 
 // Payments (spec §5.5, §5.6, §6.1, §8.1, §10.2, §10.3): Vender's review step
@@ -76,15 +77,14 @@ test("a partial sale leaves Pago parcial, and Cuenta lists its Payments and coll
   await expect(pagos).toContainText("Beto");
   await expect(pagos).toContainText(/\d{2}:\d{2}/);
 
-  // An Admin empties nothing: the amount already holds what the Bill owes, and
-  // paying it makes the Bill Pagada.
+  // An Admin types nothing: the Payment already is what the Bill owes, the
+  // action says so, and paying it makes the Bill Pagada.
   await signInAs("admin", "Ana");
   await page.goto(`/cuentas/${billId}`);
-  const cobrarCuenta = page.getByRole("region", { name: "Cobrar" });
-  await expect(cobrarCuenta.getByLabel("Monto")).toHaveValue("$15.00");
-  await cobrarCuenta.getByRole("button", { name: "Cobrar" }).click();
+  await payBill(page);
 
-  await expect(page.getByRole("status")).toContainText("Cuenta pagada: $25.00.");
+  await expect(page.getByRole("status")).toHaveText("$15.00 en efectivo. Cuenta pagada.");
+  await seeBill(page);
   await expect(main).toContainText("Pagada");
   await expect(page.getByRole("list", { name: "Pagos" }).getByRole("listitem")).toHaveCount(2);
   expect(

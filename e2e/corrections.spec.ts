@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { payBill, seeBill } from "./support/bill";
 import { addToBill, leaveOpen } from "./support/sell";
 
 // Corrections on Cuenta (spec §5.7, §8.4, §8.5, §10.4): removing a Line,
@@ -82,8 +83,9 @@ test("§8.5: an Admin removes the Payment and then voids, each with a reason; St
   // (ticket 08); a Worker would be sent to the list instead (§4.1).
   await signInAs("admin", "Ana");
   await page.goto(`/cuentas/${billId}`);
-  await page.getByRole("region", { name: "Cobrar" }).getByRole("button", { name: "Cobrar" }).click();
-  await expect(page.getByRole("status")).toContainText("Cuenta pagada: $37.00.");
+  await payBill(page);
+  await expect(page.getByRole("status")).toHaveText("$37.00 en efectivo. Cuenta pagada.");
+  await seeBill(page);
   expect(await query("SELECT units FROM stock_levels WHERE item_id = ?", [agua.id])).toEqual([{ units: 8 }]);
 
   await expect(page.locator("main")).toContainText("Pagada");
@@ -155,10 +157,9 @@ test("a reason typed right after a correction's status is not wiped by the reval
 
   // One Line and a partial Payment, so the Payment can be removed.
   await page.goto(`/cuentas/${billId}`);
-  const cobrar = page.getByRole("region", { name: "Cobrar" });
-  await cobrar.getByLabel("Monto").fill("10.00");
-  await cobrar.getByRole("button", { name: "Cobrar" }).click();
-  await expect(page.getByRole("status")).toContainText("Abono de $10.00 registrado.");
+  await payBill(page, { amount: "10.00" });
+  await expect(page.getByRole("status")).toHaveText("$10.00 en efectivo. La cuenta todavía debe $10.00.");
+  await seeBill(page);
 
   // Remove the Payment, with the reason an Admin owes.
   const pagos = page.getByRole("list", { name: "Pagos" });

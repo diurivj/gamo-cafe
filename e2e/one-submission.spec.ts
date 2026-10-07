@@ -1,27 +1,16 @@
-import type { Locator } from "@playwright/test";
-
 import { expect, test } from "./fixtures";
+import { openPay, payBill, seeBill, typePayment } from "./support/bill";
 
 // A form that creates a Payment, an Adjustment or a Count carries a key made
 // when it was rendered, and the server records one submission per key and
 // content (spec §3.4, tickets 28 and 32): a double tap records once, the form
 // the page renders next carries a new key, and a changed form sent with a
 // used key — from a document the browser restored, say — is never answered as
-// the repeat of what that key first recorded. Vender's sale makes its key at
-// the tap; its double tap and its retry are in e2e/vender-recovery.spec.ts.
+// the repeat of what that key first recorded. Vender's sale and Cuenta's
+// Payment make their key at the tap; a sale's double tap and retry are in
+// e2e/vender-recovery.spec.ts, a Payment's retry in e2e/cuenta-cobrar.spec.ts.
 
-/**
- * Sends a form twice in the same instant, the way a double tap does before
- * the button is disabled: both submissions carry what the form holds now.
- */
-const submitTwice = (button: Locator) =>
-  button.evaluate((element) => {
-    const submit = element as HTMLButtonElement;
-    submit.form!.requestSubmit(submit);
-    submit.form!.requestSubmit(submit);
-  });
-
-test("a double tap on a Bill's Cobrar records one Payment, and the next one is recorded too", async ({
+test("a double tap on Cuenta's Registrar pago records one Payment, and the next one is recorded too", async ({
   page,
   signInAs,
   query,
@@ -32,24 +21,32 @@ test("a double tap on a Bill's Cobrar records one Payment, and the next one is r
      VALUES ('doble', '2026-09-29', ?, 1000, 5000, 0, 'open', 0)`,
     [ana.id],
   );
-  const cobrar = page.getByRole("region", { name: "Cobrar" });
+  const sent: string[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "POST") sent.push(new URL(request.url()).pathname);
+  });
 
   await page.goto("/cuentas/doble");
-  await cobrar.getByLabel("Monto").fill("20.00");
-  await cobrar.getByRole("radio", { name: "Efectivo" }).check();
-  await submitTwice(cobrar.getByRole("button", { name: "Cobrar" }));
+  await openPay(page);
+  await typePayment(page, { amount: "20.00" });
+  // Twice in the same instant, before the screen can take the button away.
+  await page.getByRole("button", { name: "Registrar pago de $20.00" }).evaluate((button: HTMLElement) => {
+    button.click();
+    button.click();
+  });
 
-  // Answered as one Payment, not as a Bill that changed under the second tap.
-  await expect(page.getByRole("status")).toHaveText("Abono de $20.00 registrado. Debe $30.00.");
+  // One Payment, sent once: the second tap found it already on its way.
+  await expect(page.getByRole("heading", { name: "Pago registrado", level: 1 })).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText("$20.00 en efectivo. La cuenta todavía debe $30.00.");
   await expect(page.getByRole("alert")).toHaveCount(0);
+  expect(sent).toEqual(["/cuentas/doble/cobrar"]);
   expect(await query("SELECT amount FROM payments")).toEqual([{ amount: 2000 }]);
 
-  // The same amount again, from the form the page rendered after the first.
-  await cobrar.getByLabel("Monto").fill("20.00");
-  await cobrar.getByRole("radio", { name: "Efectivo" }).check();
-  await cobrar.getByRole("button", { name: "Cobrar" }).click();
+  // The same amount again is another Payment, with the Bill's new revision and its own key.
+  await seeBill(page);
+  await payBill(page, { amount: "20.00" });
 
-  await expect(page.getByRole("status")).toHaveText("Abono de $20.00 registrado. Debe $10.00.");
+  await expect(page.getByRole("status")).toHaveText("$20.00 en efectivo. La cuenta todavía debe $10.00.");
   expect(await query("SELECT amount FROM payments")).toEqual([{ amount: 2000 }, { amount: 2000 }]);
 });
 

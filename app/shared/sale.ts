@@ -1,6 +1,6 @@
 import type { BillState } from "./bill-state";
 import { type Centavos, changeFor, formatMoney } from "./money";
-import type { PaymentMethod } from "./payment";
+import { paidByMethod, type PaymentMethod } from "./payment";
 import { NEW_PAYMENT, type PaymentDraft, readPaymentDraft } from "./payment-draft";
 import { paymentMessages } from "./payment-messages";
 import type { Recorded, Refusal } from "./record-request";
@@ -260,8 +260,6 @@ export function recordingText(snapshot: SaleSnapshot): string {
   return snapshot.billId ? "Agregando a la cuenta…" : "Dejando la cuenta abierta…";
 }
 
-const paidBy: Record<PaymentMethod, string> = { cash: "en efectivo", transfer: "por transferencia" };
-
 /**
  * What a confirmed sale says (UI redesign §5.4): the Payment that was
  * recorded, if any, and what the Bill still owes. A Bill is called Paid only
@@ -272,7 +270,7 @@ export function saleOutcome(snapshot: SaleSnapshot, result: SaleResult) {
   const { payment } = snapshot;
   const bill = result.customerName ? `La cuenta de ${result.customerName}` : "La cuenta";
   const title = payment ? "Pago registrado" : snapshot.billId ? "Productos agregados" : "Cuenta abierta";
-  const paid = payment ? `${formatMoney(payment.amount)} ${paidBy[payment.method]}.` : "No se registró ningún pago.";
+  const paid = payment ? `${formatMoney(payment.amount)} ${paidByMethod[payment.method]}.` : "No se registró ningún pago.";
   const owed =
     result.owed === 0
       ? "Cuenta pagada."

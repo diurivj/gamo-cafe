@@ -119,6 +119,46 @@ test("coming back to the list restores what was loaded and where it was scrolled
   await expect(bill).toBeInViewport();
 });
 
+test("Cuenta's own way back to the list restores it as the browser's Back does, search included", async ({
+  page,
+  signInAs,
+  addCustomer,
+  query,
+}) => {
+  const beto = await signInAs("worker", "Beto");
+  const ruiz = await addCustomer("Familia Lejana", { by: beto });
+  await openBills(query, beto.id, "e2e-regreso-", 120, ruiz.id);
+  await openBills(query, beto.id, "e2e-de-otros-", 5);
+  await withoutScrollLoading(page);
+
+  await page.goto("/cuentas-abiertas");
+  await page.getByLabel("Buscar por cliente").fill("familia le");
+  await expect(rows(page)).toHaveCount(50);
+  await more(page).click();
+  await expect(rows(page)).toHaveCount(100);
+
+  const bill = rows(page).filter({ has: page.getByText("Nota 40", { exact: true }) }).getByRole("link");
+  await bill.click();
+  await expect(page).toHaveURL(/\/cuentas\/e2e-regreso-40$/);
+
+  // Through the Cobrar step and back, and then the screen's own link to the list.
+  await page.getByRole("link", { name: "Cobrar", exact: true }).click();
+  await page.getByRole("button", { name: "Volver a la cuenta" }).click();
+  await expect(page.getByRole("heading", { name: "Cuenta", exact: true, level: 1 })).toBeVisible();
+  await page.getByRole("main").getByRole("link", { name: "Cuentas abiertas" }).click();
+
+  await expect(page).toHaveURL(/\/cuentas-abiertas\?q=familia\+le$/);
+  await expect(page.getByLabel("Buscar por cliente")).toHaveValue("familia le");
+  await expect(rows(page)).toHaveCount(100);
+  await expect(bill).toBeInViewport();
+
+  // Opened by its address there is no list behind it: the link leads to a new one.
+  await page.goto("/cuentas/e2e-regreso-40");
+  await page.getByRole("main").getByRole("link", { name: "Cuentas abiertas" }).click();
+  await expect(page).toHaveURL(/\/cuentas-abiertas$/);
+  await expect(rows(page)).toHaveCount(50);
+});
+
 test("the Customer search finds a Bill that is not on the first page", async ({
   page,
   signInAs,

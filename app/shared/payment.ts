@@ -15,3 +15,6 @@ export const paymentMethodLabel: Record<PaymentMethod, string> = {
   cash: "Efectivo",
   transfer: "Transferencia",
 };
+
+/** How a recorded Payment says it was paid: "$18.50 en efectivo". */
+export const paidByMethod: Record<PaymentMethod, string> = { cash: "en efectivo", transfer: "por transferencia" };

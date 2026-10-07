@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
+import { payBill, seeBill } from "./support/bill";
 import * as sell from "./support/sell";
 
 // Changing a Bill's Customer or note on Cuenta (spec §5.3, §4.1, §6.1,
@@ -105,9 +106,9 @@ test("a Worker cannot change the Bill after a Payment, and an Admin can; the pic
 
   // A partial Payment leaves the Bill Open, but the Worker's edit form goes
   // away; the operation would refuse them anyway (covered in Vitest).
-  await page.getByLabel("Monto").fill("5.00");
-  await page.getByRole("button", { name: "Cobrar" }).click();
-  await expect(page.getByRole("status")).toContainText("Abono de $5.00 registrado.");
+  await payBill(page, { amount: "5.00" });
+  await expect(page.getByRole("status")).toHaveText("$5.00 en efectivo. La cuenta todavía debe $13.50.");
+  await seeBill(page);
   await expect(page.getByRole("heading", { name: "Cliente y nota" })).toHaveCount(0);
 
   // An Admin gets the form back and changes the note.

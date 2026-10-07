@@ -10,7 +10,7 @@ import { as, landing, signedIn, type SignedIn } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { savedCustomer } from "./support/customers";
 import { runTest } from "./support/effect";
-import { recordSale } from "./support/sales";
+import { recordPayment, recordSale } from "./support/sales";
 
 // One submission per rendered form, through the Worker (spec §3.4): each page
 // renders its form with a key, and the same form sent twice — a double tap, a
@@ -68,31 +68,25 @@ describe("a used key with changed content", () => {
     expect(await runTest(stockOf(cafe.id).pipe(as(ana.user)))).toBe(5);
   });
 
-  it("refuses a changed Cuenta Payment visibly, and answers the unchanged form alike", async () => {
+  it("refuses a changed Cuenta Payment visibly, and answers the unchanged Payment alike", async () => {
     const ana = await signedIn("admin", "Ana");
     const cafe = await runTest(seedItem({ price: 2500, by: ana.user }));
     const bill = await runTest(recordSelection({ items: [{ itemId: cafe.id, quantity: 4 }] }).pipe(as(ana.user)));
-    const path = `/cuentas/${bill.id}`;
-    const payment = {
-      intent: "pagar",
-      amount: "30.00",
-      method: "cash",
-      revision: String(bill.revision),
-      submissionKey: keyIn(await (await ana.fetch(path)).text()),
-    };
+    // The key is the browser's, made at the tap (`billPaymentSnapshot`).
+    const payment = { amount: "30.00", method: "cash", revision: String(bill.revision), submissionKey: "llave-de-cuenta" };
 
-    const first = await answer(ana, await post(ana, path, payment));
-    expect(first.message).toBe("Abono de $30.00 registrado. Debe $70.00.");
+    const first = await recordPayment(ana, bill.id, payment);
+    expect(first.payment).toEqual({ amount: 3000, total: 10000, owed: 7000, paid: false, canOpen: true });
 
-    // The restored document, with another amount: the first Payment moved the
-    // Bill, so this is refused visibly, not answered as the first.
-    const changed = await post(ana, path, { ...payment, amount: "20.00" });
-    expect(changed.status).toBe(400);
-    expect(await changed.text()).toContain(paymentMessages.BillChanged);
+    // The same key with another amount: the first Payment moved the Bill, so
+    // this is refused visibly, not answered as the first.
+    const changed = await recordPayment(ana, bill.id, { ...payment, amount: "20.00" });
+    expect(changed.response.status).toBe(400);
+    expect(changed.error).toBe(paymentMessages.BillChanged);
     expect((await runTest(getBill(bill.id).pipe(as(ana.user)))).payments).toHaveLength(1);
 
-    const repeat = await answer(ana, await post(ana, path, payment));
-    expect(repeat.message).toBe(first.message);
+    const repeat = await recordPayment(ana, bill.id, payment);
+    expect(repeat.payment).toEqual(first.payment);
     expect((await runTest(getBill(bill.id).pipe(as(ana.user)))).payments).toHaveLength(1);
   });
 
@@ -235,46 +229,34 @@ describe("Cuenta", () => {
     const ana = await signedIn("admin", "Ana");
     const cafe = await runTest(seedItem({ price: 2500, by: ana.user }));
     const bill = await runTest(recordSelection({ items: [{ itemId: cafe.id, quantity: 4 }] }).pipe(as(ana.user)));
-    const path = `/cuentas/${bill.id}`;
-    const payment = {
-      intent: "pagar",
-      amount: "30.00",
-      method: "cash",
-      revision: String(bill.revision),
-      submissionKey: keyIn(await (await ana.fetch(path)).text()),
-    };
+    const payment = { amount: "30.00", method: "cash", revision: String(bill.revision), submissionKey: "llave-doble" };
 
-    const first = await answer(ana, await post(ana, path, payment));
-    const second = await answer(ana, await post(ana, path, payment));
+    const first = await recordPayment(ana, bill.id, payment);
+    const second = await recordPayment(ana, bill.id, payment);
 
-    expect(first.message).toBe("Abono de $30.00 registrado. Debe $70.00.");
-    expect([second.location, second.message]).toEqual([first.location, first.message]);
+    expect(first.payment).toEqual({ amount: 3000, total: 10000, owed: 7000, paid: false, canOpen: true });
+    expect(second.response.status).toBe(200);
+    expect(second.payment).toEqual(first.payment);
     const after = await runTest(getBill(bill.id).pipe(as(ana.user)));
     expect(after).toMatchObject({ paid: 3000, owed: 7000 });
     expect(after.payments).toHaveLength(1);
 
-    // The page renders the next form with a new key and the new revision.
-    expect(keyIn(first.html)).not.toBe(payment.submissionKey);
+    // The next Payment carries the Bill's new revision and a key of its own.
+    const next = await recordPayment(ana, bill.id, { ...payment, revision: String(after.revision), submissionKey: "otra" });
+    expect(next.payment).toMatchObject({ amount: 3000, owed: 4000 });
   });
 
-  it("sends a Worker whose full Payment arrives twice to Cuentas abiertas both times", async () => {
+  it("answers a Worker whose full Payment arrives twice alike, and never with a way into the Paid Bill", async () => {
     const beto = await signedIn("worker", "Beto");
     const cafe = await runTest(seedItem({ price: 2500 }));
     const bill = await runTest(recordSelection({ items: [{ itemId: cafe.id, quantity: 1 }] }).pipe(as(beto.user)));
-    const path = `/cuentas/${bill.id}`;
-    const payment = {
-      intent: "pagar",
-      amount: "",
-      method: "transfer",
-      revision: String(bill.revision),
-      submissionKey: keyIn(await (await beto.fetch(path)).text()),
-    };
+    const payment = { amount: "", method: "transfer", revision: String(bill.revision), submissionKey: "llave-de-beto" };
 
-    const responses = [await post(beto, path, payment), await post(beto, path, payment)];
+    const answers = [await recordPayment(beto, bill.id, payment), await recordPayment(beto, bill.id, payment)];
 
-    expect(responses.map((response) => [response.status, response.headers.get("Location")])).toEqual([
-      [302, "/cuentas-abiertas"],
-      [302, "/cuentas-abiertas"],
+    expect(answers.map(({ response, payment: recorded }) => [response.status, recorded])).toEqual([
+      [200, { amount: 2500, total: 2500, owed: 0, paid: true, canOpen: false }],
+      [200, { amount: 2500, total: 2500, owed: 0, paid: true, canOpen: false }],
     ]);
   });
 });

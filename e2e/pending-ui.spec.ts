@@ -2,6 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
 import { holdSubmissions } from "./support/held";
+import { openPay, seeBill, summary, typePayment } from "./support/bill";
 import { goTo } from "./support/navigate";
 import { pay } from "./support/sell";
 
@@ -98,7 +99,7 @@ test("Cuenta shows no Payment and no correction as recorded before the server an
   await page.goto(`/cuentas/${await pay(page, { items: ["Agua mineral", "Café de olla"], amount: "10.00" })}`);
 
   const held = await holdSubmissions(page);
-  const [total, paid, owed] = [0, 1, 2].map((index) => page.locator("dl dd").nth(index));
+  const figures = summary(page);
   const payments = page.getByRole("list", { name: "Pagos" }).getByRole("listitem");
   const formOf = (button: Locator) => page.locator("form", { has: button });
 
@@ -110,16 +111,20 @@ test("Cuenta shows no Payment and no correction as recorded before the server an
   await expect(page.locator("p", { hasText: /^Mesa 2$/ })).toBeVisible();
   await settled(page);
 
-  // A Payment.
-  const cobrar = page.getByRole("region", { name: "Cobrar" });
-  await cobrar.getByLabel("Monto").fill("5.00");
-  await tap(held, cobrar.getByRole("button", { name: "Cobrar" }));
-  await expect(paid).toHaveText("$10.00");
-  await expect(owed).toHaveText("$33.50");
+  // A Payment: said to be on its way, and nothing more, until the answer
+  // (e2e/cuenta-cobrar.spec.ts looks at that screen closely).
+  await expect(figures).toContainText("Pagado $10.00");
+  await expect(figures).toContainText("Debe $33.50");
   await expect(payments).toHaveCount(1);
-  await expect(page.getByRole("status")).not.toHaveText(/Abono/);
+  await openPay(page);
+  await typePayment(page, { amount: "5.00" });
+  await page.getByRole("button", { name: "Registrar pago de $5.00" }).click();
+  await held.waitFor(1);
+  await expect(page.getByRole("heading", { name: "Registrando pago de $5.00…", level: 1 })).toBeVisible();
+  await expect(page.getByText(/Pago registrado|todavía debe/)).toHaveCount(0);
   await held.release();
-  await expect(page.getByRole("status")).toHaveText("Abono de $5.00 registrado. Debe $28.50.");
+  await expect(page.getByRole("status")).toHaveText("$5.00 en efectivo. La cuenta todavía debe $28.50.");
+  await seeBill(page);
   await expect(payments).toHaveCount(2);
   await settled(page);
 
@@ -128,20 +133,20 @@ test("Cuenta shows no Payment and no correction as recorded before the server an
   await formOf(removePayment).getByLabel("Motivo").fill("Se cobró de más");
   await tap(held, removePayment);
   await expect(page.getByText(/Quitado por/)).toHaveCount(0);
-  await expect(paid).toHaveText("$15.00");
+  await expect(figures).toContainText("Pagado $15.00");
   await held.release();
   await expect(page.getByText(/Quitado por Ana .* Se cobró de más/)).toBeVisible();
-  await expect(paid).toHaveText("$10.00");
+  await expect(figures).toContainText("Pagado $10.00");
   await settled(page);
 
   // Removing a Line.
   const removeLine = page.getByRole("button", { name: "Quitar 1 × Agua mineral" });
   await formOf(removeLine).getByLabel("Motivo").fill("No se lo llevó");
   await tap(held, removeLine);
-  await expect(total).toHaveText("$43.50");
+  await expect(figures).toContainText("Total $43.50");
   await expect(page.getByText(/Quitado por Ana .* No se lo llevó/)).toHaveCount(0);
   await held.release();
-  await expect(total).toHaveText("$25.00");
+  await expect(figures).toContainText("Total $25.00");
   await settled(page);
 
   // Voiding the Bill.
