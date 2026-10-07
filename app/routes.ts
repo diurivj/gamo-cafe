@@ -12,6 +12,7 @@ export default [
   layout("routes/shell.tsx", [
     // Where a screen's failure stops, with the shell still around it.
     layout("routes/screen.tsx", [
+      route("inicio", "routes/inicio.tsx"),
       // Vender, inside the layout that holds its Items.
       layout("routes/sell-items.tsx", [index("routes/home.tsx")]),
       route("cuentas-abiertas", "routes/open-bills.tsx"),

@@ -116,6 +116,17 @@ it("a Worker's pages carry no Stock, no other User's totals, no History and no P
   expect(mineDayHtml, "no other User's money").not.toContain("$25.00");
   expect(mineDayHtml, "no Stock number").not.toContain("98765");
 
+  // Inicio: her own figures and the Open Bills, and nothing of the Day or Stock.
+  const home = await carla.fetch("/inicio");
+  expect(home.status).toBe(200);
+  const homeHtml = await home.text();
+  expect(homeHtml, "her own name").toContain("Carla Visible");
+  expect(homeHtml, "no other User's money").not.toContain("$25.00");
+  expect(homeHtml, "no Stock number").not.toContain("98765");
+  for (const word of [...hiddenWords, "Inventario", "Historial", "por reponer"]) {
+    expect(homeHtml, `Inicio does not say «${word}»`).not.toContain(word);
+  }
+
   // Más: her remaining screens, and not one of an Admin's.
   const more = await carla.fetch("/mas");
   expect(more.status).toBe(200);

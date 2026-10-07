@@ -78,8 +78,9 @@ const figuresOf = (sold: Centavos, cash: Centavos, transfer: Centavos): Figures 
 });
 
 /**
- * One User's figures over a range of Days. Not exported: the way to ask is
- * `myDay`, which reads the session's User, while Día reads `figuresForRange`.
+ * One User's figures over a range of Days. Not exported: the ways to ask are
+ * `myDay` and `myFigures`, which read the session's User, while Día reads
+ * `figuresForRange`.
  */
 const userFigures = Effect.fnUntraced(function* (userId: string, range: DayRange) {
   const db = yield* Db;
@@ -253,6 +254,13 @@ export interface DayPayment {
   readonly method: PaymentMethod;
   readonly at: Instant;
 }
+
+/** The signed-in User's figures for today, without the records behind them: what Inicio says. */
+export const myFigures = Effect.gen(function* () {
+  const user = yield* CurrentUser;
+  const day = yield* today;
+  return yield* userFigures(user.id, { from: day, to: day });
+});
 
 /** One User's Day: their figures and the records behind them. */
 export interface MyDay {

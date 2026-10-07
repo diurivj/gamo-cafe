@@ -6,14 +6,14 @@ import { useSignInCode } from "~/backend/sign-in";
 import { Notice } from "~/components/notice";
 import { fieldLabel, hint, pageTitle, primaryButton, textField } from "~/components/styles";
 import { SubmitButton } from "~/components/submit-button";
-import { clearedSessionCookie, optionalUser, sessionCookie, sessionToken } from "~/session.server";
+import { clearedSessionCookie, HOME_PATH, optionalUser, sessionCookie, sessionToken } from "~/session.server";
 
 import type { Route } from "./+types/sign-in";
 
 export const meta: Route.MetaFunction = () => [{ title: "Entrar · Gamo Cafe" }];
 
 export function loader({ context, request }: Route.LoaderArgs) {
-  if (optionalUser(context)) throw redirect("/");
+  if (optionalUser(context)) throw redirect(HOME_PATH);
   // A phone that still carries a session's cookie had a session, and it
   // ended: 60 days without use, or an Admin signed the User out. It is told
   // once: the answer that says so clears the cookie. Salir clears it too, so a
@@ -43,7 +43,7 @@ export async function action({ context, request }: Route.ActionArgs) {
 
   // What was typed goes back with the refusal, to be corrected, not retyped.
   if ("error" in result) return data({ ...result, code }, { status: 400 });
-  throw redirect("/", { headers: { "Set-Cookie": sessionCookie(result.token) } });
+  throw redirect(HOME_PATH, { headers: { "Set-Cookie": sessionCookie(result.token) } });
 }
 
 export default function SignIn({ loaderData, actionData }: Route.ComponentProps) {
@@ -55,7 +55,7 @@ export default function SignIn({ loaderData, actionData }: Route.ComponentProps)
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-5 py-10">
-      <p className="font-bold">Gamo Cafe</p>
+      <p className="text-xl font-black">Gamo Cafe</p>
       <h1 className={`mt-1 ${pageTitle}`}>Entrar</h1>
 
       {loaderData.sessionEnded ? (

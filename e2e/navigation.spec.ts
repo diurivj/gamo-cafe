@@ -21,26 +21,49 @@ async function clearOfTheBar(page: Page, control: Locator): Promise<boolean> {
   return box.y + box.height <= bar.y;
 }
 
-test("an Admin walks Vender, Día, Inventario and Más, and every screen Más holds", async ({ page, signInAs }) => {
-  await signInAs("admin", "Ana");
+test("an Admin signs in on Inicio, walks its cards, the four destinations and every screen Más holds", async ({
+  page,
+  addUser,
+  issueCode,
+}) => {
+  const code = await issueCode(await addUser("admin", "Ana"));
   await page.goto("/");
+  await page.getByLabel("Código de acceso").fill(code);
+  await page.getByRole("button", { name: "Entrar" }).click();
 
-  await expect(heading(page, "Vender")).toBeVisible();
-  await expect(page.getByText("Ana · Administrador")).toBeVisible();
-  await expect(labels(page)).toHaveText(["Vender", "Día", "Inventario", "Más"]);
-  await expect(current(page)).toHaveText("Vender");
+  // Inicio: where a User lands.
+  await expect(page).toHaveURL(/\/inicio$/);
+  await expect(heading(page, "Hola, Ana")).toBeVisible();
+  await expect(labels(page)).toHaveText(["Inicio", "Vender", "Día", "Más"]);
+  await expect(current(page)).toHaveText("Inicio");
   await expect(current(page)).toHaveAttribute("aria-current", "page");
 
-  for (const name of ["Día", "Inventario", "Más", "Vender"]) {
+  // Each card leads to the screen it is about.
+  const cards = page.getByRole("main").getByRole("link");
+  await expect(cards).toHaveCount(6);
+  for (const [card, name] of [
+    [/Nueva venta/, "Vender"],
+    [/Cobrado hoy/, "Día"],
+    [/Cuentas abiertas/, "Cuentas abiertas"],
+    [/Inventario/, "Inventario"],
+    [/Clientes/, "Clientes"],
+    [/Mi día/, "Mi día"],
+  ] as const) {
+    await goTo(page, "Inicio");
+    await page.getByRole("main").getByRole("link", { name: card }).click();
+    await expect(heading(page, name)).toBeVisible();
+  }
+
+  for (const name of ["Vender", "Día", "Más"]) {
     await goTo(page, name);
     await expect(heading(page, name)).toBeVisible();
     await expect(current(page)).toHaveText(name);
   }
 
-  await goTo(page, "Más");
   const more = page.getByRole("main");
   await expect(more.getByRole("heading", { level: 2 })).toHaveText([
     "Cuentas y clientes",
+    "Inventario",
     "Revisar",
     "Catálogo y accesos",
     "Tu sesión",
@@ -50,12 +73,14 @@ test("an Admin walks Vender, Día, Inventario and Más, and every screen Más ho
     "Cuentas",
     "Por cobrar",
     "Clientes",
-    "Mi día",
+    "Inventario",
     "Diferencias",
+    "Mi día",
     "Historial",
     "Productos",
     "Usuarios",
   ]);
+  await expect(more).toContainText("Ana");
   await expect(more).toContainText("Administrador");
 
   for (const name of await more.getByRole("link").allTextContents()) {
@@ -67,16 +92,25 @@ test("an Admin walks Vender, Día, Inventario and Más, and every screen Más ho
   }
 });
 
-test("a Worker walks Vender, Cuentas, Mi día and Más, and is offered nothing of an Admin's", async ({
+test("a Worker walks Inicio, Vender, Cuentas and Más, and is offered nothing of an Admin's", async ({
   page,
   signInAs,
 }) => {
   await signInAs("worker", "Beto");
-  await page.goto("/");
+  await page.goto("/inicio");
 
+  await expect(heading(page, "Hola, Beto")).toBeVisible();
+  await expect(labels(page)).toHaveText(["Inicio", "Vender", "Cuentas", "Más"]);
+  // Their own Day, the Open Bills and Clientes; no Day of everyone, no Stock.
+  await expect(page.getByRole("main").getByRole("link")).toHaveText([
+    /Nueva venta/,
+    /Cobraste hoy/,
+    /Cuentas abiertas/,
+    /Clientes/,
+  ]);
+
+  await goTo(page, "Vender");
   await expect(heading(page, "Vender")).toBeVisible();
-  await expect(page.getByText("Beto · Empleado")).toBeVisible();
-  await expect(labels(page)).toHaveText(["Vender", "Cuentas", "Mi día", "Más"]);
 
   // Cuentas is Cuentas abiertas, never the Admin's list of every Bill.
   await goTo(page, "Cuentas");
@@ -84,20 +118,18 @@ test("a Worker walks Vender, Cuentas, Mi día and Más, and is offered nothing o
   await expect(heading(page, "Cuentas abiertas")).toBeVisible();
   await expect(current(page)).toHaveText("Cuentas");
 
-  await goTo(page, "Mi día");
-  await expect(heading(page, "Mi día")).toBeVisible();
-
   await goTo(page, "Más");
   const more = page.getByRole("main");
-  await expect(more.getByRole("link")).toHaveText(["Clientes"]);
+  await expect(more.getByRole("link")).toHaveText(["Clientes", "Mi día"]);
+  await expect(more).toContainText("Beto");
   await expect(more).toContainText("Empleado");
   await expect(more.getByRole("button", { name: "Salir" })).toBeVisible();
   for (const name of ["Día", "Inventario", "Historial", "Productos", "Usuarios", "Por cobrar", "Diferencias"]) {
     await expect(page.getByRole("link", { name, exact: true })).toHaveCount(0);
   }
 
-  await goTo(page, "Clientes");
-  await expect(heading(page, "Clientes")).toBeVisible();
+  await goTo(page, "Mi día");
+  await expect(heading(page, "Mi día")).toBeVisible();
   await expect(current(page)).toHaveText("Más");
 });
 
@@ -121,8 +153,9 @@ test("a link that opens a screen directly still works, and says where the User i
   await expect(current(page)).toHaveAttribute("aria-current", "true");
 
   for (const [path, name, under] of [
-    ["/mi-dia", "Mi día", "Mi día"],
+    ["/mi-dia", "Mi día", "Más"],
     ["/clientes", "Clientes", "Más"],
+    ["/inicio", "Hola, Beto", "Inicio"],
     ["/cuentas-abiertas", "Cuentas abiertas", "Cuentas"],
     ["/mas", "Más", "Más"],
   ] as const) {
@@ -136,7 +169,7 @@ test("an Admin's deep links open inside the Admin's navigation", async ({ page, 
   await signInAs("admin", "Ana");
 
   for (const [path, name, under] of [
-    ["/inventario/conteo", "Conteo", "Inventario"],
+    ["/inventario/conteo", "Conteo", "Más"],
     ["/dia", "Día", "Día"],
     ["/cuentas", "Cuentas", "Más"],
     ["/usuarios", "Usuarios", "Más"],
@@ -191,13 +224,13 @@ test("a path the app does not have, a record that is not there and a refused scr
   // No such Bill: said inside the navigation.
   expect((await page.goto("/cuentas/no-existe"))?.status()).toBe(404);
   await expect(heading(page, "No encontramos esta página")).toBeVisible();
-  await expect(labels(page)).toHaveText(["Vender", "Cuentas", "Mi día", "Más"]);
+  await expect(labels(page)).toHaveText(["Inicio", "Vender", "Cuentas", "Más"]);
 
   // An Admin's screen: refused, with the Worker's own navigation around it.
   expect((await page.goto("/inventario"))?.status()).toBe(403);
   await expect(heading(page, "No tienes acceso a esta página")).toBeVisible();
   await expect(page.getByRole("main")).toContainText("pídele acceso a un administrador");
-  await expect(labels(page)).toHaveText(["Vender", "Cuentas", "Mi día", "Más"]);
+  await expect(labels(page)).toHaveText(["Inicio", "Vender", "Cuentas", "Más"]);
   expect(await nothingSideways(page)).toBe(true);
   await page.getByRole("main").getByRole("link", { name: "Ir a Vender" }).click();
   await expect(heading(page, "Vender")).toBeVisible();
@@ -219,7 +252,7 @@ test("a screen that fails to load says so without calling anything lost, and can
   await expect(main).toContainText("Si estabas registrando algo, puede que sí se haya guardado");
   await expect(main).not.toContainText(/no se (guardó|registró)/i);
   // Still inside the navigation.
-  await expect(labels(page)).toHaveText(["Vender", "Día", "Inventario", "Más"]);
+  await expect(labels(page)).toHaveText(["Inicio", "Vender", "Día", "Más"]);
 
   await page.unroute("**/dia.data*", fail);
   await main.getByRole("link", { name: "Volver a intentar" }).click();
@@ -288,7 +321,7 @@ test("with text twice as large the navigation keeps its words and nothing scroll
   await page.addStyleTag({ content: "html { font-size: 200% }" });
 
   expect(await nothingSideways(page)).toBe(true);
-  await expect(labels(page)).toHaveText(["Vender", "Día", "Inventario", "Más"]);
+  await expect(labels(page)).toHaveText(["Inicio", "Vender", "Día", "Más"]);
   for (const link of await labels(page).all()) {
     await expect(link).toBeVisible();
     expect(await link.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
@@ -303,7 +336,7 @@ test("on a laptop the same destinations stand at the side", async ({ page, signI
   await signInAs("admin", "Ana");
   await page.goto("/mas");
 
-  await expect(labels(page)).toHaveText(["Vender", "Día", "Inventario", "Más"]);
+  await expect(labels(page)).toHaveText(["Inicio", "Vender", "Día", "Más"]);
   await expect(page.getByText("Ana · Administrador")).toBeVisible();
   const bar = (await destinations(page).boundingBox())!;
   const main = (await page.getByRole("main").boundingBox())!;
@@ -312,7 +345,7 @@ test("on a laptop the same destinations stand at the side", async ({ page, signI
   expect(main.width).toBeLessThanOrEqual(800);
   expect(await nothingSideways(page)).toBe(true);
 
-  await goTo(page, "Inventario");
-  await expect(heading(page, "Inventario")).toBeVisible();
-  await expect(current(page)).toHaveText("Inventario");
+  await goTo(page, "Día");
+  await expect(heading(page, "Día")).toBeVisible();
+  await expect(current(page)).toHaveText("Día");
 });

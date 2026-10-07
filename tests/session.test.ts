@@ -59,7 +59,7 @@ describe("Entrar", () => {
     const response = await enterCode(formatSignInCode(code));
 
     expect(response.status).toBe(302);
-    expect(response.headers.get("Location")).toBe("/");
+    expect(response.headers.get("Location")).toBe("/inicio");
     const home = await appFetch("/", { headers: { Cookie: cookieFrom(response) } });
     expect(home.status).toBe(200);
     expect(await home.text()).toContain("Carla");
@@ -102,7 +102,7 @@ describe("Entrar", () => {
     expect(await shown.text()).not.toContain("redirect");
 
     const entered = await appFetch("/entrar.data", { method: "POST", body: new URLSearchParams({ code }) });
-    expect(await entered.text()).toContain('"redirect","/"');
+    expect(await entered.text()).toContain('"redirect","/inicio"');
     const home = await appFetch("/", { headers: { Cookie: cookieFrom(entered) } });
     expect(await home.text()).toContain("Dalia");
   });
@@ -113,7 +113,7 @@ describe("Entrar", () => {
     const response = await ana.fetch("/entrar");
 
     expect(response.status).toBe(302);
-    expect(response.headers.get("Location")).toBe("/");
+    expect(response.headers.get("Location")).toBe("/inicio");
   });
 });
 
@@ -140,7 +140,7 @@ describe("the signed-in shell", () => {
     const html = await (await beto.fetch("/")).text();
 
     expect(html).toContain("Beto");
-    for (const destination of ["Vender", "Cuentas", "Mi día", "Más"]) {
+    for (const destination of ["Inicio", "Vender", "Cuentas", "Más"]) {
       expect(html).toContain(destination);
     }
     for (const section of ["Inventario", "Historial", "Usuarios", "Por cobrar"]) {
@@ -152,13 +152,13 @@ describe("the signed-in shell", () => {
     const ana = await signedIn("admin", "Ana");
 
     const html = await (await ana.fetch("/")).text();
-    for (const destination of ["Vender", "Día", "Inventario", "Más"]) {
+    for (const destination of ["Inicio", "Vender", "Día", "Más"]) {
       expect(html).toContain(destination);
     }
 
     const more = await (await ana.fetch("/mas")).text();
     for (const section of [
-      "Cuentas abiertas", "Cuentas", "Clientes", "Mi día",
+      "Cuentas abiertas", "Cuentas", "Clientes", "Mi día", "Inventario",
       "Por cobrar", "Diferencias", "Historial", "Productos", "Usuarios",
     ]) {
       expect(more).toContain(section);

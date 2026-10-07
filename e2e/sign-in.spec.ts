@@ -16,8 +16,9 @@ test("a User with a code opens the app, types it and lands signed in", async ({ 
   await page.getByLabel("Código de acceso").fill(formatSignInCode(code).toLowerCase());
   await page.getByRole("button", { name: "Entrar" }).click();
 
-  await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole("heading", { name: "Vender" })).toBeVisible();
+  // Signed in, on Inicio.
+  await expect(page).toHaveURL(/\/inicio$/);
+  await expect(page.getByRole("heading", { name: "Hola, Beto" })).toBeVisible();
   await expect(page.getByText("Beto · Empleado")).toBeVisible();
 
   // Script cannot read the session, and it only travels over HTTPS.
@@ -48,7 +49,7 @@ test("a code signs in one phone only", async ({ page, browser, baseURL, addUser,
   await page.goto("/entrar");
   await page.getByLabel("Código de acceso").fill(code);
   await page.getByRole("button", { name: "Entrar" }).click();
-  await expect(page.getByRole("heading", { name: "Vender" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^Hola, / })).toBeVisible();
 
   const secondPhone = await browser.newContext({ baseURL, ignoreHTTPSErrors: true });
   const secondPage = await secondPhone.newPage();
@@ -105,7 +106,7 @@ test("a code can be pasted, and a refused one stays to be corrected", async ({ p
   await field.fill("");
   expect(await paste(formatSignInCode(code))).toBe(true);
   await page.getByRole("button", { name: "Entrar" }).click();
-  await expect(page.getByRole("heading", { name: "Vender" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^Hola, / })).toBeVisible();
 });
 
 test("too many wrong codes are answered with how long to wait", async ({ page, query }) => {
@@ -128,7 +129,7 @@ test("a phone whose session ended is told so on Entrar", async ({ page, signInAs
 
   // An Admin signs Beto out of every phone.
   await query("DELETE FROM sessions WHERE user_id = ?", [beto.id]);
-  await goTo(page, "Mi día");
+  await goTo(page, "Cuentas");
 
   await expect(page.getByRole("heading", { name: "Entrar" })).toBeVisible();
   await expect(page.getByRole("status")).toHaveText("Tu sesión terminó. Entra con un código nuevo.");

@@ -40,7 +40,7 @@ test("an Admin adds a User, and the code shown signs that User in on their phone
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
   const betosPhone = await anotherPhone(browser, baseURL, code);
-  await expect(betosPhone.getByRole("heading", { name: "Vender" })).toBeVisible();
+  await expect(betosPhone.getByRole("heading", { name: "Hola, Beto" })).toBeVisible();
   await expect(betosPhone.getByText("Beto · Empleado")).toBeVisible();
   await betosPhone.context().close();
 });

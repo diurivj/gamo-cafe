@@ -6,9 +6,9 @@
  */
 
 /** The drawing beside a destination's word. */
-export type NavigationIcon = "bag" | "calendar" | "box" | "receipt" | "person" | "menu";
+export type NavigationIcon = "home" | "bag" | "calendar" | "box" | "receipt" | "person" | "people" | "menu";
 
-/** One of a role's four destinations. The last one is Más. */
+/** One of a role's four destinations. The first is Inicio, the last one Más. */
 export interface Destination {
   readonly label: string;
   readonly to: string;

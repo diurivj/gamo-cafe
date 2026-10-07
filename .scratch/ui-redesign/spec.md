@@ -73,11 +73,13 @@ During implementation, update the README and tests that prescribe the old intera
 - Preserve entered information through validation failures and ordinary backtracking.
 - Keep administrative screens as readable and approachable as selling screens.
 
-### 3.2 Warm, restrained and distinctive
+### 3.2 Neo-brutalist, with large cards
 
-Use warm off-white surfaces, dark readable text, a restrained accent color, strong typographic hierarchy, simple dividers and solid primary buttons. Create character through typography, spacing, thoughtful Spanish and a consistent visual language.
+*Revised 2026-10-06 after prototyping eight styles (branch `prototype/ui-styles`, variant G); it replaces the earlier “warm, restrained” direction.*
 
-Avoid decorative gradients, arbitrary dashboard-card grids, excessive pill-shaped containers, generic hero sections, gratuitous animation, faint text and coffee-themed decoration without a purpose. Do not trade contrast or clarity for an “elegant” appearance.
+Use an off-white page, white cards with a thick black outline and a hard offset shadow, heavy titles, black text everywhere, one pink for the primary action and a few pale tints (yellow, mint, lilac, peach) to tell the cards of the home screen apart. A card or button that can be tapped goes down into its shadow; other motion is small and brief (a quantity or a total that changes). Use few words: a label says what a thing is, and a sentence is added only for a consequence the User could not guess.
+
+Avoid decorative gradients, faint text, soft shadow-only (neumorphic) surfaces, serif display type, and coffee-themed decoration without a purpose. Do not trade contrast or clarity for style: text stays black on every fill, and every control keeps its outline.
 
 Exact accent hue, font selection, spacing tokens and corner radii are implementation discretion within these constraints, not unresolved product decisions. Prefer a lightweight font strategy with legible fallbacks; text and controls must not wait for a decorative asset.
 
@@ -94,26 +96,31 @@ Exact accent hue, font selection, spacing tokens and corner radii are implementa
 
 ### 4.1 Mobile navigation
 
-Replace the wrapping header link collection with four labeled bottom destinations:
+*Revised 2026-10-06: a home screen, Inicio, is the first destination and where a User lands.*
+
+Replace the wrapping header link collection with four labeled destinations in a bar that floats over the bottom of the screen:
 
 | Role | Destinations, in order | Initial destination |
 | --- | --- | --- |
-| Admin | Vender · Día · Inventario · Más | Vender |
-| Worker | Vender · Cuentas · Mi día · Más | Vender |
+| Admin | Inicio · Vender · Día · Más | Inicio |
+| Worker | Inicio · Vender · Cuentas · Más | Inicio |
 
+- **Inicio** is a bento of large cards. Each is a figure worth knowing and the way into its screen; the first and largest starts a new sale. An Admin's cards: Nueva venta, Cobrado hoy (with Efectivo and Transferencia), Cuentas abiertas (how many, and what they owe), Inventario (how many Items to restock), Clientes, Mi día. A Worker's: Nueva venta, their own Cobrado for today, Cuentas abiertas, Clientes. A Worker's cards never carry the Day of everyone or Stock.
+- Vender keeps its address (`/`); Inicio is `/inicio`.
+- The bar is translucent, but opaque enough that its labels stay readable over whatever scrolls under it.
 - Icons supplement persistent text labels. The current destination is visually and programmatically identified.
 - Worker's **Cuentas** opens **Cuentas abiertas**, not the Admin-only all-Bills screen.
 - **Más** is a readable destination with grouped, explicitly labeled links, not an icon-only overflow menu.
-- Keep the signed-in User and role discoverable; provide **Salir** without placing it next to the primary task action.
+- Keep the signed-in User and role discoverable (Inicio greets them by name; Más shows name and role); provide **Salir** without placing it next to the primary task action.
 - Detail screens have clear titles and a predictable way back to the relevant list. Preserve filters and list position where the existing app does.
 - Browser Back must behave coherently with the two-step selling flow and the unfinished-work safeguards.
 - Bottom navigation and a sticky selling total must not compete for the same space or hide content, keyboard focus or form controls. Respect mobile safe areas and the on-screen keyboard.
 
 ### 4.2 Remaining destinations
 
-Admin's Más exposes **Cuentas abiertas**, **Cuentas**, **Clientes**, **Mi día**, **Por cobrar**, **Diferencias**, **Historial**, **Productos** and **Usuarios**. Group these by task, with short explanatory text where useful; do not produce another unstructured wall of links.
+Admin's Más exposes **Cuentas abiertas**, **Cuentas**, **Por cobrar**, **Clientes**, **Inventario**, **Diferencias**, **Mi día**, **Historial**, **Productos** and **Usuarios**. Group these by task; do not produce another unstructured wall of links.
 
-Worker's Más exposes **Clientes** and session information/actions. It contains no Admin-only links or placeholder capabilities.
+Worker's Más exposes **Clientes**, **Mi día** and session information/actions. It contains no Admin-only links or placeholder capabilities.
 
 Inventario also provides contextual access to Conteo and Diferencias. Clientes, Cuentas and Por cobrar retain their contextual paths to individual Customers and Bills. Important secondary workflows should not require returning to Más at every step.
 
@@ -199,6 +206,7 @@ Every row includes readable loading, empty, populated, error and applicable succ
 | --- | --- |
 | Entrar — `sign-in.tsx` | One clearly labeled code field, support paste, simple instructions for obtaining a code from an Admin, readable invalid/expired/rate-limit feedback. Preserve authentication rules. |
 | Shell / Más — `shell.tsx`, new navigation surface as needed | Role-specific navigation from §4, identity, sign-out, clear current location and safe unfinished-work handling. |
+| Inicio — `inicio.tsx` | The home screen of §4.1: role-specific cards with today's figures, each leading to its screen. Figures mean what §7.1 says. |
 | Vender — `home.tsx`, `sell-items.tsx` | Two-step flow and complete submission state model from §§5–6, including existing-Bill targeting. |
 | Cuentas abiertas — `open-bills.tsx` | Search by Customer; readable Customer/note, Day, Bill state and Owed. Distinguish Open from Partially paid without relying on color. |
 | Cuenta — `bill.tsx` | Lead with state and Owed; clearly group Lines and Payments with author/time. Make adding Items and collecting money easy; separate metadata edits and corrections from routine work. Preserve every permitted correction. |
@@ -274,7 +282,7 @@ Run `npm run verify` and `npm run test:e2e`. Update assertions that intentionall
 
 Required scenarios:
 
-1. **Roles/navigation:** both roles open Vender; all allowed destinations are reachable through the new navigation, deep links work, and forbidden reads/actions and Worker data visibility remain enforced.
+1. **Roles/navigation:** both roles open Inicio; all allowed destinations are reachable through the new navigation, deep links work, and forbidden reads/actions and Worker data visibility remain enforced.
 2. **Immediate cash sale:** select multiple Items, edit quantities, advance, go back without loss, enter cash handed over, record once, see correct change/result, then explicitly start a clean new sale.
 3. **Transfer sale:** method and final amount are unambiguous; one confirmed Payment and the correct Bill/Stock effects result.
 4. **Other selling paths:** anonymous and named Open Bills, partial payment, adding Items to an existing Bill, and paying a new selection when the Customer already owes money retain correct totals and routing.

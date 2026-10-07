@@ -22,6 +22,7 @@
 
 - 2026-10-06: Implemented. Review (standards and spec axes) left three things open, recorded under Answer.
 - 2026-10-06: The first look (serif headings on cream, a teal accent with tinted boxes, a sentence under every link) was rejected as generic. Replaced by "plain and quiet": the phone's own font, near-white, near-black text and buttons, hairline dividers, no accent color, labels without helper sentences.
+- 2026-10-06: "Plain and quiet" was rejected too (not modern, bloated). Eight styles were prototyped on the throwaway branch `prototype/ui-styles` (`/prototipo/estilos?variant=A…H` under `npm run dev`). Verdict: variant G — a bento home screen, a floating navigation bar and a neo-brutalist skin. Built here: the skin's tokens and patterns, Inicio (`/inicio`, where sign-in lands), destinations Inicio · Vender · Día/Cuentas · Más, Más as cards. Spec §3.2, §4.1, §4.2 and §7 were revised to match. Not built here: Vender's search, Category chips and Item drawings, which are ticket 02's.
 
 ## Answer
 
@@ -31,10 +32,10 @@ Entrar, the shell, the new Más (`/mas`) and the error pages are on the new visu
 - A screen that cannot be shown is answered inside the navigation by the boundary of `app/routes/screen.tsx`, a new pathless layout; a path the app does not have is answered by the root boundary, alone.
 - `public/manifest.webmanifest` no longer locks the installed app to portrait (spec §8), and takes the new colors.
 
-Results, 2026-10-06: `npm run verify` — 64 files, 630 tests passed. `npm run test:e2e` — 192 passed (Android and iPhone shapes), including `e2e/navigation.spec.ts` (both roles' destinations, every Más link, deep links, 403/404/failed load, 320px, 200% text, laptop) and the sign-in specs.
+Results, 2026-10-06, after the last restyle: `npm run verify` — 65 files, 638 tests passed. `npm run test:e2e` — 192 passed (Android and iPhone shapes), including `e2e/navigation.spec.ts` (both roles' destinations, every Más link, deep links, 403/404/failed load, 320px, 200% text, laptop) and the sign-in specs.
 
 Left open:
 
-- The bar's labels are 14px, not 18px: four 18px words do not fit side by side at 320px ("Inventario"). They are semibold, high contrast, and beside a drawing.
+- The bar's labels are 14px, not 18px, to fit four side by side at 320px. They are bold, black, and beside a drawing.
 - Paste is covered only by a synthetic event that shows nothing cancels it; the field is a plain text input with no handler.
 - The automated accessibility scan and the manual keyboard, screen-reader, real-device and safe-area passes are ticket 12's.

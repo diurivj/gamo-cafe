@@ -199,6 +199,11 @@ const routes: Readonly<Record<string, RouteRule>> = {
     get: { worker: 403, admin: 200 },
     post: { worker: 400, admin: 400 },
   },
+  "/inicio": {
+    about: "Inicio: the home screen's cards; tests/home.test.ts holds what each role's carry",
+    signedOut: "redirect",
+    get: { worker: 200, admin: 200 },
+  },
   "/mas": {
     about: "Más: the role's remaining screens and the way out; tests/navigation.test.ts reads what each role gets",
     signedOut: "redirect",

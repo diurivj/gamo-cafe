@@ -7,29 +7,27 @@ import type { Destination, MoreGroup, MoreLink } from "~/shared/navigation";
  * That is tidiness, not enforcement: each Admin route guards itself.
  *
  * A new screen gets its link here: among the four destinations of a role, or
- * in a group of its Más.
+ * in a group of its Más. Inicio (`routes/inicio.tsx`) links to the screens
+ * its cards are about.
  */
 
+const home: Destination = { label: "Inicio", to: "/inicio", icon: "home" };
 const sell: Destination = { label: "Vender", to: "/", icon: "bag" };
 const more: Destination = { label: "Más", to: "/mas", icon: "menu" };
 
 const destinations: Readonly<Record<Role, ReadonlyArray<Destination>>> = {
-  admin: [
-    sell,
-    { label: "Día", to: "/dia", icon: "calendar" },
-    { label: "Inventario", to: "/inventario", icon: "box" },
-    more,
-  ],
+  admin: [home, sell, { label: "Día", to: "/dia", icon: "calendar" }, more],
   worker: [
+    home,
     sell,
     // A Worker's Cuentas is Cuentas abiertas, and the Bills opened from it.
     { label: "Cuentas", to: "/cuentas-abiertas", icon: "receipt", holds: ["/cuentas"] },
-    { label: "Mi día", to: "/mi-dia", icon: "person" },
     more,
   ],
 };
 
 const customers: MoreLink = { label: "Clientes", to: "/clientes" };
+const myDay: MoreLink = { label: "Mi día", to: "/mi-dia" };
 
 const moreGroups: Readonly<Record<Role, ReadonlyArray<MoreGroup>>> = {
   admin: [
@@ -43,12 +41,15 @@ const moreGroups: Readonly<Record<Role, ReadonlyArray<MoreGroup>>> = {
       ],
     },
     {
-      title: "Revisar",
+      title: "Inventario",
       links: [
-        { label: "Mi día", to: "/mi-dia" },
+        { label: "Inventario", to: "/inventario" },
         { label: "Diferencias", to: "/diferencias" },
-        { label: "Historial", to: "/historial" },
       ],
+    },
+    {
+      title: "Revisar",
+      links: [myDay, { label: "Historial", to: "/historial" }],
     },
     {
       title: "Catálogo y accesos",
@@ -58,10 +59,10 @@ const moreGroups: Readonly<Record<Role, ReadonlyArray<MoreGroup>>> = {
       ],
     },
   ],
-  worker: [{ title: "Cuentas y clientes", links: [customers] }],
+  worker: [{ title: "Clientes y tu día", links: [customers, myDay] }],
 };
 
-/** The four destinations of a role, in order; Más is the last. */
+/** The four destinations of a role, in order: Inicio first, Más last. */
 export function destinationsFor(role: Role): ReadonlyArray<Destination> {
   return destinations[role];
 }

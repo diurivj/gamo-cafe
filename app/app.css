@@ -1,10 +1,11 @@
 @import "tailwindcss";
 
 /*
- * The visual system (UI redesign §3.2): plain and quiet. A near-white page,
- * near-black text and buttons, hairline dividers, the phone's own font, and
- * red only for what was refused. Every pair used for text is at least 4.5:1,
- * and `edge`, the border of a control, is at least 3:1 on both surfaces.
+ * The visual system (UI redesign §3.2): neo-brutalist. An off-white page,
+ * white cards with a thick black outline and a hard shadow they are pressed
+ * into, heavy titles, a pink for the one action and four pale tints to tell
+ * the cards of Inicio apart. Text is black on all of them, so every pair is
+ * well over 4.5:1; a control's outline is black, over 3:1 on every surface.
  * `~/components/styles` builds the shared patterns from these.
  */
 @theme {
@@ -12,18 +13,25 @@
     ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
     Arial, sans-serif;
 
-  --color-paper: #fafaf9;
+  --color-paper: #f4f1ea;
   --color-raised: #ffffff;
-  --color-ink: #1c1917;
-  --color-ink-soft: #57534e;
-  --color-rule: #e7e5e4;
-  --color-edge: #78716c;
+  --color-ink: #000000;
+  --color-ink-soft: #404040;
+  --color-rule: #d4d4d4;
+  --color-action: #ff5c8a;
+  --color-sun: #ffe45c;
+  --color-mint: #b9f2c8;
+  --color-lilac: #c9c2ff;
+  --color-peach: #ffd1a8;
   --color-danger: #b91c1c;
+
+  /* What a card stands on, and is pressed into when tapped. */
+  --shadow-hard: 5px 5px 0 #000000;
 }
 
 :root {
   /* The room the bar at the bottom of a phone takes; none where it stands at the side (`lg`). */
-  --bar-room: calc(7rem + env(safe-area-inset-bottom));
+  --bar-room: calc(7.5rem + env(safe-area-inset-bottom));
 }
 
 @media (width >= 64rem) {
@@ -43,7 +51,7 @@ html {
 /* One focus mark for every control, on any surface. */
 :focus-visible {
   outline: 3px solid var(--color-ink);
-  outline-offset: 2px;
+  outline-offset: 3px;
 }
 
 @media (prefers-reduced-motion: reduce) {

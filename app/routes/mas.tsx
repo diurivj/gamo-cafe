@@ -1,7 +1,7 @@
 import { Form, Link } from "react-router";
 
 import { ChevronDrawing } from "~/components/icons";
-import { hint, pageTitle, secondaryButton, sectionTitle } from "~/components/styles";
+import { card, hint, pageTitle, press, secondaryButton, sectionTitle } from "~/components/styles";
 import { SubmitButton } from "~/components/submit-button";
 import { moreGroupsFor } from "~/navigation.server";
 import { requireUser } from "~/session.server";
@@ -32,12 +32,12 @@ export default function Mas({ loaderData }: Route.ComponentProps) {
           <h2 id={`grupo-${index}`} className={sectionTitle}>
             {group.title}
           </h2>
-          <ul className="mt-2 divide-y divide-rule border-y border-rule">
+          <ul className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(8rem,1fr))] gap-4">
             {group.links.map(({ label, to }) => (
               <li key={to}>
-                <Link to={to} className="flex min-h-14 items-center justify-between gap-3 py-3 font-semibold">
-                  {label}
-                  <ChevronDrawing className="size-5 text-ink-soft" />
+                <Link to={to} className={`${card} ${press} flex h-full min-h-16 items-center justify-between gap-2 px-4 py-3 leading-tight font-bold`}>
+                  <span className="min-w-0 [overflow-wrap:anywhere]">{label}</span>
+                  <ChevronDrawing className="size-5" />
                 </Link>
               </li>
             ))}
@@ -49,7 +49,7 @@ export default function Mas({ loaderData }: Route.ComponentProps) {
         <h2 id="sesion" className={sectionTitle}>
           Tu sesión
         </h2>
-        <p className="mt-2 font-semibold">{user.name}</p>
+        <p className="mt-2 font-bold">{user.name}</p>
         <p className={hint}>{roleLabel[user.role]}</p>
         <p className={`mt-4 ${hint}`}>Para volver a entrar necesitarás un código nuevo.</p>
         <Form method="post" action="/salir" className="mt-3">

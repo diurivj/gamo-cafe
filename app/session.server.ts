@@ -24,6 +24,9 @@ type User = CurrentUser["Service"];
 
 export const SIGN_IN_PATH = "/entrar";
 
+/** Inicio: where a User lands when they sign in. */
+export const HOME_PATH = "/inicio";
+
 /**
  * Paths answered without a session. Each one is an exemption from §10.1 and
  * must also be listed, with its reason, in tests/route-guard.test.ts.

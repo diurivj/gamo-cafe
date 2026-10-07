@@ -72,7 +72,7 @@ test("Entrar and Salir are pending from the tap", async ({ page, addUser, issueC
   await tap(held, entrar);
   await expect(entrar).toHaveText("Entrando…");
   await held.release();
-  await expect(page.getByRole("heading", { name: "Vender", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Hola, Beto", level: 1 })).toBeVisible();
 
   await goTo(page, "Más");
   await expect(page.getByRole("button", { name: "Salir" })).toBeVisible();

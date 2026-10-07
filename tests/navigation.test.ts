@@ -61,42 +61,44 @@ function expectNothingOfAnAdmins(html: string) {
 }
 
 describe("the four destinations", () => {
-  it("an Admin has Vender, Día, Inventario and Más, and opens Vender", async () => {
+  it("an Admin has Inicio, Vender, Día and Más", async () => {
     const ana = await signedIn("admin", "Ana Navega");
-    const html = await page(ana, "/");
+    const html = await page(ana, "/inicio");
 
     expect(primary(html)).toEqual([
+      { to: "/inicio", label: "Inicio" },
       { to: "/", label: "Vender" },
       { to: "/dia", label: "Día" },
-      { to: "/inventario", label: "Inventario" },
       { to: "/mas", label: "Más" },
     ]);
     expect(textOf(html)).toContain("Ana Navega · Administrador");
-    expect(element(html, "a", 'aria-current="page"')).toContain("Vender");
+    expect(element(html, "a", 'aria-current="page"')).toContain("Inicio");
   });
 
-  it("a Worker has Vender, Cuentas, Mi día and Más; Cuentas is Cuentas abiertas", async () => {
+  it("a Worker has Inicio, Vender, Cuentas and Más; Cuentas is Cuentas abiertas", async () => {
     const beto = await signedIn("worker", "Beto Navega");
     const html = await page(beto, "/");
 
     expect(primary(html)).toEqual([
+      { to: "/inicio", label: "Inicio" },
       { to: "/", label: "Vender" },
       { to: "/cuentas-abiertas", label: "Cuentas" },
-      { to: "/mi-dia", label: "Mi día" },
       { to: "/mas", label: "Más" },
     ]);
+    expect(element(html, "a", 'aria-current="page"')).toContain("Vender");
     expect(textOf(html)).toContain("Beto Navega · Empleado");
     expectNothingOfAnAdmins(html);
   });
 
   it("the destination a screen belongs to is the current one", () => {
-    const admin = [{ to: "/" }, { to: "/dia" }, { to: "/inventario" }, { to: "/mas" }];
-    const worker = [{ to: "/" }, { to: "/cuentas-abiertas", holds: ["/cuentas"] }, { to: "/mi-dia" }, { to: "/mas" }];
+    const admin = [{ to: "/inicio" }, { to: "/" }, { to: "/dia" }, { to: "/mas" }];
+    const worker = [{ to: "/inicio" }, { to: "/" }, { to: "/cuentas-abiertas", holds: ["/cuentas"] }, { to: "/mas" }];
     const at = (destinations: typeof worker, pathname: string) => destinationAt(destinations, pathname)?.to;
 
     expect(at(admin, "/")).toBe("/");
+    expect(at(admin, "/inicio")).toBe("/inicio");
     expect(at(admin, "/dia")).toBe("/dia");
-    expect(at(admin, "/inventario/conteo")).toBe("/inventario");
+    expect(at(admin, "/inventario/conteo")).toBe("/mas");
     // Everything no destination holds is reached through Más.
     expect(at(admin, "/cuentas-abiertas")).toBe("/mas");
     expect(at(admin, "/cuentas/b1")).toBe("/mas");
@@ -104,6 +106,29 @@ describe("the four destinations", () => {
     expect(at(worker, "/cuentas-abiertas")).toBe("/cuentas-abiertas");
     expect(at(worker, "/cuentas/b1")).toBe("/cuentas-abiertas");
     expect(at(worker, "/clientes/c1")).toBe("/mas");
+  });
+});
+
+describe("Inicio", () => {
+  it("is where a User lands, with a card for a new sale and one for each thing worth knowing", async () => {
+    const ana = await signedIn("admin", "Ana Llega");
+    const html = main(await page(ana, "/inicio"));
+
+    expect(textOf(html)).toContain("Hola, Ana Llega");
+    expect(linksIn(html).map((link) => link.to)).toEqual(["/", "/dia", "/cuentas-abiertas", "/inventario", "/clientes", "/mi-dia"]);
+    expect(textOf(html)).toContain("Nueva venta");
+    expect(textOf(html)).toContain("Cobrado hoy");
+  });
+
+  it("gives a Worker their own Day in place of everyone's, and no Inventario", async () => {
+    const beto = await signedIn("worker", "Beto Llega");
+    const whole = await page(beto, "/inicio");
+    const html = main(whole);
+
+    expect(textOf(html)).toContain("Hola, Beto Llega");
+    expect(linksIn(html).map((link) => link.to)).toEqual(["/", "/mi-dia", "/cuentas-abiertas", "/clientes"]);
+    expect(textOf(html)).toContain("Cobraste hoy");
+    expectNothingOfAnAdmins(whole);
   });
 });
 
@@ -118,8 +143,9 @@ describe("Más", () => {
       "Cuentas /cuentas",
       "Por cobrar /por-cobrar",
       "Clientes /clientes",
-      "Mi día /mi-dia",
+      "Inventario /inventario",
       "Diferencias /diferencias",
+      "Mi día /mi-dia",
       "Historial /historial",
       "Productos /productos",
       "Usuarios /usuarios",
@@ -131,12 +157,15 @@ describe("Más", () => {
     expect(element(html, "a", 'aria-current="page"')).toContain("Más");
   });
 
-  it("gives a Worker Clientes and their session, and nothing of an Admin's", async () => {
+  it("gives a Worker Clientes, Mi día and their session, and nothing of an Admin's", async () => {
     const beto = await signedIn("worker", "Beto Más");
     const html = await page(beto, "/mas");
     const shown = main(html);
 
-    expect(linksIn(shown)).toEqual([{ to: "/clientes", label: "Clientes" }]);
+    expect(linksIn(shown)).toEqual([
+      { to: "/clientes", label: "Clientes" },
+      { to: "/mi-dia", label: "Mi día" },
+    ]);
     expect(textOf(shown)).toContain("Beto Más");
     expect(textOf(shown)).toContain("Empleado");
     expect(shown).toContain('action="/salir"');
@@ -195,7 +224,7 @@ describe("the pages for what cannot be shown", () => {
     const html = await response.text();
     expect(textOf(html)).toContain("No tienes acceso a esta página");
     expect(linksIn(main(html))).toContainEqual({ to: "/", label: "Ir a Vender" });
-    expect(primary(html).map((link) => link.label)).toEqual(["Vender", "Cuentas", "Mi día", "Más"]);
+    expect(primary(html).map((link) => link.label)).toEqual(["Inicio", "Vender", "Cuentas", "Más"]);
     // The words of the screen that was refused are not among them.
     expect(html).not.toContain("Existencias");
   });

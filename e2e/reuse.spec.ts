@@ -114,8 +114,8 @@ test("navigating between screens does not ask for the shell again", async ({ pag
   await goTo(page, "Inventario");
   await expect(page.getByRole("heading", { name: "Inventario", level: 1 })).toBeVisible();
 
-  // Cuentas abiertas is on an Admin's Más.
-  expect(asked).toEqual(["routes/mas", "routes/open-bills", "routes/inventario"]);
+  // Both are on an Admin's Más.
+  expect(asked).toEqual(["routes/mas", "routes/open-bills", "routes/mas", "routes/inventario"]);
   await expect(page.getByText("Ana · Administrador")).toBeVisible();
 });
 
@@ -137,7 +137,7 @@ test("a User whose role an Admin changed sees the right navigation on their next
   await betos.getByLabel("Código de acceso").fill(await issueCode(beto));
   await betos.getByRole("button", { name: "Entrar" }).click();
   await expect(betos.getByText("Beto · Empleado")).toBeVisible();
-  await expect(destinations(betos).getByRole("link", { name: "Inventario" })).toHaveCount(0);
+  await expect(destinations(betos).getByRole("link", { name: "Día", exact: true })).toHaveCount(0);
 
   await page.goto("/usuarios");
   const row = page.getByRole("listitem", { name: "Beto", exact: true });
@@ -148,7 +148,7 @@ test("a User whose role an Admin changed sees the right navigation on their next
 
   await expect(betos.getByRole("heading", { name: "Mi día", level: 1 })).toBeVisible();
   await expect(betos.getByText("Beto · Administrador")).toBeVisible();
-  await expect(destinations(betos).getByRole("link", { name: "Inventario" })).toBeVisible();
+  await expect(destinations(betos).getByRole("link", { name: "Día", exact: true })).toBeVisible();
 
   // And back: what an Admin sees is gone on the navigation after the change.
   await row.getByRole("button", { name: "Hacer empleado" }).click();
@@ -157,7 +157,7 @@ test("a User whose role an Admin changed sees the right navigation on their next
 
   await expect(betos.getByRole("heading", { name: "Clientes", level: 1 })).toBeVisible();
   await expect(betos.getByText("Beto · Empleado")).toBeVisible();
-  await expect(destinations(betos).getByRole("link", { name: "Inventario" })).toHaveCount(0);
+  await expect(destinations(betos).getByRole("link", { name: "Día", exact: true })).toHaveCount(0);
   await phone.close();
 });
 
@@ -171,6 +171,6 @@ test("an Admin who makes themselves a Worker sees a Worker's navigation at once"
 
   await expect(page.getByRole("heading", { name: "Vender", level: 1 })).toBeVisible();
   await expect(page.getByText("Ana · Empleado")).toBeVisible();
-  await expect(destinations(page).getByRole("link", { name: "Inventario" })).toHaveCount(0);
+  await expect(destinations(page).getByRole("link", { name: "Día", exact: true })).toHaveCount(0);
   expect(await documentIsMarked(page)).toBe(true);
 });

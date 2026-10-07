@@ -26,6 +26,13 @@ function Drawing({ className = "size-6", children }: { readonly className?: stri
 }
 
 const navigation: Readonly<Record<NavigationIcon, ReactNode>> = {
+  home: <path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6h-6v6H5a1 1 0 0 1-1-1v-8z" />,
+  people: (
+    <>
+      <circle cx="9" cy="8" r="3.5" />
+      <path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.8a3.5 3.5 0 0 1 0 6.4M18 14.5a6.5 6.5 0 0 1 3.5 5.5" />
+    </>
+  ),
   bag: (
     <>
       <path d="M6 8h12l1 12H5L6 8z" />
@@ -59,9 +66,9 @@ const navigation: Readonly<Record<NavigationIcon, ReactNode>> = {
   menu: <path d="M4 6h16M4 12h16M4 18h16" />,
 };
 
-/** The drawing of one of the navigation's destinations. */
-export function NavigationDrawing({ icon }: { readonly icon: NavigationIcon }) {
-  return <Drawing>{navigation[icon]}</Drawing>;
+/** The drawing of one of the navigation's destinations, or of a card of Inicio. */
+export function NavigationDrawing({ icon, className }: { readonly icon: NavigationIcon; readonly className?: string }) {
+  return <Drawing className={className}>{navigation[icon]}</Drawing>;
 }
 
 /** Points to where a row leads. */
