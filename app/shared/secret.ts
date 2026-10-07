@@ -6,7 +6,7 @@
  * Only `hashSecret(...)` of a code or a token is ever stored.
  */
 
-import { sha256Hex } from "./sha256";
+import { sha256Hex } from "./sha256.ts";
 
 /**
  * The cookie that holds the session token. `__Host-`: browsers accept it only
