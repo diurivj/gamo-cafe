@@ -106,7 +106,7 @@ describe("a User whose role an Admin changed", () => {
 
     // Beto's phone has the shell on screen, and navigates without asking for it.
     const first = await beto.fetch("/");
-    expect(await first.text()).not.toContain("Usuarios");
+    expect(await first.text()).not.toContain("Inventario");
     const phone = cookies(beto.cookie, first);
     const navigation = "/cuentas-abiertas.data?_routes=routes%2Fopen-bills";
     expect(await (await beto.fetch(navigation, { headers: { Cookie: phone } })).text()).toContain("routes/open-bills");
@@ -123,7 +123,7 @@ describe("a User whose role an Admin changed", () => {
 
     // The reload shows an Admin's navigation, and navigating works again.
     const reloaded = await beto.fetch("/cuentas-abiertas", { headers: { Cookie: phone } });
-    expect(await reloaded.text()).toContain("Usuarios");
+    expect(await reloaded.text()).toContain("Inventario");
     const after = await beto.fetch(navigation, { headers: { Cookie: cookies(phone, reloaded) } });
     expect(after.status).toBe(200);
     expect(await after.text()).toContain("routes/open-bills");
@@ -138,7 +138,7 @@ describe("a User whose role an Admin changed", () => {
     const whole = await beto.fetch("/cuentas-abiertas.data", { headers: { Cookie: phone } });
 
     expect(whole.status).toBe(200);
-    expect(await whole.text()).toContain("Usuarios");
+    expect(await whole.text()).toContain("Inventario");
   });
 });
 

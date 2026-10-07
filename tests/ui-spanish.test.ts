@@ -178,6 +178,7 @@ it("every screen a User can open is in Spanish, with es-MX money and dates", asy
     "/productos",
     `/productos/${world.item.id}`,
     "/usuarios",
+    "/mas",
   ]);
 
   // Every screen a Worker's phone shows.
@@ -188,6 +189,7 @@ it("every screen a User can open is in Spanish, with es-MX money and dates", asy
     `/clientes/${world.customer.id}`,
     "/mi-dia",
     `/cuentas/${world.openBill}`,
+    "/mas",
   ]);
 
   // Entrar, for a phone with no session.

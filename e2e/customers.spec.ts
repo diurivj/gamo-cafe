@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { goTo } from "./support/navigate";
 
 test("a Worker searches Clientes as they type and adds a new Customer", async ({ page, signInAs, addCustomer }) => {
   const beto = await signInAs("worker", "Beto");
@@ -7,7 +8,7 @@ test("a Worker searches Clientes as they type and adds a new Customer", async ({
   await addCustomer("Rosa", { by: beto });
 
   await page.goto("/");
-  await page.getByRole("navigation", { name: "Secciones" }).getByRole("link", { name: "Clientes" }).click();
+  await goTo(page, "Clientes");
   await expect(page.getByRole("heading", { name: "Clientes" })).toBeVisible();
 
   // Matches appear while the name is typed, whatever its case or accents.
@@ -74,7 +75,7 @@ test("an Admin renames, retires and restores a Customer", async ({ page, signInA
   await expect(page.getByText("Ya no se puede elegir para cuentas nuevas.")).toBeVisible();
 
   // Still listed on Clientes, marked.
-  await page.getByRole("link", { name: "Clientes" }).first().click();
+  await goTo(page, "Clientes");
   await page.getByLabel("Buscar o agregar").pressSequentially("hugo");
   const row = page.getByRole("list", { name: "Clientes" }).getByRole("link", { name: /Hugo Méndez/ });
   await expect(row).toContainText("Retirado");

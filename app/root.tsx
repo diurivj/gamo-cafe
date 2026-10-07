@@ -1,7 +1,8 @@
-import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
+import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
 
 import type { Route } from "./+types/root";
 import "./app.css";
+import { ErrorPage } from "./components/error-screen";
 import { noticeMiddleware } from "./notice.server";
 import { sessionMiddleware } from "./session.server";
 
@@ -18,7 +19,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-        <meta name="theme-color" content="#1c1917" />
+        <meta name="theme-color" content="#faf6ef" />
         <meta name="robots" content="noindex" />
         <link rel="manifest" href="/manifest.webmanifest" />
         <link rel="icon" href="/icon.svg" type="image/svg+xml" />
@@ -26,7 +27,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Meta />
         <Links />
       </head>
-      <body className="min-h-dvh bg-stone-50 text-stone-900 antialiased">
+      <body className="min-h-dvh bg-paper text-lg text-ink antialiased">
         {children}
         <ScrollRestoration />
         <Scripts />
@@ -40,33 +41,8 @@ export default function App() {
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
-  // The status stays what the route threw; only the words change. A Worker who
-  // opens an Admin screen or a Bill they may not see gets this page (ticket 20,
-  // from the note left by ticket 03).
-  let message = "Algo salió mal";
-  let details = "Intenta de nuevo en un momento.";
-  let stack: string | undefined;
-
-  if (isRouteErrorResponse(error) && error.status === 403) {
-    message = "No tienes acceso a esta página";
-    details = "Tu usuario no puede verla. Pídele a un administrador si necesitas entrar.";
-  } else if (isRouteErrorResponse(error) && error.status === 404) {
-    message = "No encontramos esta página";
-    details = "";
-  } else if (import.meta.env.DEV && error instanceof Error) {
-    details = error.message;
-    stack = error.stack;
-  }
-
-  return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-6">
-      <h1 className="text-2xl font-semibold">{message}</h1>
-      {details ? <p className="mt-2 text-stone-600">{details}</p> : null}
-      {stack ? (
-        <pre className="mt-4 w-full overflow-x-auto rounded-lg bg-stone-100 p-4 text-left text-xs">
-          <code>{stack}</code>
-        </pre>
-      ) : null}
-    </main>
-  );
+  // What no screen inside the shell could answer: a path the app does not
+  // have, or a failure before the shell had its User. `routes/screen.tsx`
+  // answers everything else inside the navigation.
+  return <ErrorPage error={error} />;
 }

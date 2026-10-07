@@ -1,6 +1,7 @@
 import type { Browser, Page } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
+import { goTo } from "./support/navigate";
 
 /** Another phone: a browser with no session, which types a code on Entrar. */
 async function anotherPhone(browser: Browser, baseURL: string | undefined, code: string): Promise<Page> {
@@ -25,7 +26,7 @@ test("an Admin adds a User, and the code shown signs that User in on their phone
   await signInAs("admin", "Ana");
   await page.goto("/");
 
-  await page.getByRole("navigation", { name: "Administración" }).getByRole("link", { name: "Usuarios" }).click();
+  await goTo(page, "Usuarios");
   await expect(page.getByRole("heading", { name: "Usuarios", level: 1 })).toBeVisible();
   await page.getByLabel("Nombre").fill("Beto");
   await page.getByLabel("Rol").selectOption({ label: "Empleado" });

@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { goTo } from "./support/navigate";
 import { holdSubmissions } from "./support/held";
 
 // A recorded form answers the request that sent it with a notice, and the
@@ -18,7 +19,7 @@ test("a recorded sale shows its message once: not on a reload, nor going back an
 
   // Arrive at Vender from another screen, so there is somewhere to go back to.
   await page.goto("/cuentas-abiertas");
-  await page.getByRole("navigation", { name: "Secciones" }).getByRole("link", { name: "Vender" }).click();
+  await goTo(page, "Vender");
   await expect(page.getByRole("heading", { name: "Vender", level: 1 })).toBeVisible();
 
   await page.getByRole("button", { name: /Agua mineral/ }).click();

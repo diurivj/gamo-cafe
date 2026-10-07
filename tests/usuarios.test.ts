@@ -198,7 +198,9 @@ describe("Usuarios, for a Worker", () => {
     const ana = await signedIn("admin", "Ana Menú");
     const beto = await signedIn("worker", "Beto Menú");
 
-    expect(await (await ana.fetch("/")).text()).toContain('href="/usuarios"');
-    expect(await (await beto.fetch("/")).text()).not.toContain("/usuarios");
+    expect(await (await ana.fetch("/mas")).text()).toContain('href="/usuarios"');
+    for (const path of ["/", "/mas"]) {
+      expect(await (await beto.fetch(path)).text(), path).not.toContain("/usuarios");
+    }
   });
 });

@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 
 import { dayOf } from "../app/shared/day.ts";
 import { expect, test } from "./fixtures";
+import { goTo } from "./support/navigate";
 
 // Por cobrar (spec §6.2, §4.1): each Customer with what they owe and the Day
 // of their oldest Open Bill, then the Open Bills with no Customer, flagged
@@ -69,7 +70,7 @@ test("an Admin sees what each Customer owes, then the Open Bills with no Custome
   await query("UPDATE bills SET day = ? WHERE id = ?", [dayOf(Date.now() - 2 * 86_400_000), older!.id]);
 
   // The navigation entry leads there.
-  await page.getByRole("navigation", { name: "Administración" }).getByRole("link", { name: "Por cobrar" }).click();
+  await goTo(page, "Por cobrar");
 
   await expect(page.getByRole("heading", { name: "Por cobrar", level: 1 })).toBeVisible();
   await expect(page.getByText("Total por cobrar")).toContainText("$68.50");

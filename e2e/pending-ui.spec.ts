@@ -2,6 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
 import { holdSubmissions } from "./support/held";
+import { goTo } from "./support/navigate";
 
 // Every tap is acknowledged at once (spec §3.4, ticket 30). Each test holds
 // the server's answer back and looks at the screen meanwhile:
@@ -73,8 +74,12 @@ test("Entrar and Salir are pending from the tap", async ({ page, addUser, issueC
   await held.release();
   await expect(page.getByRole("heading", { name: "Vender", level: 1 })).toBeVisible();
 
-  await tap(held, page.getByRole("button", { name: "Salir" }));
-  await expect(page.getByRole("heading", { name: "Vender", level: 1 })).toBeVisible();
+  await goTo(page, "Más");
+  await expect(page.getByRole("button", { name: "Salir" })).toBeVisible();
+  const salir = page.getByRole("main").locator("button[type=submit]");
+  await tap(held, salir);
+  await expect(salir).toHaveText("Saliendo…");
+  await expect(page.getByRole("heading", { name: "Más", level: 1 })).toBeVisible();
   await held.release();
   await expect(page.getByRole("heading", { name: "Entrar" })).toBeVisible();
 });

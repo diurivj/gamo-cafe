@@ -1,13 +1,64 @@
 @import "tailwindcss";
 
+/*
+ * The visual system (UI redesign §3.2): warm off-white surfaces, dark text,
+ * one restrained accent. Every pair used for text is at least 4.5:1, and
+ * `edge`, the border of a control, is at least 3:1 on both surfaces.
+ * `~/components/styles` builds the shared patterns from these.
+ */
 @theme {
   --font-sans:
     ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
     Arial, sans-serif;
+  /* Headings: the serif the phone already has, so no text waits for a font. */
+  --font-display:
+    ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Noto Serif", serif;
+
+  --color-paper: #faf6ef;
+  --color-raised: #fffdf9;
+  --color-ink: #2a211b;
+  --color-ink-soft: #5c4f45;
+  --color-rule: #e2d8c9;
+  --color-edge: #8a7a6a;
+  --color-accent: #17525c;
+  --color-accent-strong: #0f3d45;
+  --color-accent-wash: #e1eded;
+  --color-danger: #9b1c1c;
+  --color-danger-wash: #fbeceb;
+}
+
+:root {
+  /* The room the bar at the bottom of a phone takes; none where it stands at the side (`lg`). */
+  --bar-room: calc(7rem + env(safe-area-inset-bottom));
+}
+
+@media (width >= 64rem) {
+  :root {
+    --bar-room: 0rem;
+  }
 }
 
 /* Phone first: no grey flash on tap, no double-tap zoom delay on controls. */
 html {
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
+  /* What takes the keyboard's focus is never left under the bar at the bottom. */
+  scroll-padding-bottom: var(--bar-room);
+}
+
+/* One focus mark for every control, on any surface. */
+:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

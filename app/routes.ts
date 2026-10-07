@@ -10,22 +10,26 @@ export default [
 
   // The signed-in shell: screens go inside it.
   layout("routes/shell.tsx", [
-    // Vender, inside the layout that holds its Items.
-    layout("routes/sell-items.tsx", [index("routes/home.tsx")]),
-    route("cuentas-abiertas", "routes/open-bills.tsx"),
-    route("cuentas", "routes/cuentas.tsx"),
-    route("cuentas/:billId", "routes/bill.tsx"),
-    route("clientes", "routes/customers.tsx"),
-    route("clientes/:customerId", "routes/customer.tsx"),
-    route("mi-dia", "routes/mi-dia.tsx"),
-    route("dia", "routes/dia.tsx"),
-    route("diferencias", "routes/diferencias.tsx"),
-    route("historial", "routes/historial.tsx"),
-    route("inventario", "routes/inventario.tsx"),
-    route("inventario/conteo", "routes/conteo.tsx"),
-    route("por-cobrar", "routes/owed.tsx"),
-    route("productos", "routes/productos.tsx"),
-    route("productos/:itemId", "routes/producto.tsx"),
-    route("usuarios", "routes/users.tsx"),
+    // Where a screen's failure stops, with the shell still around it.
+    layout("routes/screen.tsx", [
+      // Vender, inside the layout that holds its Items.
+      layout("routes/sell-items.tsx", [index("routes/home.tsx")]),
+      route("cuentas-abiertas", "routes/open-bills.tsx"),
+      route("cuentas", "routes/cuentas.tsx"),
+      route("cuentas/:billId", "routes/bill.tsx"),
+      route("clientes", "routes/customers.tsx"),
+      route("clientes/:customerId", "routes/customer.tsx"),
+      route("mi-dia", "routes/mi-dia.tsx"),
+      route("dia", "routes/dia.tsx"),
+      route("diferencias", "routes/diferencias.tsx"),
+      route("historial", "routes/historial.tsx"),
+      route("inventario", "routes/inventario.tsx"),
+      route("inventario/conteo", "routes/conteo.tsx"),
+      route("por-cobrar", "routes/owed.tsx"),
+      route("productos", "routes/productos.tsx"),
+      route("productos/:itemId", "routes/producto.tsx"),
+      route("usuarios", "routes/users.tsx"),
+      route("mas", "routes/mas.tsx"),
+    ]),
   ]),
 ] satisfies RouteConfig;

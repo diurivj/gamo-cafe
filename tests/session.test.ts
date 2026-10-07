@@ -134,30 +134,34 @@ describe("a signed-out visitor", () => {
 });
 
 describe("the signed-in shell", () => {
-  it("shows a Worker their name and the sections every User has, and no Admin section", async () => {
+  it("shows a Worker their name and a Worker's four destinations, and nothing of an Admin's", async () => {
     const beto = await signedIn("worker", "Beto");
 
     const html = await (await beto.fetch("/")).text();
 
     expect(html).toContain("Beto");
-    for (const section of ["Vender", "Cuentas abiertas", "Clientes", "Mi día"]) {
-      expect(html).toContain(section);
+    for (const destination of ["Vender", "Cuentas", "Mi día", "Más"]) {
+      expect(html).toContain(destination);
     }
     for (const section of ["Inventario", "Historial", "Usuarios", "Por cobrar"]) {
       expect(html).not.toContain(section);
     }
   });
 
-  it("shows an Admin the Admin sections as well", async () => {
+  it("shows an Admin an Admin's four destinations, and the rest on Más", async () => {
     const ana = await signedIn("admin", "Ana");
 
     const html = await (await ana.fetch("/")).text();
+    for (const destination of ["Vender", "Día", "Inventario", "Más"]) {
+      expect(html).toContain(destination);
+    }
 
+    const more = await (await ana.fetch("/mas")).text();
     for (const section of [
-      "Vender", "Cuentas abiertas", "Clientes", "Mi día",
-      "Día", "Cuentas", "Por cobrar", "Inventario", "Diferencias", "Historial", "Productos", "Usuarios",
+      "Cuentas abiertas", "Cuentas", "Clientes", "Mi día",
+      "Por cobrar", "Diferencias", "Historial", "Productos", "Usuarios",
     ]) {
-      expect(html).toContain(section);
+      expect(more).toContain(section);
     }
   });
 });

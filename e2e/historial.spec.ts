@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { goTo } from "./support/navigate";
 
 // Historial (spec §6.2, §8.4, §8.5, §8.6, §10.4): every correction and
 // Adjustment appears with who, when and why, newest first, and the records it
@@ -70,7 +71,7 @@ test("§10.4: each correction and Adjustment appears in Historial with its autho
   await expect(reciente).toContainText("Se contó dos veces");
 
   // Historial: newest first, each with who, when and why.
-  await page.getByRole("link", { name: "Historial" }).click();
+  await goTo(page, "Historial");
   await expect(page).toHaveURL(/historial/);
   await expect(page.getByRole("heading", { name: "Historial" })).toBeVisible();
 

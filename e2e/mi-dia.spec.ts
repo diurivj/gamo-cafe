@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { goTo } from "./support/navigate";
 
 // Mi día (spec §6.1, §5.9, §10.6): what the signed-in User sold and collected
 // today, in cash and by transfer, with their Lines and Payments, and how a
@@ -18,7 +19,7 @@ test("a Worker sees what they sold and collected today", async ({ page, signInAs
   await page.getByRole("region", { name: "Cobrar" }).getByRole("button", { name: "Cobrar" }).click();
   await expect(page.getByRole("status")).toContainText("Cuenta pagada: $37.00.");
 
-  await page.getByRole("link", { name: "Mi día" }).click();
+  await goTo(page, "Mi día");
   await expect(page).toHaveURL(/\/mi-dia$/);
 
   const figures = page.getByRole("region", { name: "Hoy" });
@@ -50,7 +51,7 @@ test("a removed Line drops out of Mi día", async ({ page, signInAs, addCategory
   await expect(page.getByRole("status")).toContainText("por $25.00.");
   const billId = await page.getByRole("status").getAttribute("data-bill-id");
 
-  await page.getByRole("link", { name: "Mi día" }).click();
+  await goTo(page, "Mi día");
   await expect(page.getByRole("region", { name: "Vendido" })).toContainText("1 × Café de olla");
 
   // The Worker removes the Line from the Open Bill; the Bill is Paid with a
@@ -59,7 +60,7 @@ test("a removed Line drops out of Mi día", async ({ page, signInAs, addCategory
   await page.getByRole("button", { name: "Quitar 1 × Café de olla" }).click();
   await expect(page).toHaveURL(/cuentas-abiertas/);
 
-  await page.getByRole("link", { name: "Mi día" }).click();
+  await goTo(page, "Mi día");
   await expect(page.getByRole("region", { name: "Vendido" })).toContainText("Todavía no has vendido nada hoy.");
   await expect(page.getByRole("region", { name: "Hoy" })).toContainText("$0.00");
 });
@@ -75,7 +76,7 @@ test("a Voided Bill drops out of Mi día", async ({ page, signInAs, addCategory,
   await expect(page.getByRole("status")).toContainText("por $12.00.");
   const billId = await page.getByRole("status").getAttribute("data-bill-id");
 
-  await page.getByRole("link", { name: "Mi día" }).click();
+  await goTo(page, "Mi día");
   await expect(page.getByRole("region", { name: "Vendido" })).toContainText("1 × Pan dulce");
 
   // The Admin voids the Bill, with a reason (spec §5.7).
@@ -85,7 +86,7 @@ test("a Voided Bill drops out of Mi día", async ({ page, signInAs, addCategory,
   await cancelar.getByRole("button", { name: "Cancelar cuenta" }).click();
   await expect(page.getByRole("status")).toContainText("Cuenta cancelada.");
 
-  await page.getByRole("link", { name: "Mi día" }).click();
+  await goTo(page, "Mi día");
   await expect(page.getByRole("region", { name: "Vendido" })).toContainText("Todavía no has vendido nada hoy.");
   await expect(page.getByRole("region", { name: "Hoy" })).toContainText("$0.00");
 });

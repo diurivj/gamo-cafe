@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { goTo } from "./support/navigate";
 
 test("an Admin records every kind of Adjustment and cancels one, and Stock follows", async ({
   page,
@@ -17,7 +18,7 @@ test("an Admin records every kind of Adjustment and cancels one, and Stock follo
   });
   await page.goto("/");
 
-  await page.getByRole("navigation", { name: "Administración" }).getByRole("link", { name: "Inventario" }).click();
+  await goTo(page, "Inventario");
   await expect(page.getByRole("heading", { name: "Inventario", level: 1 })).toBeVisible();
   const row = page.getByRole("listitem", { name: "Agua de la casa", exact: true });
   await expect(row).toContainText("Existencias: 6 · Mínimo: 5");

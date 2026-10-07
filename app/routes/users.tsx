@@ -16,6 +16,7 @@ import {
 import { answerWithNotice, takeNotice } from "~/notice.server";
 import { requireUser } from "~/session.server";
 import { type Notice, type TakenNotice, useSaidNotice } from "~/shared/notice";
+import { roleLabel } from "~/shared/role";
 import { formatSignInCode } from "~/shared/secret";
 import { SubmitButton } from "~/components/submit-button";
 
@@ -31,8 +32,6 @@ function forbidden(): Response {
 function badRequest(): Response {
   return new Response(null, { status: 400 });
 }
-
-const roleLabel = { admin: "Administrador", worker: "Empleado" } as const;
 
 function parseRole(value: FormDataEntryValue | null): Role {
   if (value === "admin" || value === "worker") return value;

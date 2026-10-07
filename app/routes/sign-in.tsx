@@ -1,17 +1,30 @@
+import { useEffect, useRef } from "react";
 import { data, Form, redirect } from "react-router";
 
 import { run } from "~/backend/run.server";
 import { useSignInCode } from "~/backend/sign-in";
-import { optionalUser, sessionCookie } from "~/session.server";
+import { Notice } from "~/components/notice";
+import { fieldLabel, hint, pageTitle, primaryButton, sectionTitle, textField } from "~/components/styles";
 import { SubmitButton } from "~/components/submit-button";
+import { clearedSessionCookie, optionalUser, sessionCookie, sessionToken } from "~/session.server";
 
 import type { Route } from "./+types/sign-in";
 
 export const meta: Route.MetaFunction = () => [{ title: "Entrar · Gamo Cafe" }];
 
-export function loader({ context }: Route.LoaderArgs) {
+export function loader({ context, request }: Route.LoaderArgs) {
   if (optionalUser(context)) throw redirect("/");
-  return null;
+  // A phone that still carries a session's cookie had a session, and it
+  // ended: 60 days without use, or an Admin signed the User out. It is told
+  // once: the answer that says so clears the cookie. Salir clears it too, so a
+  // User who left by themselves is not told this.
+  if (sessionToken(request) === undefined) return { sessionEnded: false };
+  return data({ sessionEnded: true }, { headers: { "Set-Cookie": clearedSessionCookie } });
+}
+
+// A document answers with its loader's headers only when the route says so.
+export function headers({ loaderHeaders }: Route.HeadersArgs) {
+  return loaderHeaders;
 }
 
 export async function action({ context, request }: Route.ActionArgs) {
@@ -28,51 +41,72 @@ export async function action({ context, request }: Route.ActionArgs) {
     }
   });
 
-  if ("error" in result) return data(result, { status: 400 });
+  // What was typed goes back with the refusal, to be corrected, not retyped.
+  if ("error" in result) return data({ ...result, code }, { status: 400 });
   throw redirect("/", { headers: { "Set-Cookie": sessionCookie(result.token) } });
 }
 
-export default function SignIn({ actionData }: Route.ComponentProps) {
+export default function SignIn({ loaderData, actionData }: Route.ComponentProps) {
+  const field = useRef<HTMLInputElement>(null);
+  // A refused code puts the User back on the field it is about.
+  useEffect(() => {
+    if (actionData?.error) field.current?.focus();
+  }, [actionData]);
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-6">
-      <p className="text-lg text-stone-600">Gamo Cafe</p>
-      <h1 className="mt-1 text-3xl font-semibold tracking-tight">Entrar</h1>
+    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-5 py-10">
+      <p className="font-display text-xl font-semibold text-ink-soft">Gamo Cafe</p>
+      <h1 className={`mt-1 ${pageTitle}`}>Entrar</h1>
 
-      <Form method="post" className="mt-8 flex flex-col gap-4">
-        <label htmlFor="code" className="text-lg font-medium">
+      {loaderData.sessionEnded ? (
+        <Notice tone="info" className="mt-6">
+          Tu sesión terminó. Entra otra vez con un código nuevo. Si estabas registrando algo, revísalo al entrar
+          antes de repetirlo.
+        </Notice>
+      ) : null}
+
+      <Form method="post" className="mt-8 flex flex-col gap-3">
+        <label htmlFor="code" className={fieldLabel}>
           Código de acceso
         </label>
+        <p id="code-help" className={hint}>
+          Son 8 letras y números, como ABCD 2345. Puedes escribirlo o pegarlo.
+        </p>
         <input
+          ref={field}
           id="code"
           name="code"
           required
           autoFocus
+          defaultValue={actionData?.code}
           autoComplete="one-time-code"
           autoCapitalize="characters"
           autoCorrect="off"
           spellCheck={false}
-          placeholder="ABCD 2345"
-          aria-describedby={actionData?.error ? "code-error" : "code-help"}
+          enterKeyHint="go"
+          aria-describedby={actionData?.error ? "code-help code-error" : "code-help"}
           aria-invalid={actionData?.error ? true : undefined}
-          className="w-full rounded-xl border border-stone-300 bg-white px-4 py-4 text-center font-mono text-2xl uppercase tracking-widest placeholder:text-stone-300"
+          className={`${textField} text-center font-mono text-2xl tracking-widest uppercase`}
         />
         {actionData?.error ? (
-          <p id="code-error" role="alert" className="text-red-700">
+          <Notice tone="error" id="code-error">
             {actionData.error}
-          </p>
-        ) : (
-          <p id="code-help" className="text-stone-600">
-            Pídele tu código a un administrador. Sirve una sola vez y dura 10 minutos.
-          </p>
-        )}
-        <SubmitButton
-          pendingLabel="Entrando…"
-          className="rounded-xl bg-stone-900 px-4 py-4 text-lg font-semibold text-white disabled:opacity-60"
-        >
+          </Notice>
+        ) : null}
+        <SubmitButton pendingLabel="Entrando…" className={`mt-2 ${primaryButton}`}>
           Entrar
         </SubmitButton>
       </Form>
+
+      <section aria-labelledby="sin-codigo" className="mt-10 border-t border-rule pt-6">
+        <h2 id="sin-codigo" className={sectionTitle}>
+          ¿No tienes un código?
+        </h2>
+        <p className={`mt-2 ${hint}`}>
+          Pídeselo a un administrador: lo genera en Usuarios y te lo dicta. Cada código sirve una sola vez y dura 10
+          minutos.
+        </p>
+      </section>
     </main>
   );
 }

@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
+import { destinations, goTo } from "./support/navigate";
 
 // Spec §3.4: what is not about money is reused in the browser. The Items on
 // Vender and the shell's navigation are not fetched again after every sale or
@@ -56,10 +57,9 @@ test("an Item added, repriced or retired on Productos is right on Vender when it
   const menu = page.getByRole("region", { name: "Bebidas" });
   await expect(menu.getByRole("button", { name: /Agua mineral/ })).toContainText("$18.50");
   await markDocument(page);
-  const productos = page.getByRole("navigation", { name: "Administración" }).getByRole("link", { name: "Productos" });
 
   // Added.
-  await productos.click();
+  await goTo(page, "Productos");
   await page.getByText("Nuevo producto").click();
   const form = page.locator("details", { hasText: "Nuevo producto" });
   await form.getByLabel("Nombre", { exact: true }).fill("Té helado");
@@ -79,7 +79,7 @@ test("an Item added, repriced or retired on Productos is right on Vender when it
   await page.getByRole("button", { name: "Retirar producto" }).click();
   await expect(page.getByText("Retirado: no aparece en Vender.")).toBeVisible();
 
-  await page.getByRole("navigation", { name: "Secciones" }).getByRole("link", { name: "Vender" }).click();
+  await goTo(page, "Vender");
 
   await expect(page.getByRole("heading", { name: "Vender", level: 1 })).toBeVisible();
   await expect(menu.getByRole("button", { name: /Té helado/ })).toContainText("$22.00");
@@ -109,12 +109,13 @@ test("navigating between screens does not ask for the shell again", async ({ pag
   await page.goto("/");
   const asked = loadersAskedFor(page);
 
-  await page.getByRole("navigation", { name: "Secciones" }).getByRole("link", { name: "Cuentas abiertas" }).click();
+  await goTo(page, "Cuentas abiertas");
   await expect(page.getByRole("heading", { name: "Cuentas abiertas", level: 1 })).toBeVisible();
-  await page.getByRole("navigation", { name: "Administración" }).getByRole("link", { name: "Inventario" }).click();
+  await goTo(page, "Inventario");
   await expect(page.getByRole("heading", { name: "Inventario", level: 1 })).toBeVisible();
 
-  expect(asked).toEqual(["routes/open-bills", "routes/inventario"]);
+  // Cuentas abiertas is on an Admin's Más.
+  expect(asked).toEqual(["routes/mas", "routes/open-bills", "routes/inventario"]);
   await expect(page.getByText("Ana · Administrador")).toBeVisible();
 });
 
@@ -136,27 +137,27 @@ test("a User whose role an Admin changed sees the right navigation on their next
   await betos.getByLabel("Código de acceso").fill(await issueCode(beto));
   await betos.getByRole("button", { name: "Entrar" }).click();
   await expect(betos.getByText("Beto · Empleado")).toBeVisible();
-  await expect(betos.getByRole("navigation", { name: "Administración" })).toHaveCount(0);
+  await expect(destinations(betos).getByRole("link", { name: "Inventario" })).toHaveCount(0);
 
   await page.goto("/usuarios");
   const row = page.getByRole("listitem", { name: "Beto", exact: true });
   await row.getByRole("button", { name: "Hacer administrador" }).click();
   await expect(page.getByRole("status")).toHaveText("Ahora es Administrador.");
 
-  await betos.getByRole("navigation", { name: "Secciones" }).getByRole("link", { name: "Mi día" }).click();
+  await goTo(betos, "Mi día");
 
   await expect(betos.getByRole("heading", { name: "Mi día", level: 1 })).toBeVisible();
   await expect(betos.getByText("Beto · Administrador")).toBeVisible();
-  await expect(betos.getByRole("navigation", { name: "Administración" }).getByRole("link", { name: "Usuarios" })).toBeVisible();
+  await expect(destinations(betos).getByRole("link", { name: "Inventario" })).toBeVisible();
 
   // And back: what an Admin sees is gone on the navigation after the change.
   await row.getByRole("button", { name: "Hacer empleado" }).click();
   await expect(page.getByRole("status")).toHaveText("Ahora es Empleado.");
-  await betos.getByRole("navigation", { name: "Secciones" }).getByRole("link", { name: "Clientes" }).click();
+  await goTo(betos, "Clientes");
 
   await expect(betos.getByRole("heading", { name: "Clientes", level: 1 })).toBeVisible();
   await expect(betos.getByText("Beto · Empleado")).toBeVisible();
-  await expect(betos.getByRole("navigation", { name: "Administración" })).toHaveCount(0);
+  await expect(destinations(betos).getByRole("link", { name: "Inventario" })).toHaveCount(0);
   await phone.close();
 });
 
@@ -170,6 +171,6 @@ test("an Admin who makes themselves a Worker sees a Worker's navigation at once"
 
   await expect(page.getByRole("heading", { name: "Vender", level: 1 })).toBeVisible();
   await expect(page.getByText("Ana · Empleado")).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "Administración" })).toHaveCount(0);
+  await expect(destinations(page).getByRole("link", { name: "Inventario" })).toHaveCount(0);
   expect(await documentIsMarked(page)).toBe(true);
 });

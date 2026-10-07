@@ -1,5 +1,6 @@
 import { formatSignInCode } from "../app/shared/secret.ts";
 import { expect, test } from "./fixtures";
+import { goTo } from "./support/navigate";
 
 test("a User with a code opens the app, types it and lands signed in", async ({ page, context, addUser, issueCode }) => {
   const beto = await addUser("worker", "Beto");
@@ -59,40 +60,78 @@ test("a code signs in one phone only", async ({ page, browser, baseURL, addUser,
   await secondPhone.close();
 });
 
-test("Salir signs this phone out", async ({ page, signInAs }) => {
+test("Salir, on Más, signs this phone out", async ({ page, signInAs }) => {
   await signInAs("worker");
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Vender" })).toBeVisible();
+  // Not beside the task: Vender has no way out of its own.
+  await expect(page.getByRole("button", { name: "Salir" })).toHaveCount(0);
 
+  await goTo(page, "Más");
   await page.getByRole("button", { name: "Salir" }).click();
 
   await expect(page.getByRole("heading", { name: "Entrar" })).toBeVisible();
+  // They left by themselves: nothing says their session ended.
+  await expect(page.getByText("Tu sesión terminó")).toHaveCount(0);
   await page.goto("/");
   await expect(page).toHaveURL(/\/entrar$/);
 });
 
-test("a Worker sees the sections every User has, and no Admin section", async ({ page, signInAs }) => {
-  await signInAs("worker");
+test("a code can be pasted, and a refused one stays to be corrected", async ({ page, addUser, issueCode }) => {
+  const code = await issueCode(await addUser("worker", "Beto"));
+  await page.goto("/entrar");
+  const field = page.getByLabel("Código de acceso");
+  await expect(field).toBeFocused();
+  await expect(field).toHaveAccessibleDescription(/Son 8 letras y números/);
+  await expect(page.getByRole("heading", { name: "¿No tienes un código?" })).toBeVisible();
 
-  await page.goto("/");
+  const paste = (text: string) =>
+    field.evaluate((input, text) => {
+      const clipboardData = new DataTransfer();
+      clipboardData.setData("text/plain", text);
+      const pasted = input.dispatchEvent(new ClipboardEvent("paste", { clipboardData, bubbles: true, cancelable: true }));
+      // Nothing cancelled the paste, so the browser would insert the text.
+      if (pasted) (input as HTMLInputElement).setRangeText(text);
+      return pasted;
+    }, text);
 
-  const sections = page.getByRole("navigation", { name: "Secciones" });
-  for (const name of ["Vender", "Cuentas abiertas", "Clientes", "Mi día"]) {
-    await expect(sections.getByText(name, { exact: true })).toBeVisible();
-  }
-  await expect(page.getByRole("navigation", { name: "Administración" })).toHaveCount(0);
-  await expect(page.getByText("Inventario")).toHaveCount(0);
+  expect(await paste("mala 2345")).toBe(true);
+  await page.getByRole("button", { name: "Entrar" }).click();
+  await expect(page.getByRole("alert")).toHaveText("Ese código no es válido o ya venció. Pide uno nuevo.");
+  await expect(field).toHaveValue("mala 2345");
+  await expect(field).toBeFocused();
+  await expect(field).toHaveAttribute("aria-invalid", "true");
+  await expect(field).toHaveAccessibleDescription(/Ese código no es válido/);
+
+  await field.fill("");
+  expect(await paste(formatSignInCode(code))).toBe(true);
+  await page.getByRole("button", { name: "Entrar" }).click();
+  await expect(page.getByRole("heading", { name: "Vender" })).toBeVisible();
 });
 
-test("an Admin sees the Admin sections too, and nothing scrolls sideways", async ({ page, signInAs }) => {
-  const ana = await signInAs("admin", "Ana María");
-
-  await page.goto("/");
-
-  await expect(page.getByText(`${ana.name} · Administrador`)).toBeVisible();
-  const admin = page.getByRole("navigation", { name: "Administración" });
-  for (const name of ["Día", "Cuentas", "Por cobrar", "Inventario", "Diferencias", "Historial", "Productos", "Usuarios"]) {
-    await expect(admin.getByText(name, { exact: true })).toBeVisible();
+test("too many wrong codes are answered with how long to wait", async ({ page, query }) => {
+  // The limit is ten refused codes in ten minutes, across the whole app.
+  for (let n = 0; n < 10; n++) {
+    await query("INSERT INTO sign_in_failures (id, at) VALUES (?, ?)", [crypto.randomUUID(), Date.now()]);
   }
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.goto("/entrar");
+
+  await page.getByLabel("Código de acceso").fill("WRNG WRNG");
+  await page.getByRole("button", { name: "Entrar" }).click();
+
+  await expect(page.getByRole("alert")).toHaveText("Demasiados intentos. Espera 10 minutos y pide un código nuevo.");
+});
+
+test("a phone whose session ended is told so on Entrar", async ({ page, signInAs, query }) => {
+  const beto = await signInAs("worker", "Beto");
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Vender" })).toBeVisible();
+
+  // An Admin signs Beto out of every phone.
+  await query("DELETE FROM sessions WHERE user_id = ?", [beto.id]);
+  await goTo(page, "Mi día");
+
+  await expect(page.getByRole("heading", { name: "Entrar" })).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("Tu sesión terminó. Entra otra vez con un código nuevo.");
+  await expect(page.getByLabel("Código de acceso")).toBeVisible();
 });

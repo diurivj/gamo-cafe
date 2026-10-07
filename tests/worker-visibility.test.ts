@@ -116,6 +116,15 @@ it("a Worker's pages carry no Stock, no other User's totals, no History and no P
   expect(mineDayHtml, "no other User's money").not.toContain("$25.00");
   expect(mineDayHtml, "no Stock number").not.toContain("98765");
 
+  // Más: her remaining screens, and not one of an Admin's.
+  const more = await carla.fetch("/mas");
+  expect(more.status).toBe(200);
+  const moreHtml = await more.text();
+  expect(moreHtml, "her own name").toContain("Carla Visible");
+  for (const word of [...hiddenWords, "Inventario", "Historial", "Usuarios"]) {
+    expect(moreHtml, `Más does not say «${word}»`).not.toContain(word);
+  }
+
   // The lists §4.1 reserves for Admins, each refused to a Worker's face.
   for (const path of [
     "/dia",

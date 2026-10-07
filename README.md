@@ -70,6 +70,8 @@ app/
     adjustment.ts  an Adjustment's reasons, their Spanish words and their sign
     notice.ts      a Notice's shape, and useSaidNotice: the last one a screen said
     text.ts        trimToNull: form text trimmed, empty as nothing said
+    navigation.ts  the shape of the navigation, and destinationAt: the destination a screen belongs to
+    role.ts        what the screen calls each role
   components/  React components used by more than one screen
     customer-picker.tsx  CustomerPicker, the form field that chooses a Customer
     submit-button.tsx  SubmitButton, the button that submits a form and is pending from the tap
@@ -77,12 +79,19 @@ app/
     item-fields.tsx  ItemFields, the fields of an Item's form, new or existing
     count-line.tsx  CountLineItem, one line of a Count as Conteo and Diferencias show it
     paged-list.tsx  usePagedList and LoadMore: a list's pages and its Cargar más
+    styles.ts      the shared patterns: headings, fields, buttons and links, over the tokens of app.css
+    notice.tsx     Notice, how the app says what happened: recorded, refused, or worth knowing
+    icons.tsx      the app's few line drawings
+    error-screen.tsx  ErrorScreen and ErrorPage, what stands in for a screen that cannot be shown
   session.server.ts  the session middleware, requireUser, the cookie
   notice.server.ts  what a recorded form says on the screen that sent it: answerWithNotice, takeNotice
   shell.server.ts  shellMiddleware: reloads the page of a phone whose shell shows a User as they no longer are
+  navigation.server.ts  what each role's navigation holds: its four destinations and the groups of its Más
   catalog-forms.server.ts  the shared Admin gate (`requireAdminUser`, `refuseRead`) and the Productos forms' parsing and error messages
   routes/      Route modules; resources/ holds routes without UI
-    shell.tsx      the signed-in layout and its navigation; screens go inside it
+    shell.tsx      the signed-in layout: who is signed in and the role's four destinations
+    screen.tsx     the layout between the shell and its screens, where a screen's failure stops
+    mas.tsx        Más: the role's remaining screens, and Salir
     sell-items.tsx the layout around Vender that holds its Items
   routes.ts    Route table
 workers/app.ts   Worker entry; rejects non-GET requests from another origin
@@ -174,7 +183,7 @@ export async function action({ context, params, request }: Route.ActionArgs) {
 ```
 
 - Every loader and action starts with `requireUser(context)`. The session middleware on the root route has already answered a request without a valid session with a redirect to `/entrar`, before any loader or action ran; `requireUser` hands over the User it found.
-- An operation that only an Admin may run starts with `yield* requireAdmin` (from `~/backend/current-user`). That puts `AdminOnly` among its errors, so the route's `switch` has to answer it. An Admin screen answers it with `throw new Response(null, { status: 403 })`, in its loader and in its action; [`app/routes/users.tsx`](app/routes/users.tsx) does. The root `ErrorBoundary` renders every 403 as its Spanish "No tienes acceso a esta página" page, so the status stays 403 and the words are not the framework's.
+- An operation that only an Admin may run starts with `yield* requireAdmin` (from `~/backend/current-user`). That puts `AdminOnly` among its errors, so the route's `switch` has to answer it. An Admin screen answers it with `throw new Response(null, { status: 403 })`, in its loader and in its action; [`app/routes/users.tsx`](app/routes/users.tsx) does. The boundary of `app/routes/screen.tsx` renders every 403 as the Spanish "No tienes acceso a esta página", inside the User's navigation, so the status stays 403 and the words are not the framework's.
 - A route with several forms tells them apart by the submit button's `name="intent"`, and builds one program for whichever was sent inside a single `Effect.gen`, so that `onError` gets the union of every operation's errors (`programFor` in `app/routes/users.tsx`). A form it does not understand is answered 400. A route whose forms belong to distinct families may run more than one program: `app/routes/bill.tsx` runs one for the corrections, with its own `run` and its own exhaustive error map, and another for the payment and edit forms. Each `run` still gets a typed, exhaustive error map — a `switch` on `error._tag` with no `default`.
 - `run(context, program)` resolves with the program's value.
 - An action that records something answers the request that sent the form with a **notice**: what that screen must say (spec §3.4), through `~/notice.server`. The browser's router sent the form as a data request, so the notice travels in the action's own answer — `answerWithNotice(request, to, notice)` returns `{ notice }` — and the screen that sent the form reads it: `useActionData()?.notice`, or a fetcher's `data.notice`. Only that screen can read it, so two answers at once cannot lose or take each other's words, and no other tab can take them. A document POST — JavaScript off, the browser posted the page itself — gets the redirect and the cookie instead, and the loader of the page it names returns `notice: takeNotice(context)`; the cookie lasts a minute, the page takes it once, and the message is never in the URL. Besides `message`, a notice can name the `form` that was recorded, and every notice has a new `id`: a page keys a form on it to start that form over (`fresh` in `app/routes/inventario.tsx`). A refusal still answers 400 with its Spanish message as action data, on the same form. An action with nothing to say returns a plain `redirect(...)`, or `replace(...)` when a fetcher sends its form, so that the redirect back to the same page adds no history entry; the cookie redirect replaces.
@@ -187,10 +196,22 @@ export async function action({ context, params, request }: Route.ActionArgs) {
 - After a recorded form the browser's router runs every loader of the page again, and that is what a loader about Bills, Payments or Stock needs: leave it alone. Two loaders are about neither and export `shouldRevalidate` to be kept instead (spec §3.4). The shell's (`app/routes/shell.tsx`) runs again only after a form on Usuarios; when an Admin changes a User's role from another phone, `shellMiddleware` (`~/shell.server`) answers that User's next navigation with a reload of the page. Vender's Items are the loader of a layout around it (`app/routes/sell-items.tsx`), read when Vender is opened and after a refused form, not after a recorded one. A loader that takes a notice — a document POST's, `takeNotice` — must not be skipped, or its message stays on screen; a form the browser's router sent brings its notice in the answer instead. Nothing is cached anywhere else: `workers/app.ts` answers everything with `Cache-Control: no-store`, and `tests/reuse.test.ts` holds that and the D1 statements a sale costs.
 - The third argument receives every typed error except `DbError` and returns what the route answers with, or throws a `redirect(...)`. It is required exactly when the program has such errors, and a `switch` on `error._tag` with no `default` makes the compiler report a missing case.
 - `DbError` is logged and becomes a 500 for the error boundary. A bug in the program is rethrown.
-- Add the route to `app/routes.ts`, a screen inside the `shell.tsx` layout, and give its entry in the shell's navigation a `to`. Visible text is Spanish.
+- Add the route to `app/routes.ts`, a screen inside the `screen.tsx` layout, and give it a link in `app/navigation.server.ts`: in a group of the Más of each role that may open it, unless it is reached from another screen. Visible text is Spanish. See [The look and the navigation](#the-look-and-the-navigation).
 - A route answered without a session is an exception to spec §10.1. There are two, `/entrar` and `/healthz`. Another one has to be added to `PUBLIC_PATHS` in `app/session.server.ts` and, with its reason, to the exemptions in `tests/route-guard.test.ts`, which requests every route of the app signed out.
 - A new route is also unclassified until it has an entry in `tests/permissions-matrix.test.ts`. That test sweeps the route manifest and holds one entry per route — signed out, as a Worker, as an Admin, for the loader and for the action — plus one check per row of the §4.1 matrix, and it fails until the new route is classified. A Worker is refused what §4.1 reserves for Admins; `tests/worker-visibility.test.ts` reads the pages a Worker may open and checks §4.2's numbers are not in them.
 - A non-GET request must carry the app's own `Origin`, or the Worker answers 403 before any route runs. Browsers do this by themselves; a script or a test has to set the header.
+
+## The look and the navigation
+
+The redesign's rules are in `.scratch/ui-redesign/spec.md` (§3, §4 and §8). Entrar, the shell, Más and the error pages follow them; the other screens are moved over one ticket at a time, and keep working meanwhile.
+
+- **Tokens** are in `app/app.css`: the warm surfaces `paper` and `raised`, the text `ink` and `ink-soft`, the dividers `rule`, a control's border `edge`, the one `accent`, and `danger`. Every text pair is at least 4.5:1 and `edge` at least 3:1; check a new pair before using it. Headings use `font-display`, a serif the phone already has. Body text is 18px, set on `<body>`.
+- **Patterns** are class names in `~/components/styles` (`pageTitle`, `sectionTitle`, `hint`, `fieldLabel`, `textField`, `primaryButton`, `secondaryButton`, `textLink`) and `Notice` from `~/components/notice`. A screen composes these. A field has a visible `<label>` and no placeholder standing in for one; one `primaryButton` per step; anything tapped by itself is at least 48px in both directions; a `Notice` tells its tone by its drawing and border as well as its color, and never disappears by itself.
+- **Focus** has one mark, in `app.css`, for every control. The shell moves the focus to `<main>` when the path changes, unless the new screen already took it.
+- **Navigation**: `app/navigation.server.ts` holds each role's four destinations and the groups of its Más. Loaders send only the role's own, so a Worker's phone gets no Admin label or path; `tests/navigation.test.ts` and `tests/worker-visibility.test.ts` hold that. A destination `holds` the paths under it that are not its own, which is how the shell marks where the User is (`destinationAt`); a screen no destination holds is under Más. The bar is fixed at the bottom of a phone and stands at the side from `lg` up; `<main>` leaves room for it and `scroll-padding-bottom` keeps a focused control out from under it.
+- **Salir** is on Más, away from any task's action.
+- **A screen that cannot be shown** — not there, not allowed, failed — is answered by the boundary of `app/routes/screen.tsx`, inside the navigation, with `ErrorScreen`. The root boundary answers what has no shell: a path the app does not have. A failure that may have interrupted a form says the form may have been recorded, never that it was not. A request without a live session is sent to Entrar, which says the session ended when the phone still carries a session's cookie.
+- Browser tests open a screen with `goTo(page, "Productos")` from `e2e/support/navigate.ts`: a tap on a destination, or Más and then the link.
 
 ## Rebuilding the projections
 

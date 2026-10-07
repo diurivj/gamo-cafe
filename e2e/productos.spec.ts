@@ -1,10 +1,11 @@
 import { expect, test } from "./fixtures";
+import { goTo } from "./support/navigate";
 
 test("an Admin adds a Category and an Item, and a second Item with the same name is refused", async ({ page, signInAs }) => {
   await signInAs("admin");
   await page.goto("/");
 
-  await page.getByRole("navigation", { name: "Administración" }).getByRole("link", { name: "Productos" }).click();
+  await goTo(page, "Productos");
   await expect(page.getByRole("heading", { name: "Productos", level: 1 })).toBeVisible();
   await expect(page.getByText("Todavía no hay categorías.")).toBeVisible();
 
@@ -60,7 +61,7 @@ test("an Admin changes an Item's price, retires it and restores it", async ({ pa
   await expect(page.getByText("Retirado: no aparece en Vender.")).toBeVisible();
 
   // Retired, not gone: Productos still lists it.
-  await page.getByRole("link", { name: "Productos", exact: true }).first().click();
+  await goTo(page, "Productos");
   await expect(page.getByRole("link", { name: /Cacahuates/ })).toContainText("Retirado");
 
   await page.getByRole("link", { name: /Cacahuates/ }).click();
