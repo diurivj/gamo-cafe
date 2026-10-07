@@ -47,7 +47,7 @@ export function appFetch(path: string, init: RequestInit = {}): Promise<Response
 /**
  * The page a recorded form's redirect lands on, as the browser asks for it:
  * the redirect's `Location`, carrying the cookies the redirect set — which is
- * how the message of `~/flash.server` reaches the page.
+ * how the notice of `~/notice.server` reaches the page.
  *
  *     const page = await landing(beto, await beto.fetch(path, { method: "POST", body }));
  *     expect(await page.text()).toContain("Abono de $20.00 registrado.");

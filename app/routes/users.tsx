@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Effect } from "effect";
 import { data, Form, redirect, useFetcher } from "react-router";
 
@@ -12,8 +13,9 @@ import {
   reactivateUser,
   signOutEverywhere,
 } from "~/backend/users";
-import { type Flash, redirectWithFlash, takeFlash } from "~/flash.server";
+import { answerWithNotice, takeNotice } from "~/notice.server";
 import { requireUser } from "~/session.server";
+import { type Notice, type TakenNotice, useSaidNotice } from "~/shared/notice";
 import { formatSignInCode } from "~/shared/secret";
 import { SubmitButton } from "~/components/submit-button";
 
@@ -46,16 +48,16 @@ export async function loader({ context }: Route.LoaderArgs) {
     }
   });
   // What the form that redirected here has to say (spec §3.4).
-  return { users, me: user.id, flash: takeFlash(context) };
+  return { users, me: user.id, notice: takeNotice(context) };
 }
 
-// What an action that worked has to say on the page it redirects to: a code
-// to read out, or a short notice.
-const issued = ({ user, code }: { user: { name: string }; code: string }): Flash => ({
+// What an action that worked has to say on the screen that sent the form: a
+// code to read out, or a short notice.
+const issued = ({ user, code }: { user: { name: string }; code: string }): Notice => ({
   code: { name: user.name, code: formatSignInCode(code) },
 });
 
-const notice = (text: string): Flash => ({ message: text });
+const message = (text: string): Notice => ({ message: text });
 
 const intents = ["add", "new-code", "sign-out-everywhere", "deactivate", "reactivate", "change-role"] as const;
 
@@ -76,16 +78,16 @@ function programFor(form: FormData) {
         return issued(yield* issueCodeForUser(userId));
       case "sign-out-everywhere":
         yield* signOutEverywhere(userId);
-        return notice("Se cerró su sesión en todos los teléfonos.");
+        return message("Se cerró su sesión en todos los teléfonos.");
       case "deactivate":
         yield* deactivateUser(userId);
-        return notice("Usuario desactivado.");
+        return message("Usuario desactivado.");
       case "reactivate":
         yield* reactivateUser(userId);
-        return notice("Usuario reactivado. Dale un código nuevo para que entre.");
+        return message("Usuario reactivado. Dale un código nuevo para que entre.");
       case "change-role":
         yield* changeRole(userId, role);
-        return notice(`Ahora es ${roleLabel[role]}.`);
+        return message(`Ahora es ${roleLabel[role]}.`);
     }
   });
 }
@@ -120,36 +122,42 @@ export async function action({ context, request }: Route.ActionArgs) {
   if (form.get("intent") === "change-role" && form.get("userId") === user.id && form.get("role") === "worker") {
     throw redirect("/");
   }
-  // Recorded: a redirect, so a reload or the back button neither records it
-  // again nor issues another code (spec §3.4).
-  return redirectWithFlash("/usuarios", result);
+  // Recorded: the request that sent the form is answered with the notice, so
+  // a reload or the back button neither records it again nor issues another
+  // code (spec §3.4).
+  return answerWithNotice(request, "/usuarios", result);
 }
 
 const button = "rounded-xl border border-stone-300 bg-white px-4 py-3 font-medium disabled:opacity-60";
 
 export default function Users({ loaderData, actionData }: Route.ComponentProps) {
-  const { users, me, flash } = loaderData;
+  const { users, me, notice: landingNotice } = loaderData;
+  // The last notice the page said: the answer of the form that was sent, a
+  // row's own answer (below), or the one a document POST left for the loader
+  // (spec §3.4, ticket 34).
+  const answeredNotice = actionData && "notice" in actionData ? actionData.notice : null;
+  const [said, say] = useSaidNotice(landingNotice, answeredNotice);
 
   return (
     <>
       <h1 className="text-3xl font-semibold tracking-tight">Usuarios</h1>
 
-      {flash?.code ? (
+      {said?.code ? (
         <div className="mt-6 rounded-xl border border-stone-900 bg-white p-4">
           <p className="text-lg">
-            Código de acceso para <strong>{flash.code.name}</strong>
+            Código de acceso para <strong>{said.code.name}</strong>
           </p>
           <output className="mt-2 block font-mono text-4xl font-semibold tracking-widest">
-            {flash.code.code}
+            {said.code.code}
           </output>
           <p className="mt-2 text-stone-600">
             Sirve una sola vez y dura 10 minutos. No se volverá a mostrar.
           </p>
         </div>
       ) : null}
-      {flash?.message ? (
+      {said?.message ? (
         <p role="status" className="mt-6 rounded-xl bg-stone-200 px-4 py-3">
-          {flash.message}
+          {said.message}
         </p>
       ) : null}
       {actionData && "error" in actionData ? (
@@ -202,7 +210,7 @@ export default function Users({ loaderData, actionData }: Route.ComponentProps) 
         </h2>
         <ul className="mt-3 flex flex-col gap-3">
           {users.map((user) => (
-            <UserRow key={user.id} user={user} isMe={user.id === me} />
+            <UserRow key={user.id} user={user} isMe={user.id === me} onNotice={say} />
           ))}
         </ul>
       </section>
@@ -214,15 +222,18 @@ export default function Users({ loaderData, actionData }: Route.ComponentProps) 
  * One User on the list. Their role and whether they are active are harmless
  * and reversible, so the row shows a change at once (spec §3.4): while the
  * form is on its way the User is what was asked for, and a refusal puts them
- * back as the server has them. What was recorded is said by the page, once
- * the answer brings it. A new code and signing out are not shown ahead.
+ * back as the server has them. What was recorded is said by the page, from
+ * the row's own answer (ticket 34). A new code and signing out are not shown
+ * ahead.
  */
 function UserRow({
   user,
   isMe,
+  onNotice,
 }: {
   user: Route.ComponentProps["loaderData"]["users"][number];
   isMe: boolean;
+  onNotice: (notice: TakenNotice) => void;
 }) {
   const change = useFetcher<typeof action>({ key: `user:${user.id}` });
   const pending = change.state !== "idle";
@@ -231,6 +242,11 @@ function UserRow({
   const askedRole = intent === "change-role" ? change.formData?.get("role") : null;
   const role = askedRole === "admin" || askedRole === "worker" ? askedRole : user.role;
   const error = change.data && "error" in change.data ? change.data.error : null;
+  // The row's own words, for the page to say.
+  const answered = change.data && "notice" in change.data ? change.data.notice : null;
+  useEffect(() => {
+    if (answered) onNotice(answered);
+  }, [answered?.id]);
 
   return (
     <li aria-label={user.name} className="rounded-xl border border-stone-200 bg-white p-4">

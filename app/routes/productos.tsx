@@ -27,7 +27,7 @@ import {
 } from "~/catalog-forms.server";
 import { ItemFields } from "~/components/item-fields";
 import { SubmitButton } from "~/components/submit-button";
-import { redirectWithFlash, takeFlash } from "~/flash.server";
+import { answerWithNotice, takeNotice } from "~/notice.server";
 import { formatMoney } from "~/shared/money";
 
 import type { Route } from "./+types/productos";
@@ -37,7 +37,7 @@ export const meta: Route.MetaFunction = () => [{ title: "Productos · Gamo Cafe"
 export async function loader({ context }: Route.LoaderArgs) {
   const admin = requireAdminUser(context);
   const categories = await run(context, listCatalog.pipe(Effect.provideService(CurrentUser, admin)), refuseRead);
-  return { categories, flash: takeFlash(context) };
+  return { categories, notice: takeNotice(context) };
 }
 
 /** The operation a submitted form asks for, or why the form cannot be read. */
@@ -81,9 +81,9 @@ export async function action({ context, request }: Route.ActionArgs) {
     answerCatalogError,
   );
   if ("error" in result) return refused(result, formKey);
-  // Recorded: a redirect back to the page, so a reload or the back button
-  // records nothing again (spec §3.4). It names the form, which starts over.
-  return redirectWithFlash("/productos", { form: formKey });
+  // Recorded: the request that sent the form is answered with the notice,
+  // which names the form, so it starts over (spec §3.4, ticket 34).
+  return answerWithNotice(request, "/productos", { form: formKey });
 }
 
 const button = "rounded-xl border border-stone-300 bg-white px-4 py-3 font-medium disabled:opacity-60";
@@ -99,14 +99,18 @@ function Refused({ message }: { message: string | undefined }) {
 }
 
 export default function Productos({ loaderData, actionData }: Route.ComponentProps) {
-  const { categories, flash } = loaderData;
+  const { categories, notice: landingNotice } = loaderData;
 
   const active = categories.filter((category) => !category.retired);
   const retired = categories.filter((category) => category.retired);
   const errorOn = (form: string) =>
     actionData && "error" in actionData && actionData.form === form ? actionData.error : undefined;
+  // The answer of the form that was just recorded, or the notice a document
+  // POST left for the loader (spec §3.4, ticket 34).
+  const answeredNotice = actionData && "notice" in actionData ? actionData.notice : null;
+  const notice = answeredNotice ?? landingNotice;
   // A form that was just recorded starts over, empty.
-  const fresh = (form: string) => (flash?.form === form ? flash.id : form);
+  const fresh = (form: string) => (notice?.form === form ? notice.id : form);
 
   return (
     <div className="flex flex-col gap-8">

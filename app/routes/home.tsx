@@ -22,10 +22,11 @@ import { type PaymentExceedsOwed, type PaymentNotPositive } from "~/backend/paym
 import { run } from "~/backend/run.server";
 import { CustomerPicker, type PickedCustomer } from "~/components/customer-picker";
 import { PaymentFields } from "~/components/payment-fields";
-import { answerWithFlash, type TakenFlash, takeFlash } from "~/flash.server";
+import { answerWithNotice, takeNotice } from "~/notice.server";
 import { requireUser } from "~/session.server";
 import { newId } from "~/shared/id";
 import { type Centavos, formatMoney, parsePesos } from "~/shared/money";
+import { type TakenNotice, useSaidNotice } from "~/shared/notice";
 import { PAYMENT_METHODS, type PaymentMethod } from "~/shared/payment";
 import { paymentMessages } from "~/shared/payment-messages";
 
@@ -45,13 +46,13 @@ export async function loader({ context, request }: Route.LoaderArgs) {
   const user = requireUser(context);
   const billId = new URL(request.url).searchParams.get("billId") ?? "";
   // What the selection that redirected here recorded (spec §3.4).
-  const flash = takeFlash(context);
+  const notice = takeNotice(context);
   // The key of the form this page renders (spec §3.4): new every time the
   // loader runs, so after each recorded sale, and the same for a double tap
   // or a retry of one rendered form. It is why this loader, unlike the Items'
   // in `./sell-items`, must run again after a sale.
   const submissionKey = newId();
-  if (billId === "") return { target: null, flash, submissionKey };
+  if (billId === "") return { target: null, notice, submissionKey };
 
   const bill = await run(
     context,
@@ -67,7 +68,7 @@ export async function loader({ context, request }: Route.LoaderArgs) {
   );
   // The screen shows the target's figures, not its Lines or Payments.
   const { lines: _lines, payments: _payments, ...target } = bill;
-  return { target, flash, submissionKey };
+  return { target, notice, submissionKey };
 }
 
 /** The selection as the browser sends it, in the `selection` form field. */
@@ -172,7 +173,7 @@ export async function action({ context, request }: Route.ActionArgs) {
   // emptied the selection when the sale was sent.
   const message =
     intent === "cobrar" ? paidMessage(result) : selection.billId ? addedMessage(result) : recordedMessage(result);
-  return answerWithFlash(request, selection.billId ? `/?billId=${encodeURIComponent(selection.billId)}` : "/", {
+  return answerWithNotice(request, selection.billId ? `/?billId=${encodeURIComponent(selection.billId)}` : "/", {
     message,
     billId: result.id,
   });
@@ -220,8 +221,8 @@ interface SentSale extends FormFields {
 /** How a sale that was sent ended. */
 type SaleAnswer =
   | { readonly refusal: string }
-  /** Recorded. The action's answer carries this sale's own flash (ticket 33). */
-  | { readonly refusal: null; readonly flash: TakenFlash };
+  /** Recorded. The action's answer carries this sale's own notice (ticket 33). */
+  | { readonly refusal: null; readonly notice: TakenNotice };
 
 /** One sale on its way. It says so, and tells the screen how it ended. */
 function SaleBeingRecorded({
@@ -239,28 +240,25 @@ function SaleBeingRecorded({
       sent.current = true;
       return;
     }
-    // An answer that recorded something always carries the flash; no data at
+    // An answer that recorded something always carries the notice; no data at
     // all is an error page, which the router renders instead of this screen.
     if (!sent.current || answered.current || fetcher.data === undefined) return;
     answered.current = true;
     const answer = fetcher.data;
-    onAnswer(sale, "error" in answer ? { refusal: answer.error } : { refusal: null, flash: answer.flash });
+    onAnswer(sale, "error" in answer ? { refusal: answer.error } : { refusal: null, notice: answer.notice });
   }, [fetcher.state]);
 
   return <li>{`Registrando venta de ${formatMoney(sale.total)}…`}</li>;
 }
 
 export default function Home({ loaderData, actionData }: Route.ComponentProps) {
-  const { target, flash, submissionKey } = loaderData;
+  const { target, notice, submissionKey } = loaderData;
   const { categories } = useOutletContext<SellItems>();
   const submit = useSubmit();
   // The last thing a recorded sale said, whichever way it arrived: in this
   // screen's own answer when the browser's router sent the sale (ticket 33),
-  // or in the loader's flash after a document POST. A later load of this page
-  // brings no flash, and must not take the message away while the User is
-  // still here.
-  const [said, setSaid] = useState(flash);
-  if (flash && flash.id !== said?.id) setSaid(flash);
+  // or in the loader's notice after a document POST.
+  const [said, setSaid] = useSaidNotice(notice);
   const [quantities, setQuantities] = useState<Quantities>({});
   // Every sale sent starts the form over under a new key, so the picker, the
   // note and the Payment are empty for the next one. A refused sale starts it
@@ -330,7 +328,7 @@ export default function Home({ loaderData, actionData }: Route.ComponentProps) {
     setSent((sales) => sales.filter((other) => other.key !== sale.key));
     if (answer.refusal === null) {
       // The answer carried this sale's own words; nothing to fetch (ticket 33).
-      setSaid(answer.flash);
+      setSaid(answer.notice);
       return;
     }
     // Refused: the selection comes back with the message. If another one was

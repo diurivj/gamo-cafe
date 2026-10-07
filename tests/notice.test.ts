@@ -8,12 +8,13 @@ import { savedCustomer } from "./support/customers";
 import { runTest } from "./support/effect";
 import { saleForm } from "./support/sales";
 
-// A form that records something answers with a redirect, and what the screen
-// says afterwards travels with it in a short-lived cookie that the next page
-// reads and clears (spec §3.4). Abonar on a Customer's page stands for every
-// such form here; each route's own tests cover its own messages. A sale the
-// browser's router sends to Vender is answered with its words in that answer
-// itself instead (ticket 33), so a second tab has nothing to take.
+// A recorded form answers the request that sent it with a notice: what that
+// screen must say (spec §3.4, tickets 33 and 34). Two paths reach it. The
+// browser's router sends the form as a data request, and the notice travels
+// in the action's own answer; a document POST is answered with a redirect
+// whose cookie the page it lands on reads and clears. Abonar on a Customer's
+// page stands for the document path here, and Vender's sales for the router's.
+// Each route's own tests cover its own messages.
 
 /** A Customer who owes $50.00 on one Open Bill, and the Abonar form for it. */
 async function owing(name: string) {
@@ -26,8 +27,8 @@ async function owing(name: string) {
   const path = `/clientes/${customer.id}`;
   // The Bill and its revision, as the page's own form carries them.
   const [, bill] = /name="bill" value="([^"]+)"/.exec(await (await beto.fetch(path)).text())!;
-  const abonar = (amount: string) =>
-    beto.fetch(path, {
+  const abonar = (amount: string, to = path) =>
+    beto.fetch(to, {
       method: "POST",
       body: new URLSearchParams({ intent: "abonar", method: "cash", amount, bill: bill! }),
     });
@@ -91,6 +92,21 @@ describe("a sale the browser sends", () => {
 });
 
 describe("a recorded form", () => {
+  it("answers the browser's request with the notice itself, and no cookie", async () => {
+    const { beto, path, abonar } = await owing("Familia del navegador");
+
+    const answer = await abonar("20.00", `${path}.data`);
+
+    expect(answer.status).toBe(200);
+    // The words travel in the answer: no cookie waits for another tab.
+    expect(answer.headers.getSetCookie()).toEqual([]);
+    expect(await answer.text()).toContain("Abono de $20.00 registrado.");
+
+    // The page the router loads next does not show them again.
+    const page = await beto.fetch(`${path}.data`);
+    expect(await page.text()).not.toContain("registrado.");
+  });
+
   it("answers with a redirect, and the page it lands on shows the message", async () => {
     const { beto, path, abonar } = await owing("Familia del aviso");
 

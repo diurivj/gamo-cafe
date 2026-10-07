@@ -30,6 +30,7 @@ Constraints a later reader should keep in mind:
 
 - 2026-10-06: Opened from the two-axis review of tickets 26–31 (Spec axis). Ticket 30's Answer documents the single-cookie loss; the review added the second-tab case.
 - 2026-10-06: Resolved. See the Answer.
+- 2026-10-06: The boundary recorded in the Answer — the other routes keep the redirect and the cookie — is closed by ticket 34: every recorded form answers the request that sent it with its own notice, and the cookie is left for document POSTs only. The mechanism also has a new name there: a notice, not a flash.
 
 ## Answer
 

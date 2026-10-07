@@ -1,9 +1,11 @@
 import { expect, test } from "./fixtures";
+import { holdSubmissions } from "./support/held";
 
-// A form that records something answers with a redirect, and what the screen
-// says afterwards travels with it (spec §3.4, ticket 27): the message shows
-// once, and a reload or the back button neither repeats it nor records
-// anything again. Both projects run a phone viewport (playwright.config.ts).
+// A recorded form answers the request that sent it with a notice, and the
+// screen that sent it shows the words once (spec §3.4, tickets 27, 33 and
+// 34): a reload or the back button neither repeats the message nor records
+// anything again, and another tab cannot take the words. Both projects run a
+// phone viewport (playwright.config.ts).
 
 test("a recorded sale shows its message once: not on a reload, nor going back and forward", async ({
   page,
@@ -41,6 +43,47 @@ test("a recorded sale shows its message once: not on a reload, nor going back an
 
   expect(await query("SELECT id FROM bills")).toHaveLength(1);
   expect(await query("SELECT id FROM payments")).toHaveLength(1);
+});
+
+test("a recorded form's words reach the tab that sent it, and no other", async ({
+  page,
+  context,
+  signInAs,
+  addCustomer,
+  query,
+}) => {
+  const beto = await signInAs("worker", "Beto de dos pestañas");
+  const ruiz = await addCustomer("Familia de dos pestañas", { by: beto });
+  await query(
+    `INSERT INTO bills (id, day, opened_by, opened_at, customer_id, total, paid, state, revision)
+     VALUES ('dos-pestanas', '2026-09-29', ?, 1000, ?, 5000, 0, 'open', 0)`,
+    [beto.id, ruiz.id],
+  );
+
+  await page.goto(`/clientes/${ruiz.id}`);
+  // The Abonar and the loads it answers with are held, so the words are on
+  // their way while the other tab looks.
+  const held = await holdSubmissions(page, { loads: true });
+  await page.getByRole("region", { name: "Abonar" }).getByLabel("Monto").fill("20.00");
+  await page.getByRole("region", { name: "Abonar" }).getByRole("button", { name: "Abonar" }).click();
+  await held.waitFor(1);
+
+  const other = await context.newPage();
+  await other.goto(`/clientes/${ruiz.id}`);
+  await expect(other.getByText("Debe $50.00 en 1 cuenta.")).toBeVisible();
+
+  await held.release();
+  // The answer is in flight, still held; the other tab asks for the page and
+  // must find nothing of it.
+  await held.waitFor(1);
+  await other.reload();
+  await expect(other.getByRole("status")).toHaveCount(0);
+
+  await held.releaseAll();
+  await expect(page.getByRole("status")).toHaveText("Abono de $20.00 registrado.");
+  await expect(page.getByRole("status")).toHaveCount(1);
+  await expect(other.getByRole("status")).toHaveCount(0);
+  expect(await query("SELECT amount FROM payments")).toEqual([{ amount: 2000 }]);
 });
 
 test("a refused form keeps what was typed and shows its message", async ({ page, signInAs, addCustomer, query }) => {

@@ -17,7 +17,7 @@ import { run } from "~/backend/run.server";
 import { CustomerPicker } from "~/components/customer-picker";
 import { PaymentFields } from "~/components/payment-fields";
 import { SubmitButton } from "~/components/submit-button";
-import { redirectWithFlash, takeFlash } from "~/flash.server";
+import { answerWithNotice, takeNotice } from "~/notice.server";
 import { requireUser } from "~/session.server";
 import { billStateLabel, isOpenBill } from "~/shared/bill-state";
 import { newId } from "~/shared/id";
@@ -69,7 +69,7 @@ export async function loader({ context, params }: Route.LoaderArgs) {
     // (spec §4.1). A Voided Bill accepts no corrections, this one included.
     canEdit: bill.state !== "voided" && (user.role === "admin" || bill.paid === 0),
     // What the form that redirected here recorded (spec §3.4).
-    flash: takeFlash(context),
+    notice: takeNotice(context),
     // The key of the Cobrar form this page renders (spec §3.4): new every
     // time the loader runs, the same for a double tap of one rendered form.
     submissionKey: newId(),
@@ -228,8 +228,10 @@ export async function action({ context, params, request }: Route.ActionArgs) {
   const user = requireUser(context);
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
-  // Whatever is recorded answers with a redirect back to the page, so a
-  // reload or the back button records nothing again (spec §3.4).
+  // Whatever is recorded answers the request that sent the form: the
+  // browser's router gets the notice in the answer itself; a document POST
+  // gets a redirect back to the page, so a reload or the back button records
+  // nothing again (spec §3.4).
   const page = `/cuentas/${params.billId}`;
 
   // The corrections have their own program and their own answer: a Worker
@@ -237,7 +239,7 @@ export async function action({ context, params, request }: Route.ActionArgs) {
   if ((CORRECTION_INTENTS as ReadonlyArray<string>).includes(intent)) {
     const answered = await answerCorrection(context, user, params.billId, intent as CorrectionIntent, form);
     if ("error" in answered) return data(answered, { status: 400 });
-    return redirectWithFlash(page, answered);
+    return answerWithNotice(request, page, answered);
   }
 
   const result = await run(
@@ -272,13 +274,13 @@ export async function action({ context, params, request }: Route.ActionArgs) {
     // instead of staying on the page (spec §4.1): they may not open a Paid
     // Bill. An Admin stays and sees it Pagada.
     if (result.paid && user.role !== "admin") throw redirect("/cuentas-abiertas");
-    return redirectWithFlash(page, {
+    return answerWithNotice(request, page, {
       message: result.paid
         ? `Cuenta pagada: ${formatMoney(result.total)}.`
         : `Abono de ${formatMoney(result.amount)} registrado. Debe ${formatMoney(result.owed)}.`,
     });
   }
-  return redirectWithFlash(page, { message: "Se guardaron los cambios de la cuenta." });
+  return answerWithNotice(request, page, { message: "Se guardaron los cambios de la cuenta." });
 }
 
 const primaryButton =
@@ -304,7 +306,19 @@ const reasonField = (
 );
 
 export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
-  const { bill, canAddItems, canPay, isAdmin, canEdit, flash, submissionKey } = loaderData;
+  const {
+    bill,
+    canAddItems,
+    canPay,
+    isAdmin,
+    canEdit,
+    notice: landingNotice,
+    submissionKey,
+  } = loaderData;
+  // The screen that sent a form reads its notice from the router's own data
+  // (ticket 34); the loader's is the one a document POST left (spec §3.4).
+  const answeredNotice = actionData && "notice" in actionData ? actionData.notice : null;
+  const notice = answeredNotice ?? landingNotice;
   // A Voided Bill accepts no further corrections (spec §5.7); a Paid Bill does,
   // which is what §8.5 is about.
   const canCorrect = bill.state !== "voided";
@@ -532,9 +546,9 @@ export default function Bill({ loaderData, actionData }: Route.ComponentProps) {
           {actionData.error}
         </p>
       ) : null}
-      {flash?.message ? (
+      {notice?.message ? (
         <p role="status" className="mt-6 rounded-xl bg-green-50 p-3">
-          {flash.message}
+          {notice.message}
         </p>
       ) : null}
 

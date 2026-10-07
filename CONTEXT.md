@@ -125,3 +125,9 @@ _On screen_: Conteo
 **Discrepancy**:
 The difference between a Count and the Stock it replaced: units that are unaccounted for, or that appeared.
 _On screen_: Diferencia, shown as Faltante when units are missing and Sobrante when there are extra
+
+### The app
+
+**Notice**:
+The short message a screen shows after a User records something, once: a Bill, a Payment, an Adjustment, or a sign-in code to read out. It travels in the answer to the form that was sent; a document POST carries it in a short-lived cookie. It is never in the URL.
+_Avoid_: Flash, toast, alert

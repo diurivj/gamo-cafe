@@ -14,7 +14,7 @@ import { run } from "~/backend/run.server";
 import { LoadMore, usePagedList } from "~/components/paged-list";
 import { PaymentFields } from "~/components/payment-fields";
 import { SubmitButton } from "~/components/submit-button";
-import { redirectWithFlash, takeFlash } from "~/flash.server";
+import { answerWithNotice, takeNotice } from "~/notice.server";
 import { requireUser } from "~/session.server";
 import { billStateLabel } from "~/shared/bill-state";
 import { CURSOR_PARAM, cursorOf, nextText } from "~/shared/cursor";
@@ -22,6 +22,7 @@ import { customerNameMessages } from "~/shared/customer-messages";
 import { dayOf, formatDay, formatTime } from "~/shared/day";
 import { newId } from "~/shared/id";
 import { type Centavos, formatMoney, parsePesos } from "~/shared/money";
+import { useSaidNotice } from "~/shared/notice";
 import { PAYMENT_METHODS, paymentMethodLabel } from "~/shared/payment";
 import { paymentMessages } from "~/shared/payment-messages";
 
@@ -80,7 +81,7 @@ export async function loader({ context, params, request }: Route.LoaderArgs) {
     canManage: user.role === "admin",
     pastBills: past === null ? null : { bills: past.bills, next: nextText(past.next) },
     // What an Abonar that redirected here has to say (spec §3.4).
-    flash: takeFlash(context),
+    notice: takeNotice(context),
     // The key of the Abonar form this page renders (spec §3.4): new every
     // time the loader runs, the same for a double tap of one rendered form.
     submissionKey: newId(),
@@ -190,17 +191,18 @@ export async function action({ context, params, request }: Route.ActionArgs) {
   });
 
   if ("error" in outcome) return data(outcome, { status: 400 });
-  // Recorded: a redirect, so a reload or the back button records nothing
-  // again (spec §3.4). An Abonar says what it recorded on the page.
+  // Recorded: the request that sent the form is answered with the notice (spec
+  // §3.4). An Abonar says what it recorded on the page.
   const page = `/clientes/${id}`;
   if (outcome.recorded) {
-    return redirectWithFlash(page, { message: `Abono de ${formatMoney(outcome.recorded.amount)} registrado.` });
+    return answerWithNotice(request, page, {
+      message: `Abono de ${formatMoney(outcome.recorded.amount)} registrado.`,
+    });
   }
-  // A retirement and a restoration are harmless and reversible, and say so
-  // with the redirect like a User's role does. `redirectWithFlash` replaces,
-  // so the fetcher adds no history entry; the rename has nothing to say.
+  // A retirement and a restoration are harmless and reversible, and say so in
+  // their own answer like a User's role does; the rename has nothing to say.
   if (intent === "retire" || intent === "restore") {
-    return redirectWithFlash(page, {
+    return answerWithNotice(request, page, {
       message: intent === "retire" ? "Cliente retirado." : "Cliente restaurado.",
     });
   }
@@ -213,7 +215,8 @@ const primaryButton =
   "block rounded-2xl bg-stone-900 px-4 py-4 text-center text-lg font-semibold text-white active:bg-stone-700 disabled:opacity-60";
 
 export default function Customer({ loaderData, actionData }: Route.ComponentProps) {
-  const { customer, openBills, owed, handovers, canManage, pastBills, flash, submissionKey } = loaderData;
+  const { customer, openBills, owed, handovers, canManage, pastBills, notice: landingNotice, submissionKey } =
+    loaderData;
   const past = usePagedList({
     id: "cuentas-pasadas",
     data: loaderData,
@@ -227,6 +230,12 @@ export default function Customer({ loaderData, actionData }: Route.ComponentProp
   const asked = state.formData?.get("intent");
   const retired = asked === "retire" ? true : asked === "restore" ? false : customer.retiredAt !== null;
   const stateError = state.data && "error" in state.data ? state.data.error : null;
+  // The last notice the page said: the fetcher's own answer for a retirement
+  // and a restoration, the Abonar form's answer, or the one a document POST
+  // left for the loader (spec §3.4, ticket 34).
+  const stateNotice = state.data && "notice" in state.data ? state.data.notice : null;
+  const answeredNotice = actionData && "notice" in actionData ? actionData.notice : null;
+  const [said] = useSaidNotice(landingNotice, stateNotice, answeredNotice);
 
   return (
     <>
@@ -258,9 +267,9 @@ export default function Customer({ loaderData, actionData }: Route.ComponentProp
           {stateError}
         </p>
       ) : null}
-      {flash?.message ? (
+      {said?.message ? (
         <p role="status" className="mt-4 rounded-xl bg-green-50 p-3">
-          {flash.message}
+          {said.message}
         </p>
       ) : null}
 

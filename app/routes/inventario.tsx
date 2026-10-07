@@ -18,7 +18,7 @@ import {
 } from "~/backend/inventory";
 import { run } from "~/backend/run.server";
 import { type Refusal, refuseRead, refused, requireAdminUser, text } from "~/catalog-forms.server";
-import { redirectWithFlash, takeFlash } from "~/flash.server";
+import { answerWithNotice, takeNotice } from "~/notice.server";
 import { ADJUSTMENT_REASONS, adjustmentReasonLabel, adjustmentSign } from "~/shared/adjustment";
 import { formatDay } from "~/shared/day";
 import { newId } from "~/shared/id";
@@ -40,7 +40,7 @@ export async function loader({ context }: Route.LoaderArgs) {
   );
   // `submissionKey` is the key of the Adjustment form this page renders (spec
   // §3.4): new every time the loader runs, the same for a double tap.
-  return { ...inventory, flash: takeFlash(context), submissionKey: newId() };
+  return { ...inventory, notice: takeNotice(context), submissionKey: newId() };
 }
 
 type InventoryError =
@@ -109,9 +109,9 @@ export async function action({ context, request }: Route.ActionArgs) {
     answerInventoryError,
   );
   if ("error" in result) return refused(result, formKey);
-  // Recorded: a redirect back to the page, so a reload or the back button
-  // records nothing again (spec §3.4). It names the form, which starts over.
-  return redirectWithFlash("/inventario", { form: formKey });
+  // Recorded: the request that sent the form is answered with the notice,
+  // which names the form, so it starts over (spec §3.4, ticket 34).
+  return answerWithNotice(request, "/inventario", { form: formKey });
 }
 
 const field = "w-full rounded-xl border border-stone-300 bg-white px-4 py-3";
@@ -127,11 +127,15 @@ function Refused({ message }: { message: string | undefined }) {
 }
 
 export default function Inventario({ loaderData, actionData }: Route.ComponentProps) {
-  const { lines, adjustments, flash, submissionKey } = loaderData;
+  const { lines, adjustments, notice: landingNotice, submissionKey } = loaderData;
   const errorOn = (form: string) =>
     actionData && "error" in actionData && actionData.form === form ? actionData.error : undefined;
+  // The answer of the form that was just recorded, or the notice a document
+  // POST left for the loader (spec §3.4, ticket 34).
+  const answeredNotice = actionData && "notice" in actionData ? actionData.notice : null;
+  const notice = answeredNotice ?? landingNotice;
   // A form that was just recorded starts over, empty.
-  const fresh = (form: string) => (flash?.form === form ? flash.id : form);
+  const fresh = (form: string) => (notice?.form === form ? notice.id : form);
 
   return (
     <div className="flex flex-col gap-8">

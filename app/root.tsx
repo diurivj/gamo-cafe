@@ -2,13 +2,13 @@ import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration }
 
 import type { Route } from "./+types/root";
 import "./app.css";
-import { flashMiddleware } from "./flash.server";
+import { noticeMiddleware } from "./notice.server";
 import { sessionMiddleware } from "./session.server";
 
 // Runs before every loader and action of every route: nothing but the public
-// paths answers without a valid session (spec §10.1). Then the message a
+// paths answers without a valid session (spec §10.1). Then the notice a
 // recorded form left for the page is read from its cookie (spec §3.4).
-export const middleware: Route.MiddlewareFunction[] = [sessionMiddleware, flashMiddleware];
+export const middleware: Route.MiddlewareFunction[] = [sessionMiddleware, noticeMiddleware];
 
 export const meta: Route.MetaFunction = () => [{ title: "Gamo Cafe" }];
 
