@@ -20,6 +20,9 @@
     "production": {
       "name": "gamo-cafe",
       "workers_dev": true,
+      // The owner's domain: Wrangler creates the DNS record and the
+      // certificate, and the app is reached at this address too.
+      "routes": [{ "pattern": "gamo-cafe.diurivj.com", "custom_domain": true }],
       // A ceiling against a runaway request, not a target: the plan bills CPU
       // time and has no spending cap (ADR 0007).
       "limits": { "cpu_ms": 1000 },
