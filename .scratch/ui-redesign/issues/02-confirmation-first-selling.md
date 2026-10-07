@@ -21,3 +21,11 @@
 - [ ] Browser tests cover cash, transfer, partial/open/named/anonymous sales, existing-Bill targeting, Customer prior debt, Back/discard, duplicate taps, a held request, refusal, failure before recording, lost response after recording and failed revalidation after success. Verify recorded facts and Stock effects, not only messages.
 - [ ] Verify keyboard/focus/announcements, 320 px and enlarged-text layouts, sticky total/navigation interaction, and the mobile keyboard. The cash-change input is not confused with the stored Payment amount.
 - [ ] Update implementation guidance and superseded UI tests/documentation for confirmation-first selling; retain historical issue records and domain guarantees. Run focused browser tests and project verification before completion.
+
+## Comments
+
+- 2026-10-06, decided before starting:
+  - The look is shadcn/ui (spec §3.2, README "The look and the navigation"); build both steps from its components, adding the ones needed.
+  - Illustrations are one small line drawing per Category, not per Item; a Category with no fitting drawing shows none.
+  - Step 1 also gets a search field and a Category filter, which the User liked in the prototype.
+  - Users land on Inicio; its "Nueva venta" card and the Vender destination both open step 1. After a confirmed sale, Nueva venta stays on Vender.

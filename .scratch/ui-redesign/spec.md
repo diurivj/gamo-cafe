@@ -75,7 +75,7 @@ During implementation, update the README and tests that prescribe the old intera
 
 ### 3.2 shadcn/ui
 
-*Revised 2026-10-06, for the third time: after a hand-made warm look, a plain one and a neo-brutalist one (prototyped on branch `prototype/ui-styles`) were each rejected, the app uses shadcn/ui and the components it provides.*
+*Revised 2026-10-06, for the third time: after a hand-made warm look, a plain one and a neo-brutalist one (chosen from eight prototyped styles) were each rejected, the app uses shadcn/ui and the components it provides.*
 
 Use shadcn/ui in its Maia preset: neutral greys, soft rounded cards and controls, a dark primary button. Build screens from its components rather than styling by hand, and take colors from its variables. Where the preset is smaller or fainter than §8 allows, change the component, not the requirement: actions and fields are at least 48px tall with about 18px text, text is at least 4.5:1 and a control's edge at least 3:1. Use few words: a label says what a thing is, and a sentence is added only for a consequence the User could not guess.
 
