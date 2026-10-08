@@ -1,14 +1,16 @@
 import { Effect, Schema } from "effect";
 
 import { CurrentUser } from "./current-user";
-import { type Figures, figuresForRange, myFigures } from "./day";
+import { type Figures, todaysFigures } from "./day";
 import { Db } from "./db";
 import { listInventory } from "./inventory";
-import { today } from "./time";
+import type { Day } from "~/shared/day";
 import type { Centavos } from "~/shared/money";
 
 /** What the cards of Inicio say. */
 export interface HomeSummary {
+  /** The Day the figures are about. */
+  readonly day: Day;
   /** The Bills that still owe, and what they owe together. */
   readonly openBills: { readonly count: number; readonly owed: Centavos };
   /** What the signed-in User sold and collected today. */
@@ -36,15 +38,12 @@ export const homeSummary = Effect.gen(function* () {
     `SELECT COUNT(*) AS count, COALESCE(SUM(total - paid), 0) AS owed
      FROM bills WHERE state IN ('open', 'partial')`,
   );
-  const summary = { openBills: openBills ?? { count: 0, owed: 0 }, mine: yield* myFigures };
-  if (user.role !== "admin") return { ...summary, everyone: null, toRestock: null } satisfies HomeSummary;
+  const summary = { openBills: openBills ?? { count: 0, owed: 0 }, ...(yield* todaysFigures) };
+  if (user.role !== "admin") return { ...summary, toRestock: null } satisfies HomeSummary;
 
-  const day = yield* today;
-  const { total } = yield* figuresForRange({ from: day, to: day });
   const inventory = yield* listInventory;
   return {
     ...summary,
-    everyone: total,
     toRestock: inventory.filter((line) => !line.retired && (line.needsRestock || line.belowZero)).length,
   } satisfies HomeSummary;
 });

@@ -5,7 +5,6 @@ import { Link } from "react-router";
 import { CurrentUser } from "~/backend/current-user";
 import { homeSummary } from "~/backend/home";
 import { run } from "~/backend/run.server";
-import { today } from "~/backend/time";
 import { ChevronDrawing, NavigationDrawing } from "~/components/icons";
 import { hint, pageTitle } from "~/components/styles";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -27,9 +26,9 @@ export const meta: Route.MetaFunction = () => [{ title: "Inicio · Gamo Cafe" }]
 
 export async function loader({ context }: Route.LoaderArgs) {
   const user = requireUser(context);
-  const program = Effect.gen(function* () {
-    return { name: user.name, day: yield* today, summary: yield* homeSummary };
-  }).pipe(Effect.provideService(CurrentUser, user));
+  const program = Effect.map(homeSummary, (summary) => ({ name: user.name, summary })).pipe(
+    Effect.provideService(CurrentUser, user),
+  );
 
   return run(context, program, (error) => {
     switch (error._tag) {
@@ -72,8 +71,8 @@ function Tile({
 const figure = "block font-heading text-3xl leading-none font-semibold tracking-tight tabular-nums";
 
 export default function Inicio({ loaderData }: Route.ComponentProps) {
-  const { name, day, summary } = loaderData;
-  const { openBills, mine, everyone, toRestock } = summary;
+  const { name, summary } = loaderData;
+  const { day, openBills, mine, everyone, toRestock } = summary;
   // An Admin's large card is the Day of everyone; a Worker's is their own.
   const collected = everyone ?? mine;
 

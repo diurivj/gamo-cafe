@@ -48,7 +48,7 @@ app/
     bills.ts       Bills, Lines and Payments: recordSelection, takePayment and takeCustomerPayment (one batch each), getBill (the §4.1 gate), listOpenBills, listBills and listCustomerPastBills (a page by cursor), listCustomerOpenBills, listCustomerHandovers
     corrections.ts the corrections of Cuenta: removeLine, removePayment, voidBill (one batch each), and recordedCorrection, which answers one sent again
     payments.ts    the statements a Payment writes (paymentStatements and handoverStatements) and its errors
-    day.ts         the figures of a Day: a User's own records (Mi día), every User's over a range and the Items sold (Día reuses them)
+    day.ts         the figures of a Day: myDay (Mi día), everyonesDay (Día: the range asked for, every User's figures and the Items sold), todaysFigures (Inicio)
     owed.ts        Por cobrar: each Customer's Owed, a page of the Open Bills with no Customer and the overall Owed
     history.ts     Historial: the corrections and Adjustments, newest first, a keyset page over the six fact tables
     seed.ts        the synthetic year behind the §10.7 request budgets, as plain SQL that scripts/seed.ts writes
@@ -57,7 +57,7 @@ app/
     bill-state.ts  a Bill's states, their Spanish words, isOpenBill
     payment.ts     cash or transfer, and their Spanish words
     payment-messages.ts  what a Payment's rule violations say on screen
-    day.ts         Instant, Day, dayOf, formatDay, formatTime
+    day.ts         Instant, Day, dayOf, parseDay, formatDay, formatTime
     id.ts          newId
     sha256.ts      the SHA-256 of a string, in hex
     secret.ts      sign-in codes, session tokens, their hash, the cookie name
@@ -129,7 +129,7 @@ e2e/             Playwright
 ## Conventions
 
 - **Money** is integer centavos. Add and subtract with integer `+` and `-`; turn it into text with `formatMoney` and read typed text with `parsePesos`. Never divide or multiply an amount by 100.
-- **Time**: an instant is epoch milliseconds; a Day is `YYYY-MM-DD` in `America/Mexico_City`, computed when a record is written and stored with it. Backend code gets them only from `now` and `today` in `~/backend/time`, never from `Date`. The seed generator (`~/backend/seed.ts`) is the one exception: its synthetic year does calendar arithmetic of its own (`addDays`, `weekDay`, `localInstant`), over fixed dates and not the clock.
+- **Time**: an instant is epoch milliseconds; a Day is `YYYY-MM-DD` in `America/Mexico_City`, computed when a record is written and stored with it. Backend code gets them only from `now` and `today` in `~/backend/time`, never from `Date`. Text that should name a Day (a date in a URL) is read with `parseDay` from `~/shared/day`, which answers `null` for a date the calendar does not have. The seed generator (`~/backend/seed.ts`) is the one exception: its synthetic year does calendar arithmetic of its own (`addDays`, `weekDay`, `localInstant`), over fixed dates and not the clock.
 - **Ids** are opaque strings from `newId()`.
 - **Facts** are inserted once and never updated or deleted. **Projections** are written only in the same `db.batch` as the fact that changes them (spec §7.1). The command below recomputes them all from the facts at any time.
 - **Stock** is the projection `stock_levels`, and only `~/backend/stock` writes it. An operation that moves Stock puts `changeStock(itemId, units)` (relative, negative to lower) in the same batch as its fact; an Adjustment is `adjustmentStatements({...})`. Both do nothing to an Item that is not stock-tracked. An Item with no row has a Stock of zero.
@@ -237,7 +237,7 @@ The redesign's rules are in `.scratch/ui-redesign/spec.md` (§3, §4 and §8). E
 - **Focus**: a shadcn component draws its own ring; `app.css` gives everything else one outline. The shell moves the focus to `<main>` when the path changes, unless the new screen already took it. A screen that changes what it shows without changing its path — Vender's steps and results — moves the focus to its own `<h1>`, which says what happened.
 - **What sticks to the bottom** (Vender's total) rests at `bottom-(--above-bar)`, just above the bar, and marks its screen `data-sticky-total` so `scroll-padding-bottom` keeps a focused control clear of both. Where two things must fit side by side or stack, use a container query in `rem` (`@container`, `@[17rem]:`), which follows enlarged text; a media query does not.
 - **Navigation**: `app/navigation.server.ts` holds each role's four destinations and the groups of its Más. Inicio is the first destination and Más the last. Loaders send only the role's own, so a Worker's phone gets no Admin label or path; `tests/navigation.test.ts` and `tests/worker-visibility.test.ts` hold that. A destination `holds` the paths under it that are not its own, which is how the shell marks where the User is (`destinationAt`); a screen no destination holds is under Más. The bar is fixed at the bottom of a phone and stands at the side from `lg` up; `<main>` leaves room for it (`--bar-room`) and `scroll-padding-bottom` keeps a focused control out from under it. On a phone there is no header: who is signed in is said on Inicio and Más, and to a screen reader on every screen.
-- **Inicio** (`app/routes/inicio.tsx`, `/inicio`) is where a User lands after Entrar: cards that are a figure and the way into its screen. `homeSummary` in `~/backend/home.ts` reads them — the User's own Day and the Open Bills for everyone, the Day of everyone and what to restock only for an Admin. Vender stays at `/`.
+- **Inicio** (`app/routes/inicio.tsx`, `/inicio`) is where a User lands after Entrar: cards that are a figure and the way into its screen. `homeSummary` in `~/backend/home.ts` reads them — the User's own Day and the Open Bills for everyone, the Day of everyone and what to restock only for an Admin. It answers with the Day its figures are about, read once, and that is the date Inicio shows. Vender stays at `/`.
 - **Salir** is on Más, away from any task's action.
 - **A screen that cannot be shown** — not there, not allowed, failed — is answered by the boundary of `app/routes/screen.tsx`, inside the navigation, with `ErrorScreen`. The root boundary answers what has no shell: a path the app does not have. A failure that may have interrupted a form says the form may have been recorded, never that it was not. A request without a live session is sent to Entrar, which says the session ended when the phone still carries a session's cookie.
 - Browser tests open a screen with `goTo(page, "Productos")` from `e2e/support/navigate.ts`: a tap on a destination, or Más and then the link.

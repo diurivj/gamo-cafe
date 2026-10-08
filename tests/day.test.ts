@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { now, today } from "~/backend/time";
-import { dayOf, formatDay, formatTime } from "~/shared/day";
+import { dayOf, formatDay, formatTime, parseDay } from "~/shared/day";
 
 import { advanceClock, runTest, setClock } from "./support/effect";
 
@@ -36,6 +36,26 @@ describe("dayOf", () => {
     expect(dayOf(Date.UTC(2026, 0, 1, 6, 0, 0))).toBe("2026-01-01");
     // Mexico City stopped observing daylight time in 2022: UTC-6 in July too.
     expect(dayOf(Date.UTC(2026, 6, 15, 5, 30, 0))).toBe("2026-07-14");
+  });
+});
+
+describe("parseDay", () => {
+  it("reads a Day from its text", () => {
+    expect(parseDay("2026-10-05")).toBe("2026-10-05");
+    expect(parseDay("2028-02-29")).toBe("2028-02-29");
+  });
+
+  it("reads nothing from text that is not a Day", () => {
+    for (const text of ["", "ayer", "2026-10-5", "05/10/2026", " 2026-10-05", "2026-10-05T10:00:00"]) {
+      expect(parseDay(text), text).toBeNull();
+    }
+  });
+
+  it("reads nothing from a date the calendar does not have", () => {
+    // `Date` would roll each of these over into the next month.
+    for (const text of ["2026-02-31", "2026-13-01", "2027-02-29", "2026-04-31", "2026-00-10"]) {
+      expect(parseDay(text), text).toBeNull();
+    }
   });
 });
 

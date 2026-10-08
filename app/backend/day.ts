@@ -1,6 +1,6 @@
-import { Effect, Schema } from "effect";
+import { Data, Effect, Schema } from "effect";
 
-import type { Day, Instant } from "~/shared/day";
+import { type Day, type Instant, parseDay } from "~/shared/day";
 import type { Centavos } from "~/shared/money";
 import { PAYMENT_METHODS, type PaymentMethod } from "~/shared/payment";
 
@@ -16,8 +16,9 @@ import { today } from "./time";
  *
  * `myDay` is Mi día (spec §6.1): the signed-in User's own records of today,
  * taken from the session and never from an argument, so no request can ask
- * for another User's Day (spec §4.2). The reads ticket 15's Día reuses for
- * every User and any range of Days sit here too.
+ * for another User's Day (spec §4.2). `everyonesDay` is Día (spec §6.2):
+ * every User's figures and the Items sold over the range of Days that was
+ * asked for, an Admin's read. `todaysFigures` is what Inicio says of today.
  *
  * Every read is driven by an index (spec §7.4): `lines_by_author_day` and
  * `payments_by_receiver_day` for one User, `lines_by_day` and `payments_by_day`
@@ -50,7 +51,7 @@ export interface UserFigures extends Figures {
 }
 
 /** A range of Days, everyone together and each User apart. */
-export interface DayFigures {
+interface DayFigures {
   readonly total: Figures;
   /** One entry per User with a record in the range, in name order. */
   readonly byUser: ReadonlyArray<UserFigures>;
@@ -79,8 +80,8 @@ const figuresOf = (sold: Centavos, cash: Centavos, transfer: Centavos): Figures 
 
 /**
  * One User's figures over a range of Days. Not exported: the ways to ask are
- * `myDay` and `myFigures`, which read the session's User, while Día reads
- * `figuresForRange`.
+ * `myDay` and `todaysFigures`, which read the session's User, while Día reads
+ * `everyonesDay`.
  */
 const userFigures = Effect.fnUntraced(function* (userId: string, range: DayRange) {
   const db = yield* Db;
@@ -113,13 +114,12 @@ const userFigures = Effect.fnUntraced(function* (userId: string, range: DayRange
 });
 
 /**
- * Every User's figures over a range of Days (spec §5.9), which is what Día
- * (ticket 15) shows for a date or a from–to range: an Admin's read, as the
- * permission matrix says (spec §4.1). The overall totals are the sums of the
- * per-User entries, so one pass over each of two indexes answers the screen.
+ * Every User's figures over a range of Days (spec §5.9). The overall totals
+ * are the sums of the per-User entries, so one pass over each of two indexes
+ * answers. Not exported, and it asks nobody who they are: `everyonesDay` and
+ * `todaysFigures` read it for an Admin only (spec §4.1).
  */
-export const figuresForRange = Effect.fn("figuresForRange")(function* (range: DayRange) {
-  yield* requireAdmin;
+const figuresForRange = Effect.fnUntraced(function* (range: DayRange) {
   const db = yield* Db;
 
   const sold = yield* db.all(
@@ -171,7 +171,7 @@ export const figuresForRange = Effect.fn("figuresForRange")(function* (range: Da
     (sum, user) => figuresOf(sum.sold + user.sold, sum.cash + user.cash, sum.transfer + user.transfer),
     figuresOf(0, 0, 0),
   );
-  return { total, byUser };
+  return { total, byUser } satisfies DayFigures;
 });
 
 const ItemSoldRow = Schema.Struct({
@@ -197,10 +197,9 @@ export interface ItemSold {
  * a removed Line and the Lines of a Voided Bill count toward nothing
  * (spec §5.7). One statement over `lines_by_day`, so the rows read follow the
  * Days asked for and never the rest of the history (spec §2.4, §7.4). The
- * most valuable Item comes first.
+ * most valuable Item comes first. Not exported: Día reads `everyonesDay`.
  */
-export const itemsSoldForRange = Effect.fn("itemsSoldForRange")(function* (range: DayRange) {
-  yield* requireAdmin;
+const itemsSoldForRange = Effect.fnUntraced(function* (range: DayRange) {
   const db = yield* Db;
 
   return yield* db.all(
@@ -220,6 +219,82 @@ export const itemsSoldForRange = Effect.fn("itemsSoldForRange")(function* (range
     range.from,
     range.to,
   );
+});
+
+/** What Día was asked for: the text of each end of the range, as the URL carried it. */
+export interface AskedRange {
+  /** The first Day. Missing or blank: the last one, or today when that is missing too. */
+  readonly from?: string | null;
+  /** The last Day. Missing or blank: the first one, or today when that is missing too. */
+  readonly to?: string | null;
+}
+
+/** An end of the range was written, and what was written is not a Day. */
+export class DayUnreadable extends Data.TaggedError("DayUnreadable")<{
+  /** The end that could not be read; the first one when neither could. */
+  readonly field: "from" | "to";
+  /** Each end as far as it was read: `null` for one that is missing or not a Day. */
+  readonly from: Day | null;
+  readonly to: Day | null;
+}> {}
+
+/** Both ends are Days, and the last comes before the first. */
+export class RangeEndsBeforeItStarts extends Data.TaggedError("RangeEndsBeforeItStarts")<{
+  readonly from: Day;
+  readonly to: Day;
+}> {}
+
+/** The Day of everyone: a range of Days, its figures and what was sold in it. */
+export interface EveryonesDay extends DayFigures {
+  /** The range that was read, which is the one to show. */
+  readonly range: DayRange;
+  /** The Items sold in the range, the most valuable first. */
+  readonly items: ReadonlyArray<ItemSold>;
+}
+
+/** `null` for an end that was not written, the Day it names, or `undefined` when it names none. */
+const askedDay = (text: string | null | undefined): Day | null | undefined => {
+  const typed = (text ?? "").trim();
+  return typed === "" ? null : (parseDay(typed) ?? undefined);
+};
+
+/**
+ * Día (spec §6.2): Sold, Collected in cash and by transfer, the same per User
+ * and the Items sold, for the Days that were asked for. An Admin's read
+ * (spec §4.1).
+ *
+ *     yield* everyonesDay({});                                       // today
+ *     yield* everyonesDay({ from: "2026-10-05" });                   // that Day
+ *     yield* everyonesDay({ from: "2026-10-05", to: "2026-10-11" }); // that week
+ *
+ * It takes the text of the URL and decides the range itself, so the range
+ * shown is always the one that was read: nothing asked is today, one end
+ * alone is that single Day. An end that is written and is not a Day is
+ * refused, never read as today, and so is a range that ends before it
+ * starts; a refusal reads no figures.
+ *
+ * Three statements, each driven by a by-Day index, so the rows read follow
+ * the range asked for and never the rest of the history (spec §2.4, §7.4).
+ */
+export const everyonesDay = Effect.fn("everyonesDay")(function* (asked: AskedRange) {
+  yield* requireAdmin;
+
+  const first = askedDay(asked.from);
+  const last = askedDay(asked.to);
+  if (first === undefined || last === undefined) {
+    return yield* new DayUnreadable({
+      field: first === undefined ? "from" : "to",
+      from: first ?? null,
+      to: last ?? null,
+    });
+  }
+  const day = yield* today;
+  const range: DayRange = { from: first ?? last ?? day, to: last ?? first ?? day };
+  if (range.to < range.from) return yield* new RangeEndsBeforeItStarts(range);
+
+  const figures = yield* figuresForRange(range);
+  const items = yield* itemsSoldForRange(range);
+  return { range, ...figures, items } satisfies EveryonesDay;
 });
 
 const LineRow = Schema.Struct({
@@ -255,11 +330,29 @@ export interface DayPayment {
   readonly at: Instant;
 }
 
-/** The signed-in User's figures for today, without the records behind them: what Inicio says. */
-export const myFigures = Effect.gen(function* () {
+/** Today's figures as Inicio says them, without the records behind them. */
+export interface TodaysFigures {
+  /** The Day they were read for, which is the one to show. */
+  readonly day: Day;
+  /** What the signed-in User sold and collected. */
+  readonly mine: Figures;
+  /** What every User did together. An Admin's; `null` for a Worker, for whom it is not read. */
+  readonly everyone: Figures | null;
+}
+
+/**
+ * What Inicio says of today (UI redesign §4): the signed-in User's own
+ * figures, and for an Admin those of everyone together (spec §4.1, §4.2). The
+ * Day is read once, so both are about the Day that is returned.
+ */
+export const todaysFigures = Effect.gen(function* () {
   const user = yield* CurrentUser;
   const day = yield* today;
-  return yield* userFigures(user.id, { from: day, to: day });
+  const range = { from: day, to: day };
+
+  const mine = yield* userFigures(user.id, range);
+  const everyone = user.role === "admin" ? (yield* figuresForRange(range)).total : null;
+  return { day, mine, everyone } satisfies TodaysFigures;
 });
 
 /** One User's Day: their figures and the records behind them. */

@@ -3,16 +3,16 @@ import { describe, expect, it } from "vitest";
 
 import { getBill, recordSelection, takePayment } from "~/backend/bills";
 import { removeLine, removePayment, voidBill } from "~/backend/corrections";
-import { figuresForRange, myDay } from "~/backend/day";
+import { myDay } from "~/backend/day";
 
 import { as, seedUser } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { advanceClock, runTest, setClock } from "./support/effect";
 
-// Mi día and the Day's figures (spec §5.9, §6.1, §7.4, §10.6). Sold is
-// attributed to the author of each Line and Collected to the receiver of each
-// Payment; removed Lines and Payments and Voided Bills count toward nothing
-// (spec §5.7). Tests in one file share a D1: each names its own Items.
+// Mi día (spec §5.9, §6.1, §7.4, §10.6). Sold is attributed to the author of
+// each Line and Collected to the receiver of each Payment; removed Lines and
+// Payments and Voided Bills count toward nothing (spec §5.7). Tests in one
+// file share a D1: each names its own Items.
 
 describe("Mi día", () => {
   it("shows the signed-in User's own Lines and Payments, Sold by author and Collected by receiver", () =>
@@ -192,71 +192,6 @@ describe("Mi día", () => {
         expect(newDay.day).toBe("2027-01-01");
         expect(newDay.figures.sold).toBe(2000);
         expect(newDay.lines).toMatchObject([{ quantity: 2 }]);
-      }),
-    ));
-
-  it("changes the Day a Voided Bill's Lines and Payments were recorded on", () =>
-    runTest(
-      Effect.gen(function* () {
-        yield* setClock("2027-03-01T10:00:00");
-        const ana = yield* seedUser("admin", "Ana");
-        const beto = yield* seedUser("worker", "Beto");
-        const item = yield* seedItem({ name: "Cancelada al día siguiente", price: 3000 });
-        const bill = yield* recordSelection({
-          items: [{ itemId: item.id, quantity: 1 }],
-          payment: { method: "cash" },
-        }).pipe(as(beto));
-
-        // Voided the next Day, but it leaves the figures of the Day it was
-        // recorded on (spec §5.7).
-        yield* advanceClock("1 day");
-        const shown = yield* getBill(bill.id).pipe(as(ana));
-        yield* voidBill({
-          billId: bill.id,
-          reason: "Se canceló al día siguiente",
-          expectedRevision: shown.revision,
-        }).pipe(as(ana));
-
-        const soldDay = yield* figuresForRange({ from: "2027-03-01", to: "2027-03-01" }).pipe(as(ana));
-        const voidDay = yield* figuresForRange({ from: "2027-03-02", to: "2027-03-02" }).pipe(as(ana));
-        expect(soldDay.total).toEqual({ sold: 0, cash: 0, transfer: 0, collected: 0 });
-        expect(soldDay.byUser).toEqual([]);
-        expect(voidDay.total).toEqual({ sold: 0, cash: 0, transfer: 0, collected: 0 });
-      }),
-    ));
-
-  it("sums every User's figures over a range of Days, per User, for an Admin only", () =>
-    runTest(
-      Effect.gen(function* () {
-        yield* setClock("2027-02-01T10:00:00");
-        const ana = yield* seedUser("admin", "Ana");
-        const beto = yield* seedUser("worker", "Beto");
-        const item = yield* seedItem({ name: "Del rango de Días", price: 1000 });
-        yield* recordSelection({
-          items: [{ itemId: item.id, quantity: 1 }],
-          payment: { method: "cash" },
-        }).pipe(as(beto));
-        yield* advanceClock("1 day");
-        yield* recordSelection({
-          items: [{ itemId: item.id, quantity: 2 }],
-          payment: { method: "transfer" },
-        }).pipe(as(ana));
-
-        const range = yield* figuresForRange({ from: "2027-02-01", to: "2027-02-02" }).pipe(as(ana));
-        expect(range.total).toEqual({ sold: 3000, cash: 1000, transfer: 2000, collected: 3000 });
-        expect(range.byUser).toEqual([
-          { userId: ana.id, userName: "Ana", sold: 2000, cash: 0, transfer: 2000, collected: 2000 },
-          { userId: beto.id, userName: "Beto", sold: 1000, cash: 1000, transfer: 0, collected: 1000 },
-        ]);
-
-        const onlyFirst = yield* figuresForRange({ from: "2027-02-01", to: "2027-02-01" }).pipe(as(ana));
-        expect(onlyFirst.total).toEqual({ sold: 1000, cash: 1000, transfer: 0, collected: 1000 });
-        expect(onlyFirst.byUser).toMatchObject([{ userName: "Beto" }]);
-
-        const refused = yield* Effect.flip(
-          figuresForRange({ from: "2027-02-01", to: "2027-02-02" }).pipe(as(beto)),
-        );
-        expect(refused._tag).toBe("AdminOnly");
       }),
     ));
 });

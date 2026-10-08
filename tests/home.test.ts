@@ -29,12 +29,15 @@ it("gives a Worker their own figures and the Open Bills, and an Admin the Day an
       );
 
       const betos = yield* homeSummary.pipe(as(beto));
+      // The Day the figures are about comes with them.
+      expect(betos.day).toBe("2026-10-05");
       expect(betos.openBills).toEqual({ count: 1, owed: 3600 });
       expect(betos.mine).toEqual({ sold: 2500, cash: 2500, transfer: 0, collected: 2500 });
       expect(betos.everyone).toBeNull();
       expect(betos.toRestock).toBeNull();
 
       const anas = yield* homeSummary.pipe(as(ana));
+      expect(anas.day).toBe("2026-10-05");
       expect(anas.openBills).toEqual({ count: 1, owed: 3600 });
       expect(anas.mine).toEqual({ sold: 5400, cash: 0, transfer: 1800, collected: 1800 });
       expect(anas.everyone).toEqual({ sold: 7900, cash: 2500, transfer: 1800, collected: 4300 });
