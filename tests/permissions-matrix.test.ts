@@ -204,6 +204,12 @@ const routes: Readonly<Record<string, RouteRule>> = {
     about: "Conteo: the entry and review steps, Admin only",
     signedOut: "redirect",
     get: { worker: 403, admin: 200 },
+  },
+  "/inventario/conteo/registrar": {
+    about: "Where Conteo asks for a Count's review and sends the Count, Admin only",
+    signedOut: "redirect",
+    // An action and no loader: there is nothing to read here.
+    get: { worker: 400, admin: 400 },
     post: { worker: 403, admin: 400 },
   },
   "/por-cobrar": {
@@ -753,7 +759,15 @@ const rows: ReadonlyArray<MatrixRow> = [
       if (who.user.role === "worker") {
         const recorded = await who.fetch("/inventario/ajustar", form(adjustment));
         expect(recorded.status, label).toBe(403);
-        const count = await who.fetch("/inventario/conteo", form({ intent: "review", [`units.${item.id}`]: "5" }));
+        const review = await who.fetch(
+          "/inventario/conteo/registrar",
+          form({ intent: "revisar", [`units.${item.id}`]: "5" }),
+        );
+        expect(review.status, label).toBe(403);
+        const count = await who.fetch(
+          "/inventario/conteo/registrar",
+          form({ intent: "registrar", [`units.${item.id}`]: "5" }),
+        );
         expect(count.status, label).toBe(403);
         return count;
       }
@@ -774,18 +788,22 @@ const rows: ReadonlyArray<MatrixRow> = [
       );
 
       const review = await who.fetch(
-        "/inventario/conteo",
-        form({ intent: "review", [`units.${item.id}`]: "7" }),
+        "/inventario/conteo/registrar",
+        form({ intent: "revisar", [`units.${item.id}`]: "7" }),
       );
-      expect(review.status, label).toBe(200);
-      expect(await review.text(), label).toContain("Revisión del conteo");
+      expect([review.status, await review.json()], label).toMatchObject([
+        200,
+        { review: { lines: [{ itemId: item.id, expected: 0, found: 7, difference: 7 }] } },
+      ]);
 
       const confirmed = await who.fetch(
-        "/inventario/conteo",
-        form({ intent: "confirm", [`units.${item.id}`]: "7" }),
+        "/inventario/conteo/registrar",
+        form({ intent: "registrar", [`units.${item.id}`]: "7" }),
       );
-      expect(confirmed.status, label).toBe(302);
-      expect(confirmed.headers.get("Location"), label).toBe("/diferencias");
+      expect([confirmed.status, await confirmed.clone().json()], label).toMatchObject([
+        200,
+        { count: { lines: [{ itemId: item.id, expected: 0, found: 7, difference: 7 }] } },
+      ]);
       return confirmed;
     },
   },

@@ -12,6 +12,7 @@ export default [
   route("cuentas/:billId/corregir", "routes/resources/record-correction.ts"),
   route("clientes/:customerId/abonar", "routes/resources/record-handover.ts"),
   route("inventario/ajustar", "routes/resources/record-stock-change.ts"),
+  route("inventario/conteo/registrar", "routes/resources/record-count.ts"),
 
   // The signed-in shell: screens go inside it.
   layout("routes/shell.tsx", [

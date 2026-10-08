@@ -19,6 +19,7 @@ import { Label } from "~/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "~/components/ui/native-select";
 import { RadioGroup, RadioGroupItem } from "~/components/ui/radio-group";
 import { ADJUSTMENT_REASONS, type AdjustmentReason, adjustmentReasonLabel, adjustmentSign } from "~/shared/adjustment";
+import { COUNT_PATH, DISCREPANCIES_PATH } from "~/shared/count";
 import { formatDay, formatTime } from "~/shared/day";
 import { newId } from "~/shared/id";
 import { normalizeName } from "~/shared/normalize-name";
@@ -158,7 +159,7 @@ function Stock({
         <Link to={adjustHref({ reason: "restock" })} state={WITHIN} className={buttonClasses({ size: "touch" })}>
           Registrar entrada
         </Link>
-        <Link to="/inventario/conteo" className={buttonClasses({ variant: "outline", size: "touch" })}>
+        <Link to={COUNT_PATH} className={buttonClasses({ variant: "outline", size: "touch" })}>
           Contar existencias
         </Link>
       </div>
@@ -170,7 +171,7 @@ function Stock({
               {[
                 { to: adjustHref({ reason: "waste" }), label: "Registrar merma o consumo interno", state: WITHIN },
                 { to: ADJUSTMENTS_HREF, label: "Ajustes recientes", state: WITHIN },
-                { to: "/diferencias", label: "Diferencias de los conteos", state: undefined },
+                { to: DISCREPANCIES_PATH, label: "Diferencias de los conteos", state: undefined },
               ].map((way) => (
                 <li key={way.to}>
                   <Link

@@ -127,7 +127,7 @@ function selectionForm(): FormData {
 /** Every stock-tracked Item, as the Conteo form sends them. */
 function countForm(): FormData {
   const form = new FormData();
-  form.set("intent", "confirm");
+  form.set("intent", "registrar");
   form.set("note", "");
   for (const itemId of PROOF_ITEMS) form.set(`units.${itemId}`, "4");
   return form;
@@ -215,9 +215,9 @@ const REQUESTS: ReadonlyArray<RequestCase> = [
   },
   {
     name: "A Count of every Item",
-    status: 302,
+    status: 200,
     cap: 1_000,
-    request: (cookie) => post("/inventario/conteo", cookie, countForm()),
+    request: (cookie) => post("/inventario/conteo/registrar", cookie, countForm()),
   },
   {
     name: "A page of Historial",

@@ -1,5 +1,6 @@
 import type { BillPaymentRefusal, BillPaymentResult } from "~/shared/bill-payment";
 import type { CorrectionRefusal, CorrectionResult } from "~/shared/correction";
+import { COUNT_RECORD_PATH, type CountAnswer, type CountReviewAnswer, UNITS_FIELD } from "~/shared/count";
 import type { CustomerPaymentRefusal, CustomerPaymentResult } from "~/shared/customer-payment";
 import type { Refusal } from "~/shared/record-request";
 import type { SaleRefusal, SaleResult } from "~/shared/sale";
@@ -143,4 +144,29 @@ export async function recordStockChange(who: Pick<SignedIn, "fetch">, fields: Re
     .json()
     .catch(() => ({}))) as Partial<{ change: StockChangeResult } & Refusal>;
   return { response, change: answer.change, error: answer.error };
+}
+
+/**
+ * Sends what Conteo sends — the review of a Count, or the Count itself — and
+ * reads the route's JSON answer. `counted` is the units found by Item id. A
+ * Worker is answered 403 with no JSON, so everything but `response` is
+ * undefined.
+ *
+ *     const { review } = await sendCount(ana, "revisar", { [cafe.id]: "45" });
+ *     const { count } = await sendCount(ana, "registrar", { [cafe.id]: "45" }, { note: "De la tarde", submissionKey });
+ */
+export async function sendCount(
+  who: Pick<SignedIn, "fetch">,
+  intent: string,
+  counted: Readonly<Record<string, string>>,
+  fields: Readonly<Record<string, string>> = {},
+) {
+  const body = new URLSearchParams({ intent, ...fields });
+  for (const [itemId, found] of Object.entries(counted)) body.set(`${UNITS_FIELD}${itemId}`, found);
+  const response = await who.fetch(COUNT_RECORD_PATH, { method: "POST", body });
+  const answer = (await response
+    .clone()
+    .json()
+    .catch(() => ({}))) as Partial<CountReviewAnswer & CountAnswer & Refusal>;
+  return { response, review: answer.review, count: answer.count, error: answer.error };
 }

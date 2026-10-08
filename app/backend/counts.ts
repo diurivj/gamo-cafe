@@ -1,6 +1,7 @@
 import { Data, Effect, Schema } from "effect";
 
 import { chunk } from "~/shared/chunk";
+import type { CountLine } from "~/shared/count";
 import type { Cursor } from "~/shared/cursor";
 import type { Day, Instant } from "~/shared/day";
 import { newId } from "~/shared/id";
@@ -22,7 +23,7 @@ import { now, today } from "./time";
  * counted value. Every operation here starts with `requireAdmin`: a Worker
  * never sees a Stock number (spec §4.2).
  *
- * Diferencias reads these records: `listCounts`.
+ * Diferencias reads these records: `listCounts`. `getCount` is one of them.
  */
 
 /** A Count with no Item to count. */
@@ -38,15 +39,7 @@ export interface CountedInput {
   readonly found: number;
 }
 
-/** One line of a Count: the Stock expected when it was read, and the difference. */
-export interface CountLine {
-  readonly itemId: string;
-  readonly itemName: string;
-  readonly expected: number;
-  readonly found: number;
-  /** Found minus expected: negative is Faltante, positive Sobrante (spec §5.8). */
-  readonly difference: number;
-}
+export type { CountLine };
 
 export interface RecordedCount {
   readonly id: string;
@@ -267,6 +260,66 @@ const CountLineRow = Schema.Struct({
   found: Schema.Int,
 });
 
+/** Each Count with its lines in name order: one statement for all of them. */
+const withLines = Effect.fnUntraced(function* (counts: ReadonlyArray<(typeof CountRow)["Type"]>) {
+  const db = yield* Db;
+  const placeholders = counts.map(() => "?").join(", ");
+  const rows = yield* db.all(
+    CountLineRow,
+    `SELECT cl.count_id AS countId, cl.item_id AS itemId, i.name AS itemName,
+            cl.units_expected AS expected, cl.units_found AS found
+     FROM count_lines cl JOIN items i ON i.id = cl.item_id
+     WHERE cl.count_id IN (${placeholders})
+     ORDER BY i.normalized_name, i.id`,
+    ...counts.map((count) => count.id),
+  );
+  return counts.map(
+    (count): RecordedCount => ({
+      ...count,
+      lines: rows
+        .filter((row) => row.countId === count.id)
+        .map(
+          ({ countId, ...line }): CountLine => ({
+            ...line,
+            difference: line.found - line.expected,
+          }),
+        ),
+    }),
+  );
+});
+
+/**
+ * One Count as it was recorded, or undefined when there is none: what Conteo
+ * shows once the Count is confirmed. Two statements, about its own rows.
+ */
+export const getCount = Effect.fn("getCount")(function* (id: string) {
+  yield* requireAdmin;
+  const db = yield* Db;
+  const count = yield* db.first(
+    CountRow,
+    `SELECT c.id, c.note, u.name AS byName, c.recorded_at AS at, c.day
+     FROM counts c JOIN users u ON u.id = c.recorded_by
+     WHERE c.id = ?`,
+    id,
+  );
+  if (count === undefined) return undefined;
+  const [recorded] = yield* withLines([count]);
+  return recorded;
+});
+
+/**
+ * Records a Count and answers it as it was recorded: its lines with the Stock
+ * expected at that moment, which is what Conteo shows once it is confirmed.
+ * A repeat of the same form is answered with the Count the first one recorded.
+ */
+export const recordCountAndRead = Effect.fn("recordCountAndRead")(function* (input: NewCountInput) {
+  const { id } = yield* recordCount(input);
+  const recorded = yield* getCount(id);
+  // It was written, or answered as written, a statement ago.
+  if (recorded === undefined) return yield* Effect.die(new Error(`recordCountAndRead: Count ${id} is not there`));
+  return recorded;
+});
+
 /**
  * One page of Counts, newest first, each with its lines in name order:
  * Diferencias (spec §6.2). Two statements: the page's Counts by
@@ -296,29 +349,6 @@ export const listCounts = Effect.fn("listCounts")(function* (
   const next: Cursor | null = read.length > limit && last ? { at: last.at, id: last.id } : null;
   if (counts.length === 0) return { counts: [], next } as CountPage;
 
-  const placeholders = counts.map(() => "?").join(", ");
-  const rows = yield* db.all(
-    CountLineRow,
-    `SELECT cl.count_id AS countId, cl.item_id AS itemId, i.name AS itemName,
-            cl.units_expected AS expected, cl.units_found AS found
-     FROM count_lines cl JOIN items i ON i.id = cl.item_id
-     WHERE cl.count_id IN (${placeholders})
-     ORDER BY i.normalized_name, i.id`,
-    ...counts.map((count) => count.id),
-  );
-
-  const listed = counts.map(
-    (count): RecordedCount => ({
-      ...count,
-      lines: rows
-        .filter((row) => row.countId === count.id)
-        .map(
-          ({ countId, ...line }): CountLine => ({
-            ...line,
-            difference: line.found - line.expected,
-          }),
-        ),
-    }),
-  );
+  const listed = yield* withLines(counts);
   return { counts: listed, next } as CountPage;
 });

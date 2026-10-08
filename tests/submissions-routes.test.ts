@@ -10,19 +10,12 @@ import { as, landing, signedIn, type SignedIn } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { savedCustomer } from "./support/customers";
 import { runTest } from "./support/effect";
-import { recordHandover, recordPayment, recordSale, recordStockChange } from "./support/sales";
+import { recordHandover, recordPayment, recordSale, recordStockChange, sendCount } from "./support/sales";
 
-// One submission per form, through the Worker (spec §3.4): a page renders its
-// form with a key, or the screen makes one at the tap, and the same form sent
+// One submission per form, through the Worker (spec §3.4): the screen makes a
+// key at the tap, and the same form sent
 // twice — a double tap, a retry after a lost response — records once and is
 // answered twice alike. The operations are tested in submissions.test.ts.
-
-/** The key the page rendered its form with. */
-const keyIn = (html: string) => {
-  const key = /name="submissionKey" value="([^"]+)"/.exec(html)?.[1];
-  expect(key, "the form carries a submission key").toBeTruthy();
-  return key!;
-};
 
 const post = (who: SignedIn, path: string, fields: Record<string, string>) =>
   who.fetch(path, { method: "POST", body: new URLSearchParams(fields) });
@@ -130,26 +123,22 @@ describe("a used key with changed content", () => {
   it("records a changed Count sent under a used key, and answers the first content alike", async () => {
     const ana = await signedIn("admin", "Ana");
     const cafe = await runTest(seedItem({ startingStock: 10, by: ana.user }));
-    const counted = { [`units.${cafe.id}`]: "7", note: "" };
-    // The review step renders the form that confirms, with its key.
-    const review = await post(ana, "/inventario/conteo", { intent: "review", ...counted });
-    const confirm = { intent: "confirm", ...counted, submissionKey: keyIn(await review.text()) };
+    const sent = { note: "", submissionKey: "llave-de-conteo-usada" };
 
-    const first = await post(ana, "/inventario/conteo", confirm);
-    const changed = await post(ana, "/inventario/conteo", {
-      ...confirm,
-      [`units.${cafe.id}`]: "9",
-    });
+    const first = await sendCount(ana, "registrar", { [cafe.id]: "7" }, sent);
+    // Conteo makes a key per Count, so only a hand-made request does this.
+    const changed = await sendCount(ana, "registrar", { [cafe.id]: "9" }, sent);
 
-    expect([first.status, changed.status]).toEqual([302, 302]);
+    expect([first.response.status, changed.response.status]).toEqual([200, 200]);
+    expect(changed.count!.id).not.toBe(first.count!.id);
     const counts = (await runTest(listCounts().pipe(as(ana.user)))).counts.filter((count) =>
       count.lines.some((line) => line.itemId === cafe.id),
     );
     expect(counts).toHaveLength(2);
     expect(await runTest(stockOf(cafe.id).pipe(as(ana.user)))).toBe(9);
 
-    const repeat = await post(ana, "/inventario/conteo", confirm);
-    expect(repeat.status).toBe(302);
+    const repeat = await sendCount(ana, "registrar", { [cafe.id]: "7" }, sent);
+    expect(repeat.count).toEqual(first.count);
     expect(await runTest(stockOf(cafe.id).pipe(as(ana.user)))).toBe(9);
   });
 });
@@ -286,19 +275,17 @@ describe("Inventario", () => {
 });
 
 describe("Conteo", () => {
-  it("records a confirmed Count sent twice once", async () => {
+  it("records a Count sent twice once and answers both alike: a retry is safe", async () => {
     const ana = await signedIn("admin", "Ana");
     const cafe = await runTest(seedItem({ startingStock: 10, by: ana.user }));
-    const counted = { [`units.${cafe.id}`]: "7", note: "" };
-    // The review step renders the form that confirms, with its key.
-    const review = await post(ana, "/inventario/conteo", { intent: "review", ...counted });
-    const confirm = { intent: "confirm", ...counted, submissionKey: keyIn(await review.text()) };
+    // The key Conteo made at the tap, sent again after a lost answer.
+    const send = () => sendCount(ana, "registrar", { [cafe.id]: "7" }, { note: "", submissionKey: "llave-de-conteo" });
 
-    const first = await post(ana, "/inventario/conteo", confirm);
-    const second = await post(ana, "/inventario/conteo", confirm);
+    const first = await send();
+    const second = await send();
 
-    expect([first.status, second.status]).toEqual([302, 302]);
-    expect(second.headers.get("Location")).toBe(first.headers.get("Location"));
+    expect([first.response.status, second.response.status]).toEqual([200, 200]);
+    expect(second.count).toEqual(first.count);
     const counts = (await runTest(listCounts().pipe(as(ana.user)))).counts.filter((count) =>
       count.lines.some((line) => line.itemId === cafe.id),
     );

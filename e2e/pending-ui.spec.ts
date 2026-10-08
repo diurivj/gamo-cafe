@@ -5,19 +5,18 @@ import { holdSubmissions } from "./support/held";
 import { openPay, seeBill, summary, typePayment } from "./support/bill";
 import { goTo } from "./support/navigate";
 import { pay } from "./support/sell";
-import { expectStock } from "./support/stock";
 
 // Every tap is acknowledged at once (spec §3.4, ticket 30). Each test holds
 // the server's answer back and looks at the screen meanwhile:
 //
 // - the submit control that was tapped is pending by the next frame;
-// - money and Stock (a Payment, an Abono, a correction, a Count) show nothing
-//   as recorded until the answer arrives;
+// - money (a Payment, an Abono, a correction) shows nothing as recorded until
+//   the answer arrives;
 // - a harmless, reversible change (retiring a Customer, a User's role and
 //   active state) shows its result at once and goes back if it is refused.
 //
-// Vender's own pending state is in vender-recovery.spec.ts, and an
-// Adjustment's and its cancellation's in inventario.spec.ts.
+// Vender's own pending state is in vender-recovery.spec.ts, an Adjustment's
+// and its cancellation's in inventario.spec.ts, and a Count's in conteo.spec.ts.
 
 type Held = Awaited<ReturnType<typeof holdSubmissions>>;
 
@@ -322,31 +321,6 @@ test("a refused change of role goes back to what the User was", async ({ page, s
   await held.release();
   await expect(page.getByRole("alert")).toHaveText("Debe quedar al menos un administrador activo.");
   await expect(ana).not.toContainText("Desactivado");
-});
-
-test("Conteo shows no Stock change before the server answers", async ({ page, signInAs, addItem }) => {
-  const ana = await signInAs("admin", "Ana");
-  await addItem({ name: "Agua de la casa", price: 1200, stock: { units: 6, by: ana } });
-  await page.goto("/inventario");
-  const held = await holdSubmissions(page);
-
-  // A Count: the review, then the confirmation.
-  await page.getByRole("link", { name: "Contar existencias" }).click();
-  await expect(page.getByRole("heading", { name: "Conteo", level: 1 })).toBeVisible();
-  await page.getByLabel("Agua de la casa", { exact: true }).fill("9");
-  await tap(held, page.getByRole("button", { name: "Revisar conteo" }));
-  await expect(page.getByRole("heading", { name: "Revisión del conteo" })).toHaveCount(0);
-  await held.release();
-  await expect(page.getByRole("listitem", { name: "Agua de la casa" })).toContainText("Esperado: 6 · Contado: 9");
-  await settled(page);
-
-  await tap(held, page.getByRole("button", { name: "Confirmar conteo" }));
-  await expect(page).toHaveURL(/\/inventario\/conteo$/);
-  await expect(page.getByRole("heading", { name: "Revisión del conteo" })).toBeVisible();
-  await held.release();
-  await expect(page).toHaveURL(/\/diferencias$/);
-  await page.goto("/inventario");
-  await expectStock(page, "Agua de la casa", 9);
 });
 
 test("every form of Productos and of a Producto is pending from the tap", async ({

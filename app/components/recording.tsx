@@ -128,9 +128,11 @@ export function useReadAgainSince(shown: boolean, data: unknown): boolean {
  * Keeps what is on its way from being left by accident (UI redesign §6.2):
  * in-app navigation waits for an answer to `asking`, and the browser is asked
  * to warn before the page is closed or reloaded — a phone often does not.
+ * `within` is the path of a screen whose steps are its own addresses.
  */
-export function useLeaveGuard(unfinished: boolean) {
-  const blocker = useBlocker(unfinished);
+export function useLeaveGuard(unfinished: boolean, { within }: { readonly within?: string } = {}) {
+  // A screen whose steps are addresses of one path is not left by moving between them.
+  const blocker = useBlocker(({ nextLocation }) => unfinished && nextLocation.pathname !== within);
   const blocked = blocker.state === "blocked";
   // Answered while the question was on screen: there is nothing left to ask
   // about, and the answer is what the User has to see.
