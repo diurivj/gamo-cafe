@@ -60,6 +60,7 @@ describe("recording a selection", () => {
               byName: "Ana",
               at,
               day: "2026-10-05",
+              movedStock: true,
               removal: null,
             },
             {
@@ -72,6 +73,7 @@ describe("recording a selection", () => {
               byName: "Ana",
               at,
               day: "2026-10-05",
+              movedStock: true,
               removal: null,
             },
           ],

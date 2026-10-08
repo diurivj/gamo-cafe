@@ -177,6 +177,8 @@ export interface BillLine {
   readonly byName: string;
   readonly at: Instant;
   readonly day: Day;
+  /** Whether it moved Stock when it was added: what its removal returns (spec §5.7). */
+  readonly movedStock: boolean;
   /** Its removal, or null while the Line counts (spec §5.7). */
   readonly removal: Correction | null;
 }
@@ -1305,6 +1307,7 @@ const LineRow = Schema.Struct({
   byName: Schema.String,
   at: Schema.Int,
   day: Schema.String,
+  movedStock: Schema.Literals([0, 1]),
   removalBy: Schema.NullOr(Schema.String),
   removalByName: Schema.NullOr(Schema.String),
   removalAt: Schema.NullOr(Schema.Int),
@@ -1361,7 +1364,7 @@ export const getBill = Effect.fn("getBill")(function* (billId: string) {
     LineRow,
     `SELECT l.id, l.item_id AS itemId, i.name AS itemName, l.quantity,
             l.unit_price AS unitPrice, l.added_by AS "by", u.name AS byName,
-            l.added_at AS at, l.day,
+            l.added_at AS at, l.day, l.moved_stock AS movedStock,
             r.removed_by AS removalBy, ru.name AS removalByName,
             r.removed_at AS removalAt, r.reason AS removalReason
      FROM lines l
@@ -1373,8 +1376,9 @@ export const getBill = Effect.fn("getBill")(function* (billId: string) {
      ORDER BY l.added_at, l.rowid`,
     billId,
   );
-  const lines = rows.map(({ removalBy, removalByName, removalAt, removalReason, ...line }) => ({
+  const lines = rows.map(({ removalBy, removalByName, removalAt, removalReason, movedStock, ...line }) => ({
     ...line,
+    movedStock: movedStock === 1,
     removal: correction(removalBy, removalByName, removalAt, removalReason),
   }));
   const paymentRows = yield* db.all(

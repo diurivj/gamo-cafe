@@ -12,7 +12,7 @@ import { appFetch, as, landing, seedUser, type SignedIn, signedIn } from "./supp
 import { seedItem } from "./support/catalog";
 import { seedCustomer } from "./support/customers";
 import { runTest } from "./support/effect";
-import { recordPayment, recordSale, saleForm } from "./support/sales";
+import { correctionPath, recordPayment, recordSale, saleForm } from "./support/sales";
 
 /**
  * Spec §4.1 and §10.6: the server enforces the permissions matrix in every
@@ -130,13 +130,20 @@ const routes: Readonly<Record<string, RouteRule>> = {
     get: { worker: 403, admin: 200 },
   },
   "/cuentas/x": {
-    about: "Cuenta: one Bill, its Customer and note and its corrections; unknown id",
+    about: "Cuenta: one Bill and its Customer and note; unknown id",
     signedOut: "redirect",
     get: { worker: 404, admin: 404 },
     post: { worker: 400, admin: 400 },
   },
   "/cuentas/x/cobrar": {
     about: "Where Cuenta sends a Payment",
+    signedOut: "redirect",
+    // An action and no loader: there is nothing to read here.
+    get: { worker: 400, admin: 400 },
+    post: { worker: 400, admin: 400 },
+  },
+  "/cuentas/x/corregir": {
+    about: "Where Cuenta sends a correction",
     signedOut: "redirect",
     // An action and no loader: there is nothing to read here.
     get: { worker: 400, admin: 400 },
@@ -574,11 +581,10 @@ const rows: ReadonlyArray<MatrixRow> = [
       const line = bill.lines[0]!;
 
       const removed = await who.fetch(
-        `/cuentas/${bill.id}`,
+        correctionPath(bill.id),
         form({ intent: "quitar-linea", lineId: line.id, revision: String(bill.revision) }),
       );
-      const removedPage = await landed(removed, who, label);
-      expect(await removedPage.text(), label).toContain("Producto quitado.");
+      expect(await removed.clone().json(), label).toMatchObject({ correction: { total: 1000, owed: 1000 } });
       return removed;
     },
   },
@@ -592,19 +598,18 @@ const rows: ReadonlyArray<MatrixRow> = [
       const line = bill.lines[0]!;
       const correction = { intent: "quitar-linea", lineId: line.id, revision: String(bill.revision) };
 
-      if (who.user.role === "worker") return who.fetch(`/cuentas/${bill.id}`, form(correction));
+      if (who.user.role === "worker") return who.fetch(correctionPath(bill.id), form(correction));
 
       // An Admin must give a reason, and only then is the Line removed.
-      const withoutReason = await who.fetch(`/cuentas/${bill.id}`, form(correction));
+      const withoutReason = await who.fetch(correctionPath(bill.id), form(correction));
       expect(withoutReason.status, label).toBe(400);
-      expect(await withoutReason.text(), label).toContain("Escribe el motivo.");
+      expect(await withoutReason.json(), label).toEqual({ error: "Escribe el motivo." });
 
       const removed = await who.fetch(
-        `/cuentas/${bill.id}`,
+        correctionPath(bill.id),
         form({ ...correction, reason: "Se registró de más" }),
       );
-      const removedPage = await landed(removed, who, label);
-      expect(await removedPage.text(), label).toContain("Producto quitado.");
+      expect(await removed.clone().json(), label).toMatchObject({ correction: { total: 1000, owed: 500 } });
       return removed;
     },
   },
@@ -618,18 +623,17 @@ const rows: ReadonlyArray<MatrixRow> = [
       const payment = bill.payments[0]!;
       const correction = { intent: "quitar-pago", paymentId: payment.id, revision: String(bill.revision) };
 
-      if (who.user.role === "worker") return who.fetch(`/cuentas/${bill.id}`, form(correction));
+      if (who.user.role === "worker") return who.fetch(correctionPath(bill.id), form(correction));
 
-      const withoutReason = await who.fetch(`/cuentas/${bill.id}`, form(correction));
+      const withoutReason = await who.fetch(correctionPath(bill.id), form(correction));
       expect(withoutReason.status, label).toBe(400);
-      expect(await withoutReason.text(), label).toContain("Escribe el motivo.");
+      expect(await withoutReason.json(), label).toEqual({ error: "Escribe el motivo." });
 
       const removed = await who.fetch(
-        `/cuentas/${bill.id}`,
+        correctionPath(bill.id),
         form({ ...correction, reason: "Se cobró por error" }),
       );
-      const removedPage = await landed(removed, who, label);
-      expect(await removedPage.text(), label).toContain("Pago quitado.");
+      expect(await removed.clone().json(), label).toMatchObject({ correction: { total: 2000, owed: 2000 } });
       return removed;
     },
   },
@@ -642,15 +646,14 @@ const rows: ReadonlyArray<MatrixRow> = [
       const bill = await seedBill({ itemId: item.id });
       const correction = { intent: "cancelar-cuenta", revision: String(bill.revision) };
 
-      if (who.user.role === "worker") return who.fetch(`/cuentas/${bill.id}`, form(correction));
+      if (who.user.role === "worker") return who.fetch(correctionPath(bill.id), form(correction));
 
-      const withoutReason = await who.fetch(`/cuentas/${bill.id}`, form(correction));
+      const withoutReason = await who.fetch(correctionPath(bill.id), form(correction));
       expect(withoutReason.status, label).toBe(400);
-      expect(await withoutReason.text(), label).toContain("Escribe el motivo.");
+      expect(await withoutReason.json(), label).toEqual({ error: "Escribe el motivo." });
 
-      const voided = await who.fetch(`/cuentas/${bill.id}`, form({ ...correction, reason: "Era una prueba" }));
-      const voidedPage = await landed(voided, who, label);
-      expect(await voidedPage.text(), label).toContain("Cuenta cancelada.");
+      const voided = await who.fetch(correctionPath(bill.id), form({ ...correction, reason: "Era una prueba" }));
+      expect(await voided.clone().json(), label).toMatchObject({ correction: { canOpen: true } });
       return voided;
     },
   },

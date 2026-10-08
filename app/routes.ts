@@ -9,6 +9,7 @@ export default [
   route("clientes/selector", "routes/resources/customer-picker.ts"),
   route("vender/registrar", "routes/resources/record-sale.ts"),
   route("cuentas/:billId/cobrar", "routes/resources/record-payment.ts"),
+  route("cuentas/:billId/corregir", "routes/resources/record-correction.ts"),
 
   // The signed-in shell: screens go inside it.
   layout("routes/shell.tsx", [

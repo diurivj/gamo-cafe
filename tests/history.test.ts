@@ -50,6 +50,10 @@ describe("a removed Line", () => {
             itemName: "Historial línea",
             quantity: 2,
             amount: 3700,
+            // The Line as it was recorded: whose it was, and on which Day.
+            billDay: "2026-10-05",
+            addedByName: "Beto",
+            addedAt: Date.parse("2026-10-05T09:00:00-06:00"),
           },
         ]);
 
@@ -107,7 +111,10 @@ describe("a removed Payment and a Voided Bill", () => {
             reason: "La cuenta era de prueba",
             billId: selection.id,
             billLabel: "Se lo llevó Sofía",
+            billDay: "2026-10-05",
             total: 2000,
+            // What it had been paid when it was voided: its one Payment was removed first.
+            paid: 0,
           },
           {
             kind: "payment_removal",
@@ -118,6 +125,9 @@ describe("a removed Payment and a Voided Bill", () => {
             billLabel: "Se lo llevó Sofía",
             amount: 500,
             method: "cash",
+            billDay: "2026-10-05",
+            receivedByName: "Beto",
+            receivedAt: Date.parse("2026-10-05T11:00:00-06:00"),
           },
         ]);
 
@@ -170,6 +180,8 @@ describe("a change to a Bill's Customer or note", () => {
         const page = yield* listHistory(null).pipe(as(ana));
         const entries = page.entries.filter((entry) => "billId" in entry && entry.billId === bill.id);
         expect(entries).toHaveLength(4);
+        // Which Bill, in words that an edit of its Customer or note cannot change.
+        expect(entries.map((entry) => "billDay" in entry && entry.billDay)).toEqual(Array(4).fill("2026-10-05"));
         const cleared = Date.parse("2026-10-05T13:10:00-06:00");
         const assigned = Date.parse("2026-10-05T13:05:00-06:00");
         expect(entries.slice(0, 2)).toEqual(
@@ -246,6 +258,10 @@ describe("an Adjustment and its cancellation", () => {
             units: 12,
             itemId: item.id,
             itemName: "Historial ajuste",
+            // The Adjustment as it was recorded.
+            note: "Compra semanal",
+            recordedByName: "Ana",
+            recordedAt: Date.parse("2026-10-05T15:00:00-06:00"),
           },
           {
             kind: "adjustment",

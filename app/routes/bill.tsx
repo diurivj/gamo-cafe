@@ -1,10 +1,9 @@
-import { type MouseEvent, type ReactNode, type RefObject, useEffect, useReducer, useRef, useState } from "react";
+import { Fragment, type MouseEvent, type ReactNode, type RefObject, useEffect, useReducer, useRef, useState } from "react";
 import { Effect } from "effect";
 import {
   data,
   Form,
   Link,
-  redirect,
   type ShouldRevalidateFunctionArgs,
   useBlocker,
   useLocation,
@@ -12,18 +11,8 @@ import {
   useRevalidator,
 } from "react-router";
 
-import { type BillNotFound, editBill, getBill } from "~/backend/bills";
-import {
-  type LineNotFound,
-  type PaymentNotFound,
-  type ReasonRequired,
-  type TotalBelowPayments,
-  removeLine,
-  removePayment,
-  voidBill,
-} from "~/backend/corrections";
-import { type AdminOnly, CurrentUser } from "~/backend/current-user";
-import type { BillChanged, BillIsVoided } from "~/backend/payments";
+import { editBill, getBill } from "~/backend/bills";
+import { CurrentUser } from "~/backend/current-user";
 import { run } from "~/backend/run.server";
 import { BillStateBadge } from "~/components/bill-state-badge";
 import { ConfirmDialog } from "~/components/confirm-dialog";
@@ -37,6 +26,7 @@ import { Button, buttonClasses } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
+import { Textarea } from "~/components/ui/textarea";
 import { answerWithNotice, takeNotice } from "~/notice.server";
 import { requireUser } from "~/session.server";
 import {
@@ -56,11 +46,27 @@ import {
 } from "~/shared/bill-payment";
 import { isOpenBill } from "~/shared/bill-state";
 import {
-  CORRECTION_INTENTS,
-  type CorrectionIntent,
-  correctionDone,
-  correctionMessages,
-} from "~/shared/correction-messages";
+  type CorrectionAnswer,
+  correctionAfter,
+  correctionAt,
+  correctionBody,
+  correctionHref,
+  correctionKey,
+  correctionOfKey,
+  correctionOutcome,
+  type CorrectionPlan,
+  correctionPlan,
+  correctionRecordingText,
+  type CorrectionRefusal,
+  type CorrectionSnapshot,
+  correctionSnapshot,
+  type CorrectionState,
+  type CorrectionTarget,
+  isCorrectionAnswer,
+  NEW_CORRECTION,
+  reasonFor,
+} from "~/shared/correction";
+import type { CorrectionIntent } from "~/shared/correction-messages";
 import { dayOf, formatDay, formatTime, type Instant } from "~/shared/day";
 import { newId } from "~/shared/id";
 import { listReturn } from "~/shared/list-return";
@@ -70,7 +76,6 @@ import type { PaymentDraft } from "~/shared/payment-draft";
 import { readPaymentDraft } from "~/shared/payment-draft";
 import { paymentMessages } from "~/shared/payment-messages";
 import { sendForRecord } from "~/shared/record-request";
-import { trimToNull } from "~/shared/text";
 
 import type { Route } from "./+types/bill";
 
@@ -78,8 +83,7 @@ import type { Route } from "./+types/bill";
 // owes, then its Lines and its Payments, each with who and when. Its two
 // routine actions are apart: **Cobrar** opens the step that takes a Payment
 // (`?paso=cobrar`), **Agregar productos** opens Vender targeting this Bill.
-// **Cliente y nota** (ticket 10) and the corrections (ticket 11, spec §5.7)
-// come after them.
+// **Cliente y nota** (ticket 10) comes after the records.
 //
 // A Payment is `~/shared/bill-payment`: typed, frozen at the tap, sent to
 // `/cuentas/:billId/cobrar` (`./resources/record-payment`) with the browser's
@@ -87,6 +91,13 @@ import type { Route } from "./+types/bill";
 // happened. Nothing is read after it until the User asks, so a Worker sees
 // the result of a Payment that left the Bill Paid without being sent into a
 // Bill they may no longer open (spec §4.1).
+//
+// A correction (spec §5.7, UI redesign §7.2) is `~/shared/correction`, and is
+// never one tap away from the routine actions: **Quitar** on a Line or a
+// Payment and **Cancelar esta cuenta** each open a step of their own
+// (`?paso=quitar-linea&id=…`), which names the record, says what will happen
+// and has the one action that does it. It is sent and answered as a Payment
+// is, to `/cuentas/:billId/corregir` (`./resources/record-correction`).
 
 export const meta: Route.MetaFunction = () => [{ title: "Cuenta · Gamo Cafe" }];
 
@@ -134,92 +145,9 @@ function readRevision(form: FormData): number {
   return revision;
 }
 
-type CorrectionError =
-  | BillNotFound
-  | BillChanged
-  | BillIsVoided
-  | AdminOnly
-  | LineNotFound
-  | PaymentNotFound
-  | ReasonRequired
-  | TotalBelowPayments;
-
-/** What each rule violation of a correction answers, in Spanish (spec §5.7). */
-function answerCorrectionError(error: CorrectionError): { readonly error: string } {
-  switch (error._tag) {
-    case "BillNotFound":
-      throw new Response(null, { status: 404 });
-    case "AdminOnly":
-      throw new Response(null, { status: 403 });
-    case "BillChanged":
-      return { error: correctionMessages.BillChanged };
-    case "BillIsVoided":
-      return { error: correctionMessages.BillIsVoided };
-    case "LineNotFound":
-      return { error: correctionMessages.LineNotFound };
-    case "PaymentNotFound":
-      return { error: correctionMessages.PaymentNotFound };
-    case "ReasonRequired":
-      return { error: correctionMessages.ReasonRequired };
-    case "TotalBelowPayments":
-      return { error: correctionMessages.TotalBelowPayments };
-  }
-}
-
-/**
- * Runs one correction (spec §5.7, §7.3.3): the operation for the submitted
- * intent, the Bill's revision and the reason as the form sent them. The
- * server enforces the permissions, not the screen: a Worker posting an
- * Admin-only correction is answered 403.
- */
-async function answerCorrection(
-  context: Route.ActionArgs["context"],
-  user: ReturnType<typeof requireUser>,
-  billId: string,
-  intent: CorrectionIntent,
-  form: FormData,
-): Promise<{ readonly message: string } | { readonly error: string }> {
-  const revision = Number(String(form.get("revision") ?? ""));
-  if (!Number.isSafeInteger(revision)) {
-    return { error: "Recarga la página e intenta de nuevo." };
-  }
-  const reason = trimToNull(String(form.get("reason") ?? ""));
-
-  const program = Effect.gen(function* () {
-    switch (intent) {
-      case "quitar-linea":
-        return yield* removeLine({
-          billId,
-          lineId: String(form.get("lineId") ?? ""),
-          reason,
-          expectedRevision: revision,
-        });
-      case "quitar-pago":
-        return yield* removePayment({
-          billId,
-          paymentId: String(form.get("paymentId") ?? ""),
-          reason,
-          expectedRevision: revision,
-        });
-      case "cancelar-cuenta":
-        return yield* voidBill({ billId, reason, expectedRevision: revision });
-    }
-  });
-
-  const result = await run(
-    context,
-    program.pipe(Effect.provideService(CurrentUser, user)),
-    answerCorrectionError,
-  );
-  if ("error" in result) return result;
-  // A Worker whose removal leaves the Bill Paid no longer opens it (§4.1),
-  // so they are sent to the list, where it is gone.
-  if ("leftOpen" in result && !result.leftOpen && user.role !== "admin") throw redirect("/cuentas-abiertas");
-  return { message: correctionDone[intent] };
-}
-
-// The page's own forms: **Cliente y nota** and the corrections. A Payment is
-// not one of them: it has its own route, `./resources/record-payment`.
+// The page's own form: **Cliente y nota**. A Payment and a correction are not
+// forms of the page: each has its own route, `./resources/record-payment` and
+// `./resources/record-correction`.
 export async function action({ context, params, request }: Route.ActionArgs) {
   const user = requireUser(context);
   const form = await request.formData();
@@ -229,14 +157,6 @@ export async function action({ context, params, request }: Route.ActionArgs) {
   // gets a redirect back to the page, so a reload or the back button records
   // nothing again (spec §3.4).
   const page = `/cuentas/${params.billId}`;
-
-  // The corrections have their own program and their own answer: a Worker
-  // posting an Admin-only one is refused with a 403.
-  if ((CORRECTION_INTENTS as ReadonlyArray<string>).includes(intent)) {
-    const answered = await answerCorrection(context, user, params.billId, intent as CorrectionIntent, form);
-    if ("error" in answered) return data(answered, { status: 400 });
-    return answerWithNotice(request, page, answered);
-  }
 
   if (intent !== "editar") {
     return data({ error: "No entendimos esa acción. Recarga la página e intenta de nuevo." }, { status: 400 });
@@ -281,9 +201,6 @@ type Data = Route.ComponentProps["loaderData"];
 type LoadedBill = Data["bill"];
 type Heading = RefObject<HTMLHeadingElement | null>;
 
-/** Where Cuentas abiertas is. */
-const LIST_PATH = "/cuentas-abiertas";
-
 /** Whose Bill this is, in the few words a list or a summary has room for. */
 const whoseBill = (bill: Pick<LoadedBill, "customer" | "note">) => bill.customer?.name ?? bill.note ?? "Sin cliente";
 
@@ -293,13 +210,71 @@ const recordedAt = (billDay: string, at: Instant) => {
   return day === billDay ? formatTime(at) : `${formatTime(at)} · ${formatDay(day)}`;
 };
 
-/** The reason an Admin's correction carries. Each form has its own, so the label holds the field. */
-const reasonField = (
-  <Label className="flex-col items-stretch gap-2">
-    Motivo
-    <Input name="reason" required autoComplete="off" />
-  </Label>
-);
+type LoadedLine = LoadedBill["lines"][number];
+type LoadedPayment = LoadedBill["payments"][number];
+
+/** A Line, a Payment and the Bill itself as a correction is asked about them. */
+const lineTarget = (line: LoadedLine): CorrectionTarget => ({
+  intent: "quitar-linea",
+  line: { ...line, removed: line.removal !== null },
+});
+const paymentTarget = (payment: LoadedPayment): CorrectionTarget => ({
+  intent: "quitar-pago",
+  payment: { ...payment, removed: payment.removal !== null },
+});
+const voidTarget = (bill: LoadedBill): CorrectionTarget => ({
+  intent: "cancelar-cuenta",
+  movesStock: bill.lines.some((line) => line.removal === null && line.movedStock),
+});
+
+/** The record the address's correction is about, as the Bill has it now; null when it has none. */
+function targetAt(bill: LoadedBill, asked: NonNullable<ReturnType<typeof correctionAt>>): CorrectionTarget | null {
+  switch (asked.intent) {
+    case "quitar-linea": {
+      const line = bill.lines.find((line) => line.id === asked.targetId);
+      return line ? lineTarget(line) : null;
+    }
+    case "quitar-pago": {
+      const payment = bill.payments.find((payment) => payment.id === asked.targetId);
+      return payment ? paymentTarget(payment) : null;
+    }
+    case "cancelar-cuenta":
+      return voidTarget(bill);
+  }
+}
+
+/** A removal as its record says it: who, when and, when one was given, why. */
+const removalText = (billDay: string, removal: NonNullable<LoadedLine["removal"]>) =>
+  `Quitado por ${removal.byName} · ${recordedAt(billDay, removal.at)}${removal.reason ? ` · Motivo: ${removal.reason}` : ""}`;
+
+/** A Line as its row and its correction's step show it. */
+function LineRecord({ bill, line }: { readonly bill: LoadedBill; readonly line: LoadedLine }) {
+  return (
+    <>
+      <div className={`flex items-baseline justify-between gap-3 ${line.removal ? "text-muted-foreground line-through" : ""}`}>
+        <span className="min-w-0 wrap-break-word">
+          <span className="font-semibold tabular-nums">{`${line.quantity} ×`}</span> {line.itemName}
+        </span>
+        <span className="shrink-0 font-medium tabular-nums">{formatMoney(line.unitPrice * line.quantity)}</span>
+      </div>
+      <p className={hint}>{`${formatMoney(line.unitPrice)} c/u`}</p>
+      <p className={`${hint} wrap-break-word`}>{`${line.byName} · ${recordedAt(bill.day, line.at)}`}</p>
+    </>
+  );
+}
+
+/** A Payment as its row and its correction's step show it. */
+function PaymentRecord({ bill, payment }: { readonly bill: LoadedBill; readonly payment: LoadedPayment }) {
+  return (
+    <>
+      <div className={`flex items-baseline justify-between gap-3 ${payment.removal ? "text-muted-foreground line-through" : ""}`}>
+        <span className="font-semibold">{paymentMethodLabel[payment.method]}</span>
+        <span className="shrink-0 font-medium tabular-nums">{formatMoney(payment.amount)}</span>
+      </div>
+      <p className={`${hint} wrap-break-word`}>{`${payment.byName} · ${recordedAt(bill.day, payment.at)}`}</p>
+    </>
+  );
+}
 
 /** A row of the summary: what the figure is, and the figure. */
 function Figure({ label, lead = false, children }: { readonly label: string; readonly lead?: boolean; readonly children: ReactNode }) {
@@ -312,17 +287,23 @@ function Figure({ label, lead = false, children }: { readonly label: string; rea
 }
 
 /** What the Bill owes, first and largest, then what it adds up to and what was paid. */
+function Figures({ bill }: { readonly bill: LoadedBill }) {
+  return (
+    <dl className="flex flex-col gap-2">
+      <Figure label="Debe" lead>
+        {formatMoney(bill.owed)}
+      </Figure>
+      <Figure label="Total">{formatMoney(bill.total)}</Figure>
+      <Figure label="Pagado">{formatMoney(bill.paid)}</Figure>
+    </dl>
+  );
+}
+
 function Summary({ bill }: { readonly bill: LoadedBill }) {
   return (
     <Card size="sm" role="region" aria-label="Resumen">
       <CardContent>
-        <dl className="flex flex-col gap-2">
-          <Figure label="Debe" lead>
-            {formatMoney(bill.owed)}
-          </Figure>
-          <Figure label="Total">{formatMoney(bill.total)}</Figure>
-          <Figure label="Pagado">{formatMoney(bill.paid)}</Figure>
-        </dl>
+        <Figures bill={bill} />
       </CardContent>
     </Card>
   );
@@ -337,21 +318,35 @@ function Overview({
   list,
   payHref,
   onPay,
+  onCorrect,
 }: {
   readonly data: Data;
   readonly heading: Heading;
-  /** What a form of this screen, or its Payment, was refused for. */
+  /** What a form of this screen, its Payment or a correction was refused for. */
   readonly error: string | null;
   /** What a form of this screen recorded. */
   readonly said: string | null;
   readonly list: ReactNode;
   readonly payHref: string;
   readonly onPay: () => void;
+  /** A correction's step is being opened. */
+  readonly onCorrect: (intent: CorrectionIntent, targetId: string | null) => void;
 }) {
   const { bill, canAddItems, canPay, isAdmin, canEdit } = data;
-  // A Voided Bill accepts no further corrections (spec §5.7); a Paid Bill does,
-  // which is what §8.5 is about.
-  const canCorrect = bill.state !== "voided";
+  // What this User is offered is `correctionPlan`'s to say (spec §4.1, §5.7):
+  // a Paid Bill still accepts an Admin's corrections, a Voided one accepts none.
+  const offered = (target: CorrectionTarget) => correctionPlan(bill, target, isAdmin) !== null;
+  /** The way into a correction's step: quiet, and never the action itself. */
+  const stepLink = (intent: CorrectionIntent, targetId: string | null, label: string, name: string) => (
+    <Link
+      to={correctionHref(bill.id, intent, targetId)}
+      onClick={() => onCorrect(intent, targetId)}
+      aria-label={name}
+      className={`${buttonClasses({ size: "touch", variant: "outline" })} mt-2 self-start`}
+    >
+      {label}
+    </Link>
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -421,36 +416,11 @@ function Overview({
               <ul className="flex flex-col divide-y">
                 {bill.lines.map((line) => (
                   <li key={line.id} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
-                    <div className={`flex items-baseline justify-between gap-3 ${line.removal ? "text-muted-foreground line-through" : ""}`}>
-                      <span className="min-w-0 wrap-break-word">
-                        <span className="font-semibold tabular-nums">{`${line.quantity} ×`}</span> {line.itemName}
-                      </span>
-                      <span className="shrink-0 font-medium tabular-nums">{formatMoney(line.unitPrice * line.quantity)}</span>
-                    </div>
-                    <p className={hint}>{`${formatMoney(line.unitPrice)} c/u`}</p>
-                    <p className={`${hint} wrap-break-word`}>{`${line.byName} · ${recordedAt(bill.day, line.at)}`}</p>
+                    <LineRecord bill={bill} line={line} />
                     {line.removal ? (
-                      <p className="font-medium wrap-break-word">
-                        {`Quitado por ${line.removal.byName} · ${recordedAt(bill.day, line.removal.at)}${
-                          line.removal.reason ? ` · ${line.removal.reason}` : ""
-                        }`}
-                      </p>
-                    ) : canCorrect && (bill.paid === 0 || (isAdmin && line.quantity * line.unitPrice <= bill.owed)) ? (
-                      <Form method="post" className="mt-2 flex flex-col gap-3">
-                        <input type="hidden" name="revision" value={bill.revision} />
-                        <input type="hidden" name="lineId" value={line.id} />
-                        {/* The reason is required once the Bill has a Payment,
-                            which is what `paid > 0` says (spec §5.7). */}
-                        {isAdmin && bill.paid > 0 ? reasonField : null}
-                        <SubmitButton
-                          name="intent"
-                          value="quitar-linea"
-                          aria-label={`Quitar ${line.quantity} × ${line.itemName}`}
-                          className={`${buttonClasses({ size: "touch", variant: "outline" })} self-start`}
-                        >
-                          Quitar
-                        </SubmitButton>
-                      </Form>
+                      <p className="font-medium wrap-break-word">{removalText(bill.day, line.removal)}</p>
+                    ) : offered(lineTarget(line)) ? (
+                      stepLink("quitar-linea", line.id, "Quitar", `Quitar ${line.quantity} × ${line.itemName}`)
                     ) : null}
                   </li>
                 ))}
@@ -458,6 +428,10 @@ function Overview({
             </CardContent>
           </Card>
         )}
+        {/* Why a Worker finds no way to remove a Line here (spec §4.1). */}
+        {!isAdmin && bill.paid > 0 && bill.lines.some((line) => line.removal === null) ? (
+          <p className={hint}>Esta cuenta ya tiene pagos: solo un administrador puede quitar productos.</p>
+        ) : null}
       </section>
 
       <section aria-labelledby="pagos" className="flex flex-col gap-3">
@@ -472,31 +446,11 @@ function Overview({
               <ul aria-label="Pagos" className="flex flex-col divide-y">
                 {bill.payments.map((payment) => (
                   <li key={payment.id} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
-                    <div className={`flex items-baseline justify-between gap-3 ${payment.removal ? "text-muted-foreground line-through" : ""}`}>
-                      <span className="font-semibold">{paymentMethodLabel[payment.method]}</span>
-                      <span className="shrink-0 font-medium tabular-nums">{formatMoney(payment.amount)}</span>
-                    </div>
-                    <p className={`${hint} wrap-break-word`}>{`${payment.byName} · ${recordedAt(bill.day, payment.at)}`}</p>
+                    <PaymentRecord bill={bill} payment={payment} />
                     {payment.removal ? (
-                      <p className="font-medium wrap-break-word">
-                        {`Quitado por ${payment.removal.byName} · ${recordedAt(bill.day, payment.removal.at)} · ${
-                          payment.removal.reason ?? ""
-                        }`}
-                      </p>
-                    ) : canCorrect && isAdmin ? (
-                      <Form method="post" className="mt-2 flex flex-col gap-3">
-                        <input type="hidden" name="revision" value={bill.revision} />
-                        <input type="hidden" name="paymentId" value={payment.id} />
-                        {reasonField}
-                        <SubmitButton
-                          name="intent"
-                          value="quitar-pago"
-                          aria-label={`Quitar pago de ${formatMoney(payment.amount)}`}
-                          className={`${buttonClasses({ size: "touch", variant: "outline" })} self-start`}
-                        >
-                          Quitar pago
-                        </SubmitButton>
-                      </Form>
+                      <p className="font-medium wrap-break-word">{removalText(bill.day, payment.removal)}</p>
+                    ) : offered(paymentTarget(payment)) ? (
+                      stepLink("quitar-pago", payment.id, "Quitar pago", `Quitar pago de ${formatMoney(payment.amount)}`)
                     ) : null}
                   </li>
                 ))}
@@ -543,23 +497,13 @@ function Overview({
         </section>
       ) : null}
 
-      {canCorrect && isAdmin ? (
+      {offered(voidTarget(bill)) ? (
         <section aria-labelledby="cancelar-cuenta" className="flex flex-col gap-3 border-t pt-6">
           <h2 id="cancelar-cuenta" className={sectionTitle}>
             Cancelar cuenta
           </h2>
-          <p>No se puede deshacer. Los productos regresan a existencias.</p>
-          <Form method="post" className="flex flex-col gap-3">
-            <input type="hidden" name="revision" value={bill.revision} />
-            {reasonField}
-            <SubmitButton
-              name="intent"
-              value="cancelar-cuenta"
-              className={`${buttonClasses({ size: "touch", variant: "destructive" })} self-start`}
-            >
-              Cancelar cuenta
-            </SubmitButton>
-          </Form>
+          <p>Para una cuenta que no debió registrarse. No se puede deshacer.</p>
+          {stepLink("cancelar-cuenta", null, "Cancelar esta cuenta", "Cancelar esta cuenta")}
         </section>
       ) : null}
     </div>
@@ -643,49 +587,208 @@ function Pay({
   );
 }
 
-/** What a Payment that was sent carried, for as long as it is on screen. */
-function Sent({ snapshot, bill }: { readonly snapshot: BillPaymentSnapshot; readonly bill: LoadedBill }) {
+/** What each correction's step is called. */
+const correctionTitle: Record<CorrectionIntent, string> = {
+  "quitar-linea": "Quitar producto",
+  "quitar-pago": "Quitar pago",
+  "cancelar-cuenta": "Cancelar cuenta",
+};
+
+/**
+ * The step of a correction (UI redesign §7.2): the Bill and the record it is
+ * about, what will happen, the reason when one is owed, and the one action
+ * that does it, named by its effect. The step is the confirmation: no dialog
+ * asks again.
+ */
+function Correct({
+  bill,
+  target,
+  plan,
+  reason,
+  refusal,
+  heading,
+  onType,
+  onBack,
+  onSend,
+}: {
+  readonly bill: LoadedBill;
+  readonly target: CorrectionTarget;
+  readonly plan: CorrectionPlan;
+  readonly reason: string;
+  readonly refusal: string | null;
+  readonly heading: Heading;
+  readonly onType: (reason: string) => void;
+  readonly onBack: () => void;
+  readonly onSend: () => void;
+}) {
+  // Whether a tap on the action found the reason missing.
+  const [insist, setInsist] = useState(false);
+  const field = useRef<HTMLTextAreaElement>(null);
+  const missing = plan.needsReason && reason.trim() === "";
+  const line = target.intent === "quitar-linea" ? bill.lines.find((line) => line.id === target.line.id) : undefined;
+  const payment =
+    target.intent === "quitar-pago" ? bill.payments.find((payment) => payment.id === target.payment.id) : undefined;
+
+  return (
+    <div className="flex flex-col gap-6">
+      <Button type="button" variant="outline" size="touch" onClick={onBack} className="self-start">
+        <BackDrawing />
+        Volver a la cuenta
+      </Button>
+      <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
+        {correctionTitle[target.intent]}
+      </h1>
+
+      <Card size="sm" role="region" aria-label="Cuenta">
+        <CardContent className="flex flex-col gap-1">
+          <p className="text-xl font-semibold wrap-break-word">{whoseBill(bill)}</p>
+          <p className={hint}>{formatDay(bill.day)}</p>
+          <div className="mt-2 flex flex-col gap-1 border-t pt-3">
+            {line ? <LineRecord bill={bill} line={line} /> : null}
+            {payment ? <PaymentRecord bill={bill} payment={payment} /> : null}
+            {target.intent === "cancelar-cuenta" ? <Figures bill={bill} /> : null}
+          </div>
+        </CardContent>
+      </Card>
+
+      {refusal ? <Notice tone="error">{refusal}</Notice> : null}
+
+      {plan.blocked !== null ? (
+        <Notice tone="info">{plan.blocked}</Notice>
+      ) : (
+        <>
+          <section aria-labelledby="efecto" className="flex flex-col gap-3">
+            <h2 id="efecto" className={sectionTitle}>
+              {target.intent === "cancelar-cuenta" ? "Al cancelarla" : "Al quitarlo"}
+            </h2>
+            <ul className="flex list-disc flex-col gap-2 pl-6">
+              {plan.consequences.map((consequence) => (
+                <li key={consequence} className="wrap-break-word">
+                  {consequence}
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          {plan.needsReason ? (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="motivo">Motivo</Label>
+              <Textarea
+                ref={field}
+                id="motivo"
+                value={reason}
+                onChange={(event) => onType(event.currentTarget.value)}
+                rows={2}
+                autoComplete="off"
+                aria-required
+                aria-invalid={(insist && missing) || undefined}
+                aria-describedby="motivo-ayuda"
+              />
+              {insist && missing ? (
+                <Notice tone="error" id="motivo-ayuda">
+                  Escribe el motivo.
+                </Notice>
+              ) : (
+                <p id="motivo-ayuda" className={hint}>
+                  Queda en el historial, con tu nombre.
+                </p>
+              )}
+            </div>
+          ) : null}
+
+          <Button
+            type="button"
+            size="touch"
+            variant={target.intent === "cancelar-cuenta" ? "destructive" : "default"}
+            onClick={() => {
+              // The field says what is missing; nothing is sent without it.
+              if (missing) {
+                setInsist(true);
+                field.current?.focus();
+              } else onSend();
+            }}
+          >
+            {plan.action}
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** What was sent, for as long as it is on screen: the Bill, and the Payment or the correction. */
+function Sent({
+  bill,
+  rows,
+}: {
+  readonly bill: LoadedBill;
+  /** What it was, and what it carried: "Pago", "$20.00 · Efectivo". */
+  readonly rows: ReadonlyArray<readonly [label: string, value: string]>;
+}) {
   return (
     <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
       <dt className={hint}>Cuenta</dt>
       <dd className="min-w-0 font-medium wrap-break-word">{`${whoseBill(bill)} · ${formatDay(bill.day)}`}</dd>
-      <dt className={hint}>Pago</dt>
-      <dd className="min-w-0 font-medium wrap-break-word">
-        {`${formatMoney(snapshot.amount)} · ${paymentMethodLabel[snapshot.method]}`}
-      </dd>
+      {rows.map(([label, value]) => (
+        <Fragment key={label}>
+          <dt className={hint}>{label}</dt>
+          <dd className="min-w-0 font-medium wrap-break-word">{value}</dd>
+        </Fragment>
+      ))}
     </dl>
   );
 }
 
-/** A Payment on its way, or one nobody knows the outcome of: frozen, with only safe ways on. */
+const sentPayment = (snapshot: BillPaymentSnapshot) =>
+  [["Pago", `${formatMoney(snapshot.amount)} · ${paymentMethodLabel[snapshot.method]}`]] as const;
+
+const sentCorrection = (snapshot: CorrectionSnapshot) =>
+  [
+    [correctionTitle[snapshot.intent], snapshot.what],
+    ...(snapshot.reason === null ? [] : [["Motivo", snapshot.reason] as const]),
+  ] as const;
+
+/**
+ * Something on its way, or of which nobody knows the outcome: frozen, with
+ * only safe ways on. It never says recorded, and never says failed.
+ */
 function Pending({
-  payment,
-  bill,
+  recording,
+  title,
+  unknown,
+  ended,
+  sessionEnded,
+  check,
   heading,
   onRetry,
+  children,
 }: {
-  readonly payment: Extract<BillPaymentState, { phase: "recording" | "unknown" }>;
-  readonly bill: LoadedBill;
+  readonly recording: boolean;
+  /** What is on its way: "Registrando pago de $20.00…". */
+  readonly title: string;
+  /** What is said when no answer came. */
+  readonly unknown: string;
+  /** What is said when the session ended before an answer came. */
+  readonly ended: string;
+  readonly sessionEnded: boolean;
+  /** Where a User can look for themselves, when there is such a place. */
+  readonly check: { readonly to: string; readonly label: string } | null;
   readonly heading: Heading;
   readonly onRetry: () => void;
+  readonly children: ReactNode;
 }) {
-  const recording = payment.phase === "recording";
   return (
     <div className="flex flex-col gap-6" aria-busy={recording}>
       <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
-        {recording ? billPaymentRecordingText(payment.snapshot) : "No sabemos si se registró"}
+        {recording ? title : "No sabemos si se registró"}
       </h1>
       {recording ? (
         <Notice tone="info">Espera la confirmación.</Notice>
       ) : (
         <>
-          <Notice tone="info">
-            {payment.sessionEnded
-              ? "Tu sesión terminó antes de saberlo. Entra de nuevo y revisa Mi día antes de repetir el pago."
-              : "El pago pudo registrarse o no. Volver a intentar no lo registra dos veces."}
-          </Notice>
+          <Notice tone="info">{sessionEnded ? ended : unknown}</Notice>
           <div className="flex flex-col gap-3">
-            {payment.sessionEnded ? (
+            {sessionEnded ? (
               // A document load: the way out of a session that ended.
               <a href="/entrar" className={buttonClasses({ size: "touch" })}>
                 Entrar de nuevo
@@ -695,117 +798,174 @@ function Pending({
                 Volver a intentar
               </Button>
             )}
-            <Link to="/mi-dia" className={buttonClasses({ variant: "outline", size: "touch" })}>
-              Revisar en Mi día
-            </Link>
+            {check ? (
+              <Link to={check.to} className={buttonClasses({ variant: "outline", size: "touch" })}>
+                {check.label}
+              </Link>
+            ) : null}
           </div>
         </>
       )}
-      <Sent snapshot={payment.snapshot} bill={bill} />
+      {children}
     </div>
   );
 }
 
 /** What the server confirmed, kept until the User goes on (UI redesign §5.4). */
 function Confirmed({
-  payment,
-  bill,
+  title,
+  details,
+  change = null,
+  canOpen,
   heading,
   list,
   onOpenBill,
+  children,
 }: {
-  readonly payment: Extract<BillPaymentState, { phase: "confirmed" }>;
-  readonly bill: LoadedBill;
+  readonly title: string;
+  readonly details: string;
+  /** The cash to hand back, when a Payment had any. */
+  readonly change?: string | null;
+  /** Only a Bill this User may open: a Worker is not sent to one that is no longer Open. */
+  readonly canOpen: boolean;
   readonly heading: Heading;
   readonly list: ReactNode;
   readonly onOpenBill: () => void;
+  readonly children: ReactNode;
 }) {
-  const { snapshot, result } = payment;
-  const outcome = billPaymentOutcome(snapshot, result);
-
   return (
     <div className="flex flex-col gap-6">
       <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
-        {outcome.title}
+        {title}
       </h1>
-      <Notice tone="success">{outcome.details}</Notice>
+      <Notice tone="success">{details}</Notice>
 
-      {outcome.change !== null ? (
+      {change !== null ? (
         <Card size="sm" role="region" aria-label="Cambio">
           <CardContent className="flex items-baseline justify-between gap-3">
             <span className="text-xl font-medium">Cambio</span>
-            <span className="font-heading text-4xl font-semibold tabular-nums">{outcome.change}</span>
+            <span className="font-heading text-4xl font-semibold tabular-nums">{change}</span>
           </CardContent>
         </Card>
       ) : null}
 
       <div className="flex flex-col gap-3">
         {list}
-        {/* Only a Bill this User may open: a Worker is not sent to a Paid one. */}
-        {result.canOpen ? (
+        {canOpen ? (
           <Button type="button" variant="outline" size="touch" onClick={onOpenBill}>
             Ver cuenta
           </Button>
         ) : null}
       </div>
 
-      <Sent snapshot={snapshot} bill={bill} />
+      {children}
     </div>
   );
 }
 
-/** A Payment that was refused because the Bill is no longer this User's to open. */
+/** What was refused because the Bill is no longer this User's to open. */
 function Gone({
-  payment,
-  bill,
+  title,
   heading,
   list,
+  children,
 }: {
-  readonly payment: Extract<BillPaymentState, { phase: "gone" }>;
-  readonly bill: LoadedBill;
+  readonly title: string;
   readonly heading: Heading;
   readonly list: ReactNode;
+  readonly children: ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-6">
       <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
-        No se registró el pago
+        {title}
       </h1>
       <Notice tone="error">La cuenta ya no está abierta: se cobró o se canceló desde otro teléfono.</Notice>
       {list}
-      <Sent snapshot={payment.snapshot} bill={bill} />
+      {children}
     </div>
   );
 }
 
+/**
+ * Whether the Bill was read again since `shown` became true: a result on
+ * screen gives way to the Bill as it is now. What the loader had read when the
+ * result arrived, however old or new, is not that.
+ */
+function useReadAgainSince(shown: boolean, data: unknown): boolean {
+  const [readThen, setReadThen] = useState<unknown>(null);
+  useEffect(() => {
+    setReadThen(shown ? data : null);
+  }, [shown]);
+  return shown && readThen !== null && readThen !== data;
+}
+
+/** The lists a Bill is opened from, and what the way back to each is called. */
+const LISTS: Readonly<Record<string, string>> = {
+  "/cuentas-abiertas": "Cuentas abiertas",
+  "/historial": "Historial",
+};
+
+/** The list whose row led here, when its link said so (`state={{ fromList }}`). */
+function listBehind(state: unknown): string | null {
+  const from = (state as { readonly fromList?: unknown } | null)?.fromList;
+  return typeof from === "string" && Object.hasOwn(LISTS, from) ? from : null;
+}
+
 function BillScreen({ loaderData, actionData }: Route.ComponentProps) {
-  const { bill, canPay, notice: landingNotice } = loaderData;
+  const { bill, canPay, isAdmin, notice: landingNotice } = loaderData;
   const [payment, dispatch] = useReducer(billPaymentAfter, NEW_BILL_PAYMENT);
+  const [correction, dispatchCorrection] = useReducer(correctionAfter, NEW_CORRECTION);
   const location = useLocation();
   const navigate = useNavigate();
   const { revalidate } = useRevalidator();
 
   const billPath = `/cuentas/${bill.id}`;
-  const atPay = new URLSearchParams(location.search).get(PAY_STEP_PARAM) === PAY_STEP;
-  // The Bill was read again after the result came on screen: the result gives
-  // way to the Bill as it is now, and the next Payment is a new one. What the
-  // loader had read when the result arrived, however old or new, is not that.
-  const [readAtResult, setReadAtResult] = useState<typeof loaderData | null>(null);
-  const confirmed = payment.phase === "confirmed";
-  useEffect(() => {
-    setReadAtResult(confirmed ? loaderData : null);
-  }, [confirmed]);
-  const left = confirmed && readAtResult !== null && readAtResult !== loaderData;
-  useEffect(() => {
-    if (left) dispatch({ type: "started" });
-  }, [left]);
-  // A Payment that was sent stays on screen whatever the address says.
-  const view =
-    payment.phase !== "editing" ? (left ? "bill" : payment.phase) : atPay && canPay ? "pay" : "bill";
+  const search = new URLSearchParams(location.search);
+  const atPay = search.get(PAY_STEP_PARAM) === PAY_STEP;
+  // The correction the address asks for, and what it would do to the Bill as
+  // it is now: no plan, no step.
+  const asked = correctionAt(search);
+  const target = asked ? targetAt(bill, asked) : null;
+  const plan = target ? correctionPlan(bill, target, isAdmin) : null;
+  const atStep = atPay || asked !== null;
 
-  // The step of a Bill that owes nothing is the Bill: after a reload, or once
-  // another phone paid it. The address follows.
-  const stray = payment.phase === "editing" && atPay && !canPay;
+  // The Bill was read again after a result came on screen: the result gives
+  // way to the Bill as it is now, and the next Payment or correction is new.
+  const paidAndLeft = useReadAgainSince(payment.phase === "confirmed", loaderData);
+  useEffect(() => {
+    if (paidAndLeft) dispatch({ type: "started" });
+  }, [paidAndLeft]);
+  const correctedAndLeft = useReadAgainSince(correction.phase === "confirmed", loaderData);
+  useEffect(() => {
+    if (correctedAndLeft) dispatchCorrection({ type: "started" });
+  }, [correctedAndLeft]);
+
+  // What was sent stays on screen whatever the address says.
+  const sent: "payment" | "correction" | null =
+    payment.phase !== "editing" && !paidAndLeft
+      ? "payment"
+      : correction.phase !== "editing" && !correctedAndLeft
+        ? "correction"
+        : null;
+  const idle = payment.phase === "editing" && correction.phase === "editing";
+  const view =
+    sent === "payment"
+      ? payment.phase
+      : sent === "correction"
+        ? `correction-${correction.phase}`
+        : !idle
+          ? "bill"
+          : atPay && canPay
+            ? "pay"
+            : plan
+              ? "correct"
+              : "bill";
+
+  // A step with nothing to do is the Bill: Cobrar on one that owes nothing, a
+  // correction of a record that can no longer be corrected, after a reload or
+  // once another phone got there first. The address follows.
+  const stray = idle && ((atPay && !canPay) || (asked !== null && plan === null));
   useEffect(() => {
     if (stray) leaveStep();
   }, [stray]);
@@ -832,8 +992,29 @@ function BillScreen({ loaderData, actionData }: Route.ComponentProps) {
     };
   }, [attempt]);
 
+  const correctionAttempt = correction.phase === "recording" ? correction.attempt : 0;
+  useEffect(() => {
+    if (correction.phase !== "recording") return;
+    const { snapshot, attempt } = correction;
+    let heard = true;
+    void sendForRecord<CorrectionAnswer, CorrectionRefusal>(
+      `${billPath}/corregir`,
+      correctionBody(snapshot),
+      isCorrectionAnswer,
+    ).then((outcome) => {
+      if (!heard) return;
+      dispatchCorrection({ type: "answered", attempt, outcome });
+      // The Bill is not what the step showed: read it again. The step stays,
+      // with the reason, when the record can still be corrected.
+      if (outcome.outcome === "refused" && outcome.answer.changed?.canOpen) void revalidate();
+    });
+    return () => {
+      heard = false;
+    };
+  }, [correctionAttempt]);
+
   // A new view takes the keyboard and the screen reader to its heading, which
-  // says what happened: the step, that the Payment is on its way, how it ended.
+  // says what happened: the step, that something is on its way, how it ended.
   const heading = useRef<HTMLHeadingElement>(null);
   const shown = useRef(view);
   useEffect(() => {
@@ -843,48 +1024,50 @@ function BillScreen({ loaderData, actionData }: Route.ComponentProps) {
     heading.current?.focus({ preventScroll: true });
   }, [view]);
 
-  // A Payment on its way is not left by accident (UI redesign §6.2).
-  const unfinished = payment.phase === "recording" || payment.phase === "unknown";
-  const blocker = useBlocker(unfinished);
+  // What is on its way is not left by accident (UI redesign §6.2).
+  const unsure = (phase: string) => phase === "recording" || phase === "unknown";
+  const unfinished = unsure(payment.phase) ? "payment" : unsure(correction.phase) ? "correction" : null;
+  const blocker = useBlocker(unfinished !== null);
   // Answered while the question was on screen: there is nothing left to ask
   // about, and the answer is what the User has to see.
   const asking = blocker.state === "blocked";
   useEffect(() => {
-    if (asking && !unfinished) blocker.reset();
+    if (asking && unfinished === null) blocker.reset();
   }, [asking, unfinished]);
   useEffect(() => {
-    if (!unfinished) return;
+    if (unfinished === null) return;
     // The browser decides whether to ask; a phone often does not.
     const ask = (event: BeforeUnloadEvent) => event.preventDefault();
     window.addEventListener("beforeunload", ask);
     return () => window.removeEventListener("beforeunload", ask);
   }, [unfinished]);
 
-  // Whether Cuentas abiertas is the history entry before this Bill, and
-  // whether the step was reached from the Bill in this history: going back,
-  // not on to a new entry, is what keeps the list's search and its place.
-  const [cameFromList] = useState(() => (location.state as { fromOpenBills?: boolean } | null)?.fromOpenBills === true);
+  // Whether a list is the history entry before this Bill, and whether the
+  // step was reached from the Bill in this history: going back, not on to a
+  // new entry, is what keeps the list's search, its pages and its place.
+  const [cameFrom] = useState(() => listBehind(location.state));
+  const listPath = cameFrom ?? "/cuentas-abiertas";
   const cameFromBill = useRef(false);
-  /** From the step to the Bill, without leaving a second entry of the Bill behind. */
+  /** From a step to the Bill, without leaving a second entry of the Bill behind. */
   function leaveStep() {
     if (cameFromBill.current) void navigate(-1);
     else void navigate(billPath, { replace: true });
   }
   const toBill = () => {
-    // Left while the Payment was on its way: this is the Bill's entry already.
-    if (!atPay) void revalidate();
+    // Left while it was on its way: this is the Bill's entry already.
+    if (!atStep) void revalidate();
     else leaveStep();
   };
   const toList = (event: MouseEvent) => {
-    const entriesBack = !atPay ? 1 : cameFromBill.current ? 2 : null;
-    if (!cameFromList || entriesBack === null) return;
+    const entriesBack = !atStep ? 1 : cameFromBill.current ? 2 : null;
+    if (cameFrom === null || entriesBack === null) return;
     event.preventDefault();
     void navigate(-entriesBack);
   };
   const listLink = (variant: "outline" | "default") => (
-    <Link to={listReturn(LIST_PATH)} onClick={toList} className={`${buttonClasses({ size: "touch", variant })} ${variant === "outline" ? "self-start" : ""}`}>
+    <Link to={listReturn(listPath)} onClick={toList} className={`${buttonClasses({ size: "touch", variant })} ${variant === "outline" ? "self-start" : ""}`}>
       {variant === "outline" ? <BackDrawing /> : null}
-      Cuentas abiertas
+      {LISTS[listPath]}
     </Link>
   );
 
@@ -900,22 +1083,94 @@ function BillScreen({ loaderData, actionData }: Route.ComponentProps) {
     if (!("problem" in snapshot)) dispatch({ type: "submitted", snapshot });
   }
 
+  /** The reason typed for the correction on screen, and for no other record. */
+  const correcting = asked ? correctionKey(asked.intent, asked.targetId) : null;
+  function sendCorrection() {
+    if (correction.phase !== "editing" || !target || !plan || correcting === null) return;
+    // Frozen at the tap, with the revision the step showed: a second tap finds
+    // the correction already sent, and the server records it at most once.
+    const snapshot = correctionSnapshot({ bill, target, plan, reason: reasonFor(correction, correcting) });
+    if (!("problem" in snapshot)) dispatchCorrection({ type: "submitted", snapshot });
+  }
+
   // The screen that sent a form reads its notice from the router's own data
   // (ticket 34); the loader's is the one a document POST left (spec §3.4).
   const answeredNotice = actionData && "notice" in actionData ? actionData.notice : null;
   const said = (answeredNotice ?? landingNotice)?.message ?? null;
   const refused = actionData && "error" in actionData ? actionData.error : null;
+  // A Payment refused for a Bill that then owes nothing, or a correction
+  // refused for a record that can no longer be corrected, has no step left to
+  // be said on: the Bill says it, until this screen has something newer to
+  // say. A correction whose step is still there says its refusal there.
+  const refusedOf = correction.phase === "editing" && correction.refusal !== null && correction.target !== null ? correctionOfKey(correction.target) : null;
+  const refusedTarget = refusedOf ? targetAt(bill, refusedOf) : null;
+  const stepGone = refusedTarget === null || correctionPlan(bill, refusedTarget, isAdmin) === null;
+  const stepRefusal =
+    said !== null
+      ? null
+      : ((payment.phase === "editing" ? payment.refusal : null) ??
+        (correction.phase === "editing" && stepGone ? correction.refusal : null));
 
   return (
     <>
-      {view === "bill" || payment.phase === "editing" ? null : payment.phase === "confirmed" ? (
-        <Confirmed payment={payment} bill={bill} heading={heading} list={listLink("default")} onOpenBill={toBill} />
-      ) : payment.phase === "gone" ? (
-        <Gone payment={payment} bill={bill} heading={heading} list={listLink("default")} />
-      ) : (
-        <Pending payment={payment} bill={bill} heading={heading} onRetry={() => dispatch({ type: "retried" })} />
-      )}
-      {view === "pay" && payment.phase === "editing" ? (
+      {sent === "payment" && payment.phase === "confirmed" ? (
+        <Confirmed
+          {...billPaymentOutcome(payment.snapshot, payment.result)}
+          canOpen={payment.result.canOpen}
+          heading={heading}
+          list={listLink("default")}
+          onOpenBill={toBill}
+        >
+          <Sent bill={bill} rows={sentPayment(payment.snapshot)} />
+        </Confirmed>
+      ) : sent === "payment" && payment.phase === "gone" ? (
+        <Gone title="No se registró el pago" heading={heading} list={listLink("default")}>
+          <Sent bill={bill} rows={sentPayment(payment.snapshot)} />
+        </Gone>
+      ) : sent === "payment" && (payment.phase === "recording" || payment.phase === "unknown") ? (
+        <Pending
+          recording={payment.phase === "recording"}
+          title={billPaymentRecordingText(payment.snapshot)}
+          unknown="El pago pudo registrarse o no. Volver a intentar no lo registra dos veces."
+          ended="Tu sesión terminó antes de saberlo. Entra de nuevo y revisa Mi día antes de repetir el pago."
+          sessionEnded={payment.phase === "unknown" && payment.sessionEnded}
+          check={{ to: "/mi-dia", label: "Revisar en Mi día" }}
+          heading={heading}
+          onRetry={() => dispatch({ type: "retried" })}
+        >
+          <Sent bill={bill} rows={sentPayment(payment.snapshot)} />
+        </Pending>
+      ) : sent === "correction" && correction.phase === "confirmed" ? (
+        <Confirmed
+          {...correctionOutcome(correction.snapshot, correction.result)}
+          canOpen={correction.result.canOpen}
+          heading={heading}
+          list={listLink("default")}
+          onOpenBill={toBill}
+        >
+          <Sent bill={bill} rows={sentCorrection(correction.snapshot)} />
+        </Confirmed>
+      ) : sent === "correction" && correction.phase === "gone" ? (
+        <Gone title="No se registró la corrección" heading={heading} list={listLink("default")}>
+          <Sent bill={bill} rows={sentCorrection(correction.snapshot)} />
+        </Gone>
+      ) : sent === "correction" && (correction.phase === "recording" || correction.phase === "unknown") ? (
+        <Pending
+          recording={correction.phase === "recording"}
+          title={correctionRecordingText(correction.snapshot)}
+          // A Worker has no Historial to look in (spec §4.1): an Admin does.
+          unknown={`La corrección pudo registrarse o no. Volver a intentar no la registra dos veces.${
+            isAdmin ? "" : " Si sigue sin saberse, pide a un administrador que revise la cuenta."
+          }`}
+          ended="Tu sesión terminó antes de saberlo. Entra de nuevo y revisa la cuenta antes de repetir la corrección."
+          sessionEnded={correction.phase === "unknown" && correction.sessionEnded}
+          check={isAdmin ? { to: "/historial", label: "Revisar en Historial" } : null}
+          heading={heading}
+          onRetry={() => dispatchCorrection({ type: "retried" })}
+        >
+          <Sent bill={bill} rows={sentCorrection(correction.snapshot)} />
+        </Pending>
+      ) : view === "pay" && payment.phase === "editing" ? (
         <Pay
           bill={bill}
           payment={payment}
@@ -924,13 +1179,25 @@ function BillScreen({ loaderData, actionData }: Route.ComponentProps) {
           onBack={leaveStep}
           onSend={send}
         />
-      ) : view === "bill" ? (
+      ) : view === "correct" && correction.phase === "editing" && target && plan && correcting !== null ? (
+        <Correct
+          // Another record is another step: what a tap found missing is its own.
+          key={correcting}
+          bill={bill}
+          target={target}
+          plan={plan}
+          reason={reasonFor(correction, correcting)}
+          refusal={correction.target === correcting ? correction.refusal : null}
+          heading={heading}
+          onType={(reason) => dispatchCorrection({ type: "typed", target: correcting, reason })}
+          onBack={leaveStep}
+          onSend={sendCorrection}
+        />
+      ) : (
         <Overview
           data={loaderData}
           heading={heading}
-          // A Payment refused for a Bill that then owes nothing is said here,
-          // until this screen has something newer to say.
-          error={refused ?? (said === null && payment.phase === "editing" ? payment.refusal : null)}
+          error={refused ?? stepRefusal}
           said={said}
           list={listLink("outline")}
           payHref={`${billPath}?${PAY_STEP_PARAM}=${PAY_STEP}`}
@@ -939,13 +1206,24 @@ function BillScreen({ loaderData, actionData }: Route.ComponentProps) {
             // The last Payment's refusal was about the Bill as it was.
             if (payment.phase === "editing") dispatch({ type: "typed", draft: payment.draft });
           }}
+          onCorrect={(intent, targetId) => {
+            cameFromBill.current = true;
+            // What was typed for this record is kept; the last refusal was
+            // about the Bill as it was.
+            const opened = correctionKey(intent, targetId);
+            dispatchCorrection({ type: "typed", target: opened, reason: reasonFor(correction, opened) });
+          }}
         />
-      ) : null}
+      )}
 
       <ConfirmDialog
-        open={asking && unfinished}
-        title="El pago puede estarse registrando"
-        description="Salir no cancela el registro. Antes de repetir el pago, revisa Mi día."
+        open={asking && unfinished !== null}
+        title={unfinished === "correction" ? "La corrección puede estarse registrando" : "El pago puede estarse registrando"}
+        description={
+          unfinished === "correction"
+            ? "Salir no cancela el registro. Antes de repetir la corrección, revisa la cuenta."
+            : "Salir no cancela el registro. Antes de repetir el pago, revisa Mi día."
+        }
         confirm="Salir"
         cancel="Quedarme aquí"
         onConfirm={() => blocker.proceed?.()}
@@ -958,6 +1236,6 @@ function BillScreen({ loaderData, actionData }: Route.ComponentProps) {
 }
 
 export default function Bill(props: Route.ComponentProps) {
-  // Another Bill is another Payment: it starts from nothing.
+  // Another Bill is another Payment and another correction: each starts from nothing.
   return <BillScreen key={props.loaderData.bill.id} {...props} />;
 }

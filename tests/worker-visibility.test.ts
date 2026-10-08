@@ -143,10 +143,10 @@ it("a Worker's pages carry no Stock, no other User's totals, no History and no P
   // ---- An Admin voids Carla's Bill and records an Adjustment ----
 
   const voided = await ana.fetch(
-    `/cuentas/${mineBill}`,
+    `/cuentas/${mineBill}/corregir`,
     form({ intent: "cancelar-cuenta", reason: "Era una prueba", revision: "0" }),
   );
-  expect(voided.status, "the Admin voids Carla's Bill").toBe(302);
+  expect(voided.status, "the Admin voids Carla's Bill").toBe(200);
   const adjusted = await ana.fetch(
     "/inventario",
     form({ intent: "record-adjustment", itemId: mine.id, reason: "waste", units: "2" }),

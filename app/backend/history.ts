@@ -2,7 +2,7 @@ import { Effect, Schema } from "effect";
 
 import { ADJUSTMENT_REASONS, type AdjustmentReason } from "~/shared/adjustment";
 import type { Cursor } from "~/shared/cursor";
-import type { Instant } from "~/shared/day";
+import type { Day, Instant } from "~/shared/day";
 import type { Centavos } from "~/shared/money";
 import type { PaymentMethod } from "~/shared/payment";
 
@@ -13,7 +13,9 @@ import { Db, type Param } from "./db";
 /**
  * Historial (spec §5.7, §6.2, §7.4, §10.4): the corrections and Adjustments,
  * newest first, 50 per page. Every entry is a fact of its own; the record it
- * corrects is never touched (ADR 0002).
+ * corrects is never touched (ADR 0002), and an entry carries that record as
+ * it was made: who added the Line or received the Payment and when, which is
+ * also the Day whose figures the correction changed.
  *
  * The page is a keyset over the union of the six fact tables, each read by
  * its own index on time (`line_removals_by_time`, `payment_removals_by_time`,
@@ -47,10 +49,14 @@ export interface RemovedLineEntry {
   readonly billId: string;
   /** The Bill's Customer, its note, or null for neither. */
   readonly billLabel: string | null;
+  readonly billDay: Day;
   readonly itemId: string;
   readonly itemName: string;
   readonly quantity: number;
   readonly amount: Centavos;
+  /** The User who added the Line, and when. */
+  readonly addedByName: string;
+  readonly addedAt: Instant;
 }
 
 /** A Payment an Admin removed from a Bill (spec §5.7). */
@@ -62,8 +68,12 @@ export interface RemovedPaymentEntry {
   readonly reason: string;
   readonly billId: string;
   readonly billLabel: string | null;
+  readonly billDay: Day;
   readonly amount: Centavos;
   readonly method: PaymentMethod;
+  /** The User who received the Payment, and when. */
+  readonly receivedByName: string;
+  readonly receivedAt: Instant;
 }
 
 /** A Bill an Admin voided (spec §5.7). */
@@ -75,7 +85,10 @@ export interface VoidedBillEntry {
   readonly reason: string;
   readonly billId: string;
   readonly billLabel: string | null;
+  readonly billDay: Day;
+  /** What the Bill added up to and had been paid when it was voided: a Voided Bill keeps both. */
   readonly total: Centavos;
+  readonly paid: Centavos;
 }
 
 /** A change to a Bill's Customer or note (spec §5.3, §5.7). */
@@ -85,6 +98,8 @@ export interface BillEditEntry {
   readonly at: Instant;
   readonly byName: string;
   readonly billId: string;
+  /** Which Bill, in words the edit itself cannot change. */
+  readonly billDay: Day;
   readonly field: BillEditField;
   /** The Customer's name, or the note as it was; null when there was none. */
   readonly previous: string | null;
@@ -116,6 +131,10 @@ export interface AdjustmentCancellationEntry {
   readonly adjustmentId: string;
   readonly adjustmentReason: AdjustmentReason;
   readonly units: number;
+  readonly note: string | null;
+  /** The User who recorded the Adjustment, and when. */
+  readonly recordedByName: string;
+  readonly recordedAt: Instant;
   readonly itemId: string;
   readonly itemName: string;
 }
@@ -162,10 +181,13 @@ const RemovedLineRow = Schema.Struct({
   reason: Schema.NullOr(Schema.String),
   billId: Schema.String,
   billLabel: Schema.NullOr(Schema.String),
+  billDay: Schema.String,
   itemId: Schema.String,
   itemName: Schema.String,
   quantity: Schema.Int,
   amount: Schema.Int,
+  addedByName: Schema.String,
+  addedAt: Schema.Int,
 });
 
 const RemovedPaymentRow = Schema.Struct({
@@ -175,8 +197,11 @@ const RemovedPaymentRow = Schema.Struct({
   reason: Schema.String,
   billId: Schema.String,
   billLabel: Schema.NullOr(Schema.String),
+  billDay: Schema.String,
   amount: Schema.Int,
   method: Schema.Literals(["cash", "transfer"]),
+  receivedByName: Schema.String,
+  receivedAt: Schema.Int,
 });
 
 const VoidedBillRow = Schema.Struct({
@@ -186,7 +211,9 @@ const VoidedBillRow = Schema.Struct({
   reason: Schema.String,
   billId: Schema.String,
   billLabel: Schema.NullOr(Schema.String),
+  billDay: Schema.String,
   total: Schema.Int,
+  paid: Schema.Int,
 });
 
 const BillEditRow = Schema.Struct({
@@ -194,6 +221,7 @@ const BillEditRow = Schema.Struct({
   at: Schema.Int,
   byName: Schema.String,
   billId: Schema.String,
+  billDay: Schema.String,
   field: Schema.Literals(["customer", "note"]),
   previous: Schema.NullOr(Schema.String),
   next: Schema.NullOr(Schema.String),
@@ -218,6 +246,9 @@ const AdjustmentCancellationRow = Schema.Struct({
   adjustmentId: Schema.String,
   adjustmentReason: Schema.Literals(ADJUSTMENT_REASONS),
   units: Schema.Int,
+  note: Schema.NullOr(Schema.String),
+  recordedByName: Schema.String,
+  recordedAt: Schema.Int,
   itemId: Schema.String,
   itemName: Schema.String,
 });
@@ -246,14 +277,16 @@ export const listHistory = Effect.fn("listHistory")(function* (cursor: HistoryCu
   const removedLines = yield* read(
     RemovedLineRow,
     `SELECT r.id, r.removed_at AS at, u.name AS byName, r.reason,
-            l.bill_id AS billId, COALESCE(c.name, b.note) AS billLabel,
+            l.bill_id AS billId, COALESCE(c.name, b.note) AS billLabel, b.day AS billDay,
             l.item_id AS itemId, i.name AS itemName, l.quantity,
-            l.quantity * l.unit_price AS amount
+            l.quantity * l.unit_price AS amount,
+            au.name AS addedByName, l.added_at AS addedAt
      FROM line_removals r
      JOIN lines l ON l.id = r.line_id
      JOIN bills b ON b.id = l.bill_id
      JOIN items i ON i.id = l.item_id
      JOIN users u ON u.id = r.removed_by
+     JOIN users au ON au.id = l.added_by
      LEFT JOIN customers c ON c.id = b.customer_id
      WHERE 1 = 1`,
     "r.removed_at",
@@ -263,12 +296,14 @@ export const listHistory = Effect.fn("listHistory")(function* (cursor: HistoryCu
   const removedPayments = yield* read(
     RemovedPaymentRow,
     `SELECT r.id, r.removed_at AS at, u.name AS byName, r.reason,
-            p.bill_id AS billId, COALESCE(c.name, b.note) AS billLabel,
-            p.amount, p.method
+            p.bill_id AS billId, COALESCE(c.name, b.note) AS billLabel, b.day AS billDay,
+            p.amount, p.method,
+            ru.name AS receivedByName, p.received_at AS receivedAt
      FROM payment_removals r
      JOIN payments p ON p.id = r.payment_id
      JOIN bills b ON b.id = p.bill_id
      JOIN users u ON u.id = r.removed_by
+     JOIN users ru ON ru.id = p.received_by
      LEFT JOIN customers c ON c.id = b.customer_id
      WHERE 1 = 1`,
     "r.removed_at",
@@ -278,7 +313,8 @@ export const listHistory = Effect.fn("listHistory")(function* (cursor: HistoryCu
   const voidedBills = yield* read(
     VoidedBillRow,
     `SELECT v.id, v.voided_at AS at, u.name AS byName, v.reason,
-            b.id AS billId, COALESCE(c.name, b.note) AS billLabel, b.total
+            b.id AS billId, COALESCE(c.name, b.note) AS billLabel, b.day AS billDay,
+            b.total, b.paid
      FROM bill_voids v
      JOIN bills b ON b.id = v.bill_id
      JOIN users u ON u.id = v.voided_by
@@ -290,10 +326,11 @@ export const listHistory = Effect.fn("listHistory")(function* (cursor: HistoryCu
 
   const billEdits = yield* read(
     BillEditRow,
-    `SELECT e.id, e.edited_at AS at, u.name AS byName, e.bill_id AS billId, e.field,
+    `SELECT e.id, e.edited_at AS at, u.name AS byName, e.bill_id AS billId, b.day AS billDay, e.field,
             CASE WHEN e.field = 'customer' THEN pc.name ELSE e.previous_value END AS previous,
             CASE WHEN e.field = 'customer' THEN nc.name ELSE e.new_value END AS next
      FROM bill_edits e
+     JOIN bills b ON b.id = e.bill_id
      JOIN users u ON u.id = e.edited_by
      LEFT JOIN customers pc ON e.field = 'customer' AND pc.id = e.previous_value
      LEFT JOIN customers nc ON e.field = 'customer' AND nc.id = e.new_value
@@ -317,12 +354,14 @@ export const listHistory = Effect.fn("listHistory")(function* (cursor: HistoryCu
   const cancellations = yield* read(
     AdjustmentCancellationRow,
     `SELECT c.id, c.cancelled_at AS at, u.name AS byName, c.reason,
-            a.id AS adjustmentId, a.reason AS adjustmentReason, a.units,
+            a.id AS adjustmentId, a.reason AS adjustmentReason, a.units, a.note,
+            ru.name AS recordedByName, a.recorded_at AS recordedAt,
             a.item_id AS itemId, i.name AS itemName
      FROM adjustment_cancellations c
      JOIN adjustments a ON a.id = c.adjustment_id
      JOIN items i ON i.id = a.item_id
      JOIN users u ON u.id = c.cancelled_by
+     JOIN users ru ON ru.id = a.recorded_by
      WHERE 1 = 1`,
     "c.cancelled_at",
     "c.id",

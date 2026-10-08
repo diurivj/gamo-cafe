@@ -101,7 +101,6 @@ test("Cuenta shows no Payment and no correction as recorded before the server an
   const held = await holdSubmissions(page);
   const figures = summary(page);
   const payments = page.getByRole("list", { name: "Pagos" }).getByRole("listitem");
-  const formOf = (button: Locator) => page.locator("form", { has: button });
 
   // Cliente y nota.
   await page.getByLabel("Nota (opcional)").fill("Mesa 2");
@@ -128,33 +127,43 @@ test("Cuenta shows no Payment and no correction as recorded before the server an
   await expect(payments).toHaveCount(2);
   await settled(page);
 
+  // A correction: said to be on its way, and nothing more, until the answer
+  // (e2e/corrections.spec.ts looks at those screens closely).
+  const correct = async (link: string, action: string, reason: string) => {
+    await page.getByRole("link", { name: link, exact: true }).click();
+    await page.getByLabel("Motivo").fill(reason);
+    await page.getByRole("button", { name: action, exact: true }).click();
+    await held.waitFor(1);
+  };
+
   // Removing a Payment.
-  const removePayment = page.getByRole("button", { name: "Quitar pago de $5.00" });
-  await formOf(removePayment).getByLabel("Motivo").fill("Se cobró de más");
-  await tap(held, removePayment);
-  await expect(page.getByText(/Quitado por/)).toHaveCount(0);
-  await expect(figures).toContainText("Pagado $15.00");
+  await correct("Quitar pago de $5.00", "Quitar pago de $5.00", "Se cobró de más");
+  await expect(page.getByRole("heading", { name: "Quitando pago de $5.00 en efectivo…", level: 1 })).toBeVisible();
+  await expect(page.getByText(/Pago quitado|Quitado por/)).toHaveCount(0);
   await held.release();
+  await expect(page.getByRole("status")).toHaveText("$5.00 en efectivo. La cuenta debe $33.50.");
+  await seeBill(page);
   await expect(page.getByText(/Quitado por Ana .* Se cobró de más/)).toBeVisible();
   await expect(figures).toContainText("Pagado $10.00");
   await settled(page);
 
   // Removing a Line.
-  const removeLine = page.getByRole("button", { name: "Quitar 1 × Agua mineral" });
-  await formOf(removeLine).getByLabel("Motivo").fill("No se lo llevó");
-  await tap(held, removeLine);
-  await expect(figures).toContainText("Total $43.50");
-  await expect(page.getByText(/Quitado por Ana .* No se lo llevó/)).toHaveCount(0);
+  await correct("Quitar 1 × Agua mineral", "Quitar 1 × Agua mineral", "No se lo llevó");
+  await expect(page.getByRole("heading", { name: "Quitando 1 × Agua mineral…", level: 1 })).toBeVisible();
+  await expect(page.getByText(/Producto quitado|Quitado por Ana .* No se lo llevó/)).toHaveCount(0);
   await held.release();
+  await expect(page.getByRole("status")).toHaveText("1 × Agua mineral. La cuenta suma $25.00 y debe $15.00.");
+  await seeBill(page);
   await expect(figures).toContainText("Total $25.00");
   await settled(page);
 
   // Voiding the Bill.
-  const cancelar = page.getByRole("button", { name: "Cancelar cuenta" });
-  await formOf(cancelar).getByLabel("Motivo").fill("Se abrió por error");
-  await tap(held, cancelar);
-  await expect(page.getByText(/Cancelada/)).toHaveCount(0);
+  await correct("Cancelar esta cuenta", "Cancelar cuenta", "Se abrió por error");
+  await expect(page.getByRole("heading", { name: "Cancelando cuenta…", level: 1 })).toBeVisible();
+  await expect(page.getByText(/Cuenta cancelada|Cancelada por/)).toHaveCount(0);
   await held.release();
+  await expect(page.getByRole("heading", { name: "Cuenta cancelada", level: 1 })).toBeVisible();
+  await seeBill(page);
   await expect(page.getByText(/Cancelada por Ana/)).toBeVisible();
 });
 

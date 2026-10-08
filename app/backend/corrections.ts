@@ -76,6 +76,18 @@ const PaymentRow = Schema.Struct({ amount: Schema.Int, removalId: Schema.NullOr(
 
 type BillFigures = typeof BillRow.Type;
 
+/**
+ * What a recorded correction answers: its fact's id and the Bill's figures as
+ * it left them, which is all the screen says afterwards. Nothing is read again
+ * for it.
+ */
+export interface Corrected {
+  readonly id: string;
+  readonly total: Centavos;
+  readonly paid: Centavos;
+  readonly voided: boolean;
+}
+
 const readBill = (billId: string) =>
   Effect.gen(function* () {
     const db = yield* Db;
@@ -131,9 +143,6 @@ export interface RemoveLineInput {
  * an Admin with a reason otherwise, refused when the removal would leave the
  * Bill's total below its Payments. The Line's units return to Stock from the
  * Line's own `moved_stock` fact.
- *
- * Returns whether the Bill is still Open: a Worker whose removal leaves the
- * Bill Paid no longer opens it (§4.1), so the route sends them to the list.
  */
 export const removeLine = Effect.fn("removeLine")(function* (input: RemoveLineInput) {
   const db = yield* Db;
@@ -200,7 +209,7 @@ export const removeLine = Effect.fn("removeLine")(function* (input: RemoveLineIn
   ]);
 
   if (recorded!.changes === 0) return yield* classifyRemoveLine(billId, lineId, expectedRevision, reason, user);
-  return { id, leftOpen: remaining > bill.paid };
+  return { id, total: remaining, paid: bill.paid, voided: false } satisfies Corrected;
 });
 
 /** Why the removal's fact wrote nothing, from the rows as they are now. */
@@ -293,7 +302,7 @@ export const removePayment = Effect.fn("removePayment")(function* (input: Remove
   ]);
 
   if (recorded!.changes === 0) return yield* classifyRemovePayment(billId, paymentId, expectedRevision, reason);
-  return { id };
+  return { id, total: bill.total, paid: bill.paid - payment.amount, voided: false } satisfies Corrected;
 });
 
 /** Why the removal's fact wrote nothing, from the rows as they are now. */
@@ -365,7 +374,7 @@ export const voidBill = Effect.fn("voidBill")(function* (input: VoidBillInput) {
   ]);
 
   if (recorded!.changes === 0) return yield* classifyVoid(billId);
-  return { id };
+  return { id, total: bill.total, paid: bill.paid, voided: true } satisfies Corrected;
 });
 
 /** Why the void's fact wrote nothing, from the Bill as it is now. */
@@ -374,4 +383,77 @@ const classifyVoid = Effect.fnUntraced(function* (billId: string) {
   if (!bill) return yield* new BillNotFound({ billId });
   if (bill.state === "voided") return yield* new BillIsVoided({ billId });
   return yield* new BillChanged({ billId });
+});
+
+/** A correction as a form names it: the Line, the Payment, or the Bill itself. */
+export type CorrectionAsked =
+  | { readonly intent: "quitar-linea"; readonly billId: string; readonly lineId: string }
+  | { readonly intent: "quitar-pago"; readonly billId: string; readonly paymentId: string }
+  | { readonly intent: "cancelar-cuenta"; readonly billId: string };
+
+const CorrectedRow = Schema.Struct({
+  id: Schema.String,
+  total: Schema.Int,
+  paid: Schema.Int,
+  state: BillStateSchema,
+});
+
+/**
+ * The correction this User already recorded on that record with that very
+ * reason, with the Bill as it is now, or `undefined` when they recorded none.
+ * A correction of theirs with another reason is not the form that was sent.
+ *
+ * It is how a correction sent again is answered (UI redesign §6.1). A record
+ * is corrected at most once and every correction moves the Bill's revision,
+ * so the same form sent after an answer was lost is refused as stale and
+ * writes nothing; this tells the User whose first attempt was recorded that
+ * it was, in place of "the Bill changed". It reads and decides nothing: the
+ * rules stay in the operations above.
+ */
+export const recordedCorrection = Effect.fn("recordedCorrection")(function* (
+  asked: CorrectionAsked,
+  sentReason?: string | null,
+) {
+  const db = yield* Db;
+  const user = yield* CurrentUser;
+  const reason = trimToNull(sentReason);
+
+  const row =
+    asked.intent === "quitar-linea"
+      ? yield* db.first(
+          CorrectedRow,
+          `SELECT r.id, b.total, b.paid, b.state
+           FROM line_removals r
+           JOIN lines l ON l.id = r.line_id
+           JOIN bills b ON b.id = l.bill_id
+           WHERE r.line_id = ? AND l.bill_id = ? AND r.removed_by = ? AND r.reason IS ?`,
+          asked.lineId,
+          asked.billId,
+          user.id,
+          reason,
+        )
+      : asked.intent === "quitar-pago"
+        ? yield* db.first(
+            CorrectedRow,
+            `SELECT r.id, b.total, b.paid, b.state
+             FROM payment_removals r
+             JOIN payments p ON p.id = r.payment_id
+             JOIN bills b ON b.id = p.bill_id
+             WHERE r.payment_id = ? AND p.bill_id = ? AND r.removed_by = ? AND r.reason IS ?`,
+            asked.paymentId,
+            asked.billId,
+            user.id,
+            reason,
+          )
+        : yield* db.first(
+            CorrectedRow,
+            `SELECT v.id, b.total, b.paid, b.state
+             FROM bill_voids v JOIN bills b ON b.id = v.bill_id
+             WHERE v.bill_id = ? AND v.voided_by = ? AND v.reason IS ?`,
+            asked.billId,
+            user.id,
+            reason,
+          );
+  if (!row) return undefined;
+  return { id: row.id, total: row.total, paid: row.paid, voided: row.state === "voided" } satisfies Corrected;
 });

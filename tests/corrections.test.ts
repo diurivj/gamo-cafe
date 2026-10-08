@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { getBill, listOpenBills, recordSelection, takePayment } from "~/backend/bills";
 import { updateItem } from "~/backend/catalog";
-import { removeLine, removePayment, voidBill } from "~/backend/corrections";
+import { recordedCorrection, removeLine, removePayment, voidBill } from "~/backend/corrections";
 import { Db } from "~/backend/db";
 import { stockOf } from "~/backend/stock";
 
@@ -687,6 +687,123 @@ describe("voiding a Bill", () => {
 
         expect(fresh.id).not.toBe(bill.id);
         expect((yield* listOpenBills("Familia anulada")).bills.map((row) => row.id)).toEqual([fresh.id]);
+      }),
+    ));
+});
+
+describe("what a correction answers", () => {
+  it("is the Bill's figures as the correction left them", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const item = yield* seedItem({ name: "Cifras tras corregir", price: 1000, startingStock: 10, by: ana });
+        const bill = yield* openBill(ana, item.id, 2);
+        yield* recordSelection({ items: [{ itemId: item.id, quantity: 1 }], billId: bill.id }).pipe(as(ana));
+        let seen = yield* getBill(bill.id).pipe(as(ana));
+        const paid = yield* takePayment({
+          billId: bill.id,
+          amount: 500,
+          method: "cash",
+          expectedRevision: seen.revision,
+        }).pipe(as(ana));
+        seen = yield* getBill(bill.id).pipe(as(ana));
+        // A Line says whether it moved Stock: what its removal returns (spec §5.7).
+        expect(seen.lines.map((line) => line.movedStock)).toEqual([true, true]);
+
+        const line = yield* removeLine({
+          billId: bill.id,
+          lineId: seen.lines[1]!.id,
+          reason: "De más",
+          expectedRevision: seen.revision,
+        }).pipe(as(ana));
+        expect(line).toMatchObject({ total: 2000, paid: 500, voided: false });
+
+        seen = yield* getBill(bill.id).pipe(as(ana));
+        const payment = yield* removePayment({
+          billId: bill.id,
+          paymentId: paid.id,
+          reason: "Por error",
+          expectedRevision: seen.revision,
+        }).pipe(as(ana));
+        expect(payment).toMatchObject({ total: 2000, paid: 0, voided: false });
+
+        seen = yield* getBill(bill.id).pipe(as(ana));
+        const voided = yield* voidBill({ billId: bill.id, reason: "Prueba", expectedRevision: seen.revision }).pipe(as(ana));
+        expect(voided).toMatchObject({ total: 2000, paid: 0, voided: true });
+      }),
+    ));
+});
+
+describe("a correction this User already recorded", () => {
+  it("is found for the Line, the Payment and the Bill, with the Bill as it is now", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const item = yield* seedItem({ name: "Corrección ya hecha", price: 1000, startingStock: 10, by: ana });
+        const bill = yield* openBill(ana, item.id, 2);
+        yield* recordSelection({ items: [{ itemId: item.id, quantity: 1 }], billId: bill.id }).pipe(as(ana));
+        let seen = yield* getBill(bill.id).pipe(as(ana));
+        const paid = yield* takePayment({
+          billId: bill.id,
+          amount: 500,
+          method: "cash",
+          expectedRevision: seen.revision,
+        }).pipe(as(ana));
+        seen = yield* getBill(bill.id).pipe(as(ana));
+        const lineId = seen.lines[1]!.id;
+        const line = { intent: "quitar-linea", billId: bill.id, lineId } as const;
+        const payment = { intent: "quitar-pago", billId: bill.id, paymentId: paid.id } as const;
+        const whole = { intent: "cancelar-cuenta", billId: bill.id } as const;
+
+        // Nothing was corrected yet.
+        expect(yield* recordedCorrection(line).pipe(as(ana))).toBeUndefined();
+        expect(yield* recordedCorrection(payment).pipe(as(ana))).toBeUndefined();
+        expect(yield* recordedCorrection(whole).pipe(as(ana))).toBeUndefined();
+
+        const removed = yield* removeLine({ billId: bill.id, lineId, reason: "De más", expectedRevision: seen.revision }).pipe(as(ana));
+        expect(yield* recordedCorrection(line, " De más ").pipe(as(ana))).toEqual({ id: removed.id, total: 2000, paid: 500, voided: false });
+
+        seen = yield* getBill(bill.id).pipe(as(ana));
+        const unpaid = yield* removePayment({
+          billId: bill.id,
+          paymentId: paid.id,
+          reason: "Por error",
+          expectedRevision: seen.revision,
+        }).pipe(as(ana));
+        expect(yield* recordedCorrection(payment, "Por error").pipe(as(ana))).toEqual({
+          id: unpaid.id,
+          total: 2000,
+          paid: 0,
+          voided: false,
+        });
+        // The Line's is answered with the Bill as it is now, not as it was then.
+        expect(yield* recordedCorrection(line, "De más").pipe(as(ana))).toMatchObject({ id: removed.id, paid: 0 });
+        // Another reason, or none, is not the correction that was recorded.
+        expect(yield* recordedCorrection(line, "Otra cosa").pipe(as(ana))).toBeUndefined();
+        expect(yield* recordedCorrection(payment).pipe(as(ana))).toBeUndefined();
+
+        seen = yield* getBill(bill.id).pipe(as(ana));
+        const voided = yield* voidBill({ billId: bill.id, reason: "Prueba", expectedRevision: seen.revision }).pipe(as(ana));
+        expect(yield* recordedCorrection(whole, "Prueba").pipe(as(ana))).toEqual({ id: voided.id, total: 2000, paid: 0, voided: true });
+      }),
+    ));
+
+  it("is not another User's, nor a record of another Bill", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const carla = yield* seedUser("admin", "Carla");
+        const item = yield* seedItem({ name: "Corrección ajena", price: 1000, startingStock: 10, by: ana });
+        const bill = yield* openBill(ana, item.id, 1);
+        const other = yield* openBill(ana, item.id, 1);
+        const seen = yield* getBill(bill.id).pipe(as(ana));
+        const lineId = seen.lines[0]!.id;
+        yield* removeLine({ billId: bill.id, lineId, expectedRevision: seen.revision }).pipe(as(ana));
+
+        expect(yield* recordedCorrection({ intent: "quitar-linea", billId: bill.id, lineId }).pipe(as(carla))).toBeUndefined();
+        expect(
+          yield* recordedCorrection({ intent: "quitar-linea", billId: other.id, lineId }).pipe(as(ana)),
+        ).toBeUndefined();
       }),
     ));
 });

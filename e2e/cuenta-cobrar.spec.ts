@@ -211,8 +211,8 @@ test("an Admin finds a Bill, adds Items, takes a part and the rest, and opens th
   await expect(summary(page)).toContainText("Pagado $87.00");
   await expect(main.getByRole("link", { name: "Cobrar", exact: true })).toHaveCount(0);
   await expect(main.getByRole("link", { name: "Agregar productos" })).toHaveCount(0);
-  await expect(main.getByRole("button", { name: /^Quitar pago de / })).toHaveCount(2);
-  await expect(page.getByRole("region", { name: "Cancelar cuenta" })).toBeVisible();
+  await expect(main.getByRole("link", { name: /^Quitar pago de / })).toHaveCount(2);
+  await expect(main.getByRole("link", { name: "Cancelar esta cuenta" })).toBeVisible();
 
   expect(await query("SELECT amount, method FROM payments ORDER BY rowid")).toEqual([
     { amount: 3700, method: "transfer" },

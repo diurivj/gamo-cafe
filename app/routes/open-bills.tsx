@@ -104,7 +104,7 @@ export default function OpenBills({ loaderData }: Route.ComponentProps) {
           {bills.map((bill) => (
             <li key={bill.id} data-bill-id={bill.id}>
               {/* Cuenta goes back to this entry, not on to a new list. */}
-              <Link to={`/cuentas/${bill.id}`} state={{ fromOpenBills: true }} className="block rounded-2xl">
+              <Link to={`/cuentas/${bill.id}`} state={{ fromList: "/cuentas-abiertas" }} className="block rounded-2xl">
                 <Card size="sm" className="transition-colors hover:bg-muted/60 active:bg-muted">
                   <CardContent className="flex flex-col gap-2">
                     <span className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">

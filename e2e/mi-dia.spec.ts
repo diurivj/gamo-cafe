@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { removeLine, voidBill } from "./support/bill";
 import { goTo } from "./support/navigate";
 import { leaveOpen, pay } from "./support/sell";
 
@@ -50,10 +51,10 @@ test("a removed Line drops out of Mi día", async ({ page, signInAs, addCategory
   await expect(page.getByRole("region", { name: "Vendido" })).toContainText("1 × Café de olla");
 
   // The Worker removes the Line from the Open Bill; the Bill is Paid with a
-  // zero total, so they land on Cuentas abiertas.
+  // zero total, which a Worker may not open: the result is all they see of it.
   await page.goto(`/cuentas/${billId}`);
-  await page.getByRole("button", { name: "Quitar 1 × Café de olla" }).click();
-  await expect(page).toHaveURL(/cuentas-abiertas/);
+  await removeLine(page, "1 × Café de olla");
+  await expect(page.getByRole("button", { name: "Ver cuenta" })).toHaveCount(0);
 
   await goTo(page, "Mi día");
   await expect(page.getByRole("region", { name: "Vendido" })).toContainText("Todavía no has vendido nada hoy.");
@@ -73,10 +74,7 @@ test("a Voided Bill drops out of Mi día", async ({ page, signInAs, addCategory,
 
   // The Admin voids the Bill, with a reason (spec §5.7).
   await page.goto(`/cuentas/${billId}`);
-  const cancelar = page.getByRole("region", { name: "Cancelar cuenta" });
-  await cancelar.getByLabel("Motivo").fill("La cuenta era una prueba");
-  await cancelar.getByRole("button", { name: "Cancelar cuenta" }).click();
-  await expect(page.getByRole("status")).toContainText("Cuenta cancelada.");
+  await voidBill(page, "La cuenta era una prueba");
 
   await goTo(page, "Mi día");
   await expect(page.getByRole("region", { name: "Vendido" })).toContainText("Todavía no has vendido nada hoy.");

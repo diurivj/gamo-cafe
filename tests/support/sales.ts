@@ -1,4 +1,5 @@
 import type { BillPaymentRefusal, BillPaymentResult } from "~/shared/bill-payment";
+import type { CorrectionRefusal, CorrectionResult } from "~/shared/correction";
 import type { SaleRefusal, SaleResult } from "~/shared/sale";
 
 import type { SignedIn } from "./auth";
@@ -74,4 +75,23 @@ export async function recordPayment(
   const response = await who.fetch(paymentPath(billId), { method: "POST", body: new URLSearchParams(fields) });
   const answer = (await response.clone().json()) as Partial<{ payment: BillPaymentResult } & BillPaymentRefusal>;
   return { response, payment: answer.payment, error: answer.error, changed: answer.changed };
+}
+
+/** Where Cuenta sends a correction (`app/routes/resources/record-correction.ts`). */
+export const correctionPath = (billId: string) => `/cuentas/${billId}/corregir`;
+
+/**
+ * Sends one correction as Cuenta does and reads the route's JSON answer: the
+ * Bill as the correction left it, or the refusal.
+ *
+ *     const { correction } = await recordCorrection(ana, bill.id, { intent: "quitar-linea", lineId, revision: "3", reason: "De más" });
+ */
+export async function recordCorrection(
+  who: Pick<SignedIn, "fetch">,
+  billId: string,
+  fields: Record<string, string>,
+) {
+  const response = await who.fetch(correctionPath(billId), { method: "POST", body: new URLSearchParams(fields) });
+  const answer = (await response.clone().json()) as Partial<{ correction: CorrectionResult } & CorrectionRefusal>;
+  return { response, correction: answer.correction, error: answer.error, changed: answer.changed };
 }

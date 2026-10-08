@@ -279,8 +279,10 @@ it("issues six statements and reads a bounded number of rows, whatever the histo
       expect(deep.page.entries).toHaveLength(HISTORY_PAGE_SIZE);
       expect(deep.rowsRead).toBeLessThanOrEqual(small.rowsRead + 50);
       // Bounded by the six reads and their 51-row limits, not by the tables:
-      // one unindexed branch would read at least its 500 rows alone.
-      expect(deep.rowsRead).toBeLessThan(1_500);
+      // each entry also reads the record it corrects and that record's author
+      // (about 1,600 rows in all), and one unindexed branch would read at
+      // least its 500 rows more.
+      expect(deep.rowsRead).toBeLessThan(1_700);
     }),
   ));
 

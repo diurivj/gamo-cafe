@@ -60,10 +60,18 @@ describe("Historial", () => {
       .map((match) => match[2]!)
       .filter((body) => body.includes("Historial rutas"));
     expect(mine).toHaveLength(3);
-    expect(mine[0]).toContain("Ajuste cancelado: Entrada +7 · Historial rutas");
+    expect(mine[0]).toContain("Ajuste cancelado");
+    expect(mine[0]).toContain("Entrada +7 · Historial rutas");
+    expect(mine[0]).toContain("Cancelado por Ana");
+    expect(mine[1]).toContain("Ajuste de existencias");
     expect(mine[1]).toContain("Entrada +7 · Historial rutas");
     expect(mine[1]).not.toContain("Ajuste cancelado");
-    expect(mine[2]).toContain("Producto quitado: 2 × Historial rutas — $37.00");
+    expect(mine[2]).toContain("Producto quitado");
+    expect(mine[2]).toContain("2 × Historial rutas — $37.00");
+    // The record as it was made stays in sight: whose Line it was, and when.
+    expect(mine[2]).toContain(`Agregado por Beto · ${formatDay("2026-10-05")} · ${formatTime(Date.parse("2026-10-05T10:00:00-06:00"))}`);
+    expect(mine[2]).toContain("Quitado por Ana");
+    expect(mine[0]).toContain(`Registrado por Ana · ${formatDay("2026-10-05")} · ${formatTime(Date.parse("2026-10-05T10:10:00-06:00"))}`);
     expect(html).toContain("Motivo:");
     expect(html).toContain("Motivo de la cancelación");
     expect(html).toContain("Motivo de la ruta");
