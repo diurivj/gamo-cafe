@@ -88,6 +88,7 @@ app/
     payment-entry.tsx  PaymentEntry, how a Payment is entered from Vender on: method, all or a part, cash change
     confirm-dialog.tsx  ConfirmDialog, the question before unfinished work is discarded or left
     recording.tsx  what the screens that record with sendForRecord share: Pending, SentRows, Change, useLeaveGuard, useReadAgainSince
+    figures.tsx    FiguresPanel, Collected and Sold as Día and Mi día say them: Cobrado and its split, then Vendido
     item-fields.tsx  ItemFields, the fields of an Item's form, new or existing
     count-line.tsx  CountLineItem, one line of a Count as Conteo and Diferencias show it
     paged-list.tsx  usePagedList and LoadMore: a list's pages and its Cargar más
@@ -228,7 +229,7 @@ export async function action({ context, params, request }: Route.ActionArgs) {
 
 ## The look and the navigation
 
-The redesign's rules are in `.scratch/ui-redesign/spec.md` (§3, §4 and §8). Entrar, the shell, Inicio, Más, Vender, Cuentas abiertas, Cuenta, Historial, Clientes, Cliente, the Customer picker and the error pages follow them; the other screens are moved over one ticket at a time, and keep working meanwhile.
+The redesign's rules are in `.scratch/ui-redesign/spec.md` (§3, §4 and §8). Entrar, the shell, Inicio, Más, Vender, Cuentas abiertas, Cuenta, Historial, Clientes, Cliente, Día, Mi día, the Customer picker and the error pages follow them; the other screens are moved over one ticket at a time, and keep working meanwhile.
 
 - **The look is shadcn/ui's**, in its Maia preset over Base UI (`components.json`). Its components are copied into `app/components/ui/` and are this repo's code from then on. Add one with `npx shadcn@latest add <name>` (answer no when it offers to overwrite `button.tsx`), and build screens from them — `Card`, `Button`, `Input`, `Textarea`, `Label`, `Alert`, `Badge`, `RadioGroup`, `AlertDialog` are there — instead of styling by hand. The colors are the variables the CLI wrote in `app/app.css` (`background`, `foreground`, `primary`, `muted`, `border`, …); use those names (`bg-muted`, `text-muted-foreground`), never a raw color. The font is Figtree, bundled by `@fontsource-variable/figtree`.
 - **What differs from the preset**, because the spec's §8 asks for it (18px text, 48px targets, contrast): `Button` has a `touch` size (56px tall, 18px text) for every action and `icon-touch` (48px square) for one that is only a drawing; a `RadioGroupItem` is 24px inside a `Label` that is the 48px target; an `AlertDialog` has 18px text, `touch` actions, and scrolls when large text makes it tall; `Input` is 56px tall with 18px text and a white fill, and `Textarea` has the same text and fill and grows with what is typed; `Label`, `Card` and `Alert` text is 18px; a `Badge` is 28px tall with 16px text; the outline `Button` is white with the field's edge; and `--muted-foreground`, `--input` and `--ring` are darker. Each change is commented where it is made. A component added later starts at the preset's sizes: bring it to these.
@@ -418,6 +419,17 @@ Browser tests drive it with `e2e/support/customer.ts` (`openAbonar`, `abonar`, `
 Removing a Line or a Payment and voiding a Bill are spec §5.7, in `~/backend/corrections.ts`. Each is one batch: the fact (`line_removals`, `payment_removals`, `bill_voids`), the Bill's projections, and Stock. Only the fact's `INSERT ... SELECT` carries the rules (the Bill's revision included); the other statements join the fact by its id, so a refused correction writes nothing at all. The operation classifies a refusal again from the rows, and `correctionMessages` in `~/shared/correction-messages.ts` holds the Spanish for each tag. How the screen offers, sends and reports them is [Cuenta: its corrections](#cuenta-its-corrections).
 
 A Worker may remove a Line while the Bill has no Payment, which is `paid = 0`; with a Payment only an Admin may, with a reason. Removing a Payment lowers `paid`, so "has a Payment" stays meaningful for ticket 10, and a Bill whose total would fall below `paid` refuses the removal. Stock comes back from the Line's own `moved_stock` fact, not from the Item's flag today, once per Line: a Line already removed is not returned again when its Bill is Voided, and rebuilding Stock from the facts (ticket 19) uses the same rule. A Voided Bill keeps its Lines, Payments and totals on record and refuses every later correction.
+
+## The Day's figures
+
+Día and Mi día say three things that must never pass for one another (UI redesign §7.1), and each has one home.
+
+- **Cobrado and Vendido** are `FiguresPanel` (`~/components/figures`): the money received first, with Efectivo and Transferencia under it, then the value of what was consumed, apart and explained. Nothing adds them up and nothing is called a total. A screen that shows a `Figures` passes it to the panel; `compact` is for one entry among several, as each User's on Día.
+- **Por cobrar** is not a figure of a Day. Día links to its screen and shows no amount of it.
+- **The range Día shows is the range it read.** `everyonesDay` (`~/backend/day`) takes the `desde` and `hasta` text of the URL and decides: nothing asked is today, one end alone is that single Day, text that is not a Day (`parseDay`) or a range that ends before it starts is refused. The loader answers a refusal 400 with its reason in a `Notice`, each field holding the end that was read, and no date and no figure. The date over the figures comes from the read, never from the fields, so while another range is on its way the figures still stand under their own date, dimmed, with a line that says the new dates are being read.
+- **Each User's figures and the Items sold** on Día are `<details>` under a heading that says how many there are: one tap or Enter away, and found by the browser's own search. Mi día lists the User's Payments and Lines in the open; it says whose they are, and its read takes no argument.
+- **Rules about which Day a record counts on** are tested on the operations with the test clock (`tests/dia.test.ts`, `tests/mi-dia.test.ts`), where time can be moved. A browser test that needs an older Day moves a Bill's and its Lines' `day` back with `query`, as `e2e/dia.spec.ts` does for a debt paid today.
+- Browser tests read a figure by what it is with `expectFigures(scope, { cobrado, efectivo, transferencia, vendido })` from `e2e/support/figures.ts`, never by an amount that is somewhere on the page. `cutOff(scope)` from `e2e/support/layout.ts` lists whatever is wider than its room: with long names, large amounts, a 320px phone and text twice as large it must be empty.
 
 ## Paged lists
 

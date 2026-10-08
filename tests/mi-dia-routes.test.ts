@@ -39,6 +39,8 @@ describe("Mi día", () => {
     const html = await (await beto.fetch("/mi-dia")).text();
 
     expect(html).toContain("Mi día");
+    // The screen says whose figures these are.
+    expect(html).toMatch(/Solo lo que registró\s*(<!-- -->)?\s*<strong[^>]*>Beto<\/strong>/);
     expect(html).toContain("Solo de Beto en la ruta");
     expect(html).toContain("$18.50");
     expect(html).toContain("Efectivo");

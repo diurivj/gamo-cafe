@@ -1,20 +1,29 @@
 import { Effect } from "effect";
-import { data, Form } from "react-router";
+import { data, Form, Link, useNavigation } from "react-router";
 
 import { CurrentUser } from "~/backend/current-user";
 import { everyonesDay } from "~/backend/day";
 import { run } from "~/backend/run.server";
 import { requireAdminUser } from "~/catalog-forms.server";
+import { FiguresPanel } from "~/components/figures";
+import { ChevronDrawing } from "~/components/icons";
 import { Notice } from "~/components/notice";
+import { hint, pageTitle } from "~/components/styles";
 import { SubmitButton } from "~/components/submit-button";
+import { buttonClasses } from "~/components/ui/button";
+import { Card, CardContent } from "~/components/ui/card";
+import { Input } from "~/components/ui/input";
+import { Label } from "~/components/ui/label";
 import { formatDay } from "~/shared/day";
 import { formatMoney } from "~/shared/money";
 
 import type { Route } from "./+types/dia";
 
-// Día (spec §6.2): for a date or a from–to range, Sold, Collected in cash and
-// by transfer, the same per User, and Items sold with quantities and value.
-// Defaults to today. Admin only: a Worker never sees the Day (spec §4.1).
+// Día (spec §6.2, UI redesign §7.1): for a date or a from–to range, Collected
+// in cash and by transfer, then Sold; the same per User and the Items sold,
+// each a tap away so the summary stays short. Defaults to today. Admin only:
+// a Worker never sees the Day (spec §4.1). Owed is not a figure of a Day: the
+// screen links to Por cobrar and shows no amount of it.
 // `everyonesDay` decides the range from what the URL asked and reads it, so
 // the range this screen names is the one its figures are about; a range it
 // refuses is answered 400 with the reason and no figures.
@@ -51,111 +60,133 @@ export async function loader({ context, request }: Route.LoaderArgs) {
 const refused = (error: string, desde: string, hasta: string) =>
   data({ desde, hasta, error, day: null }, { status: 400 });
 
-const row = "flex items-center justify-between gap-3 py-3";
-const field = "w-full rounded-xl border border-stone-300 bg-white px-4 py-3";
+// A part of the screen that opens at a tap: its name, how many it holds, and
+// which way it points. The count goes under the name when both do not fit.
+const disclosure =
+  "flex min-h-14 list-none cursor-pointer flex-wrap items-center justify-between gap-x-3 rounded-2xl px-(--card-spacing) py-2 text-lg font-medium";
 
 export default function Dia({ loaderData }: Route.ComponentProps) {
   const { desde, hasta, error, day } = loaderData;
+  // Another range is a round trip away. Until it is here the figures below
+  // are still the ones of the range named above them: say so, and never let
+  // them pass for the dates just asked.
+  const navigation = useNavigation();
+  const reading = navigation.state === "loading" && navigation.location.pathname === "/dia";
 
   return (
-    <div className="flex flex-col gap-6">
-      <h1 className="text-3xl font-semibold tracking-tight">Día</h1>
+    <div className="flex flex-col gap-5">
+      <h1 className={pageTitle}>Día</h1>
 
-      <Form method="get" className="rounded-2xl border border-stone-200 bg-white p-4">
-        <div className="flex flex-col gap-4 sm:flex-row">
-          <label className="flex flex-1 flex-col gap-1">
-            <span className="font-medium">Desde</span>
-            <input type="date" name="desde" defaultValue={desde} className={field} />
-          </label>
-          <label className="flex flex-1 flex-col gap-1">
-            <span className="font-medium">Hasta</span>
-            <input type="date" name="hasta" defaultValue={hasta} className={field} />
-          </label>
+      <Form method="get" className="flex flex-col gap-3">
+        <div className="@container">
+          <div className="flex flex-col gap-3 @[30rem]:flex-row">
+            <div className="flex flex-1 flex-col gap-2">
+              <Label htmlFor="desde">Desde</Label>
+              <Input key={desde} id="desde" type="date" name="desde" defaultValue={desde} />
+            </div>
+            <div className="flex flex-1 flex-col gap-2">
+              <Label htmlFor="hasta">Hasta</Label>
+              <Input key={hasta} id="hasta" type="date" name="hasta" defaultValue={hasta} />
+            </div>
+          </div>
         </div>
-        <SubmitButton pendingLabel="Viendo…" className="mt-4 rounded-xl bg-stone-900 px-4 py-3 font-semibold text-white disabled:opacity-60">
+        <SubmitButton pendingLabel="Viendo…" className={buttonClasses({ variant: "outline", size: "touch" })}>
           Ver
         </SubmitButton>
+        {/* Its room is kept, so the figures do not move when it speaks. */}
+        <p aria-live="polite" className={`min-h-7 ${hint}`}>
+          {reading ? "Leyendo las fechas que pediste…" : ""}
+        </p>
       </Form>
 
       {error === null ? null : <Notice tone="error">{error}</Notice>}
 
       {day === null ? null : (
-        <>
-          <p className="text-stone-600">
-            {desde === hasta ? formatDay(desde) : `${formatDay(desde)} al ${formatDay(hasta)}`}
-          </p>
-
-          <section aria-labelledby="totales" className="rounded-2xl border border-stone-200 bg-white p-4">
-            <h2 id="totales" className="text-xl font-semibold">
-              Totales
+        <div className={`flex flex-col gap-5 ${reading ? "opacity-60" : ""}`} aria-busy={reading}>
+          <section aria-labelledby="resumen" className="flex flex-col gap-3">
+            <h2 id="resumen" className="text-xl font-semibold wrap-break-word">
+              {desde === hasta ? formatDay(desde) : `Del ${formatDay(desde)} al ${formatDay(hasta)}`}
             </h2>
-            <dl className="mt-2 flex flex-col divide-y divide-stone-200 text-lg">
-              <div className={row}>
-                <dt className="font-medium">Vendido</dt>
-                <dd className="font-semibold tabular-nums">{formatMoney(day.total.sold)}</dd>
-              </div>
-              <div className={row}>
-                <dt className="font-medium">Cobrado</dt>
-                <dd className="font-semibold tabular-nums">{formatMoney(day.total.collected)}</dd>
-              </div>
-              <div className={`${row} text-stone-600`}>
-                <dt>Efectivo</dt>
-                <dd className="tabular-nums">{formatMoney(day.total.cash)}</dd>
-              </div>
-              <div className={`${row} text-stone-600`}>
-                <dt>Transferencia</dt>
-                <dd className="tabular-nums">{formatMoney(day.total.transfer)}</dd>
-              </div>
-            </dl>
+            <Card size="sm">
+              <CardContent>
+                <FiguresPanel figures={day.total} />
+              </CardContent>
+            </Card>
           </section>
 
-          <section aria-labelledby="por-usuario">
-            <h2 id="por-usuario" className="text-xl font-semibold">
-              Por usuario
-            </h2>
-            {day.byUser.length === 0 ? (
-              <p className="mt-2 text-stone-600">Nadie registró nada en estas fechas.</p>
-            ) : (
-              <ul className="mt-2 flex flex-col gap-3">
-                {day.byUser.map((user) => (
-                  <li key={user.userId} className="rounded-2xl border border-stone-200 bg-white p-4">
-                    <p className="font-medium">{user.userName}</p>
-                    <p className="mt-1 text-stone-600">
-                      {`Vendido ${formatMoney(user.sold)} · Cobrado ${formatMoney(user.collected)}`}
-                    </p>
-                    <p className="text-stone-600">
-                      {`Efectivo ${formatMoney(user.cash)} · Transferencia ${formatMoney(user.transfer)}`}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+          {/* What is still owed is not a figure of these dates: it has a screen of its own. */}
+          <Link to="/por-cobrar" className="block rounded-2xl">
+            <Card size="sm" className="transition-colors hover:bg-muted/60 active:bg-muted">
+              <CardContent className="flex items-center justify-between gap-3">
+                <span>
+                  <span className="block text-lg font-medium">Por cobrar</span>
+                  <span className={`block ${hint}`}>Lo que se debe hoy, de cualquier fecha.</span>
+                </span>
+                <ChevronDrawing className="size-6 shrink-0" />
+              </CardContent>
+            </Card>
+          </Link>
 
-          <section aria-labelledby="productos-vendidos">
-            <h2 id="productos-vendidos" className="text-xl font-semibold">
-              Productos vendidos
-            </h2>
-            {day.items.length === 0 ? (
-              <p className="mt-2 text-stone-600">No se vendió nada en estas fechas.</p>
-            ) : (
-              <ul
-                aria-label="Productos vendidos"
-                className="mt-2 flex flex-col divide-y divide-stone-200 rounded-2xl border border-stone-200 bg-white px-4"
-              >
-                {day.items.map((item) => (
-                  <li key={item.itemId} className={row}>
-                    <span className="min-w-0">
-                      <span className="block break-words font-medium">{item.itemName}</span>
-                      <span className="block text-sm text-stone-600">{`Cantidad: ${item.quantity}`}</span>
-                    </span>
-                    <span className="shrink-0 font-semibold tabular-nums">{formatMoney(item.sold)}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        </>
+          <Card size="sm" className="py-0">
+            <details className="group">
+              <summary className={disclosure}>
+                <h2 className="max-w-full min-w-0 wrap-break-word">Por usuario</h2>
+                <span className={`flex shrink-0 items-center gap-2 tabular-nums ${hint}`}>
+                  {day.byUser.length}
+                  {/* Points down once the part is open. */}
+                  <ChevronDrawing className="size-6 group-open:rotate-90" />
+                </span>
+              </summary>
+              <div className="px-(--card-spacing) pb-(--card-spacing)">
+                {day.byUser.length === 0 ? (
+                  <p className={hint}>Nadie registró nada en estas fechas.</p>
+                ) : (
+                  <ul aria-label="Por usuario" className="flex flex-col">
+                    {day.byUser.map((user) => (
+                      <li key={user.userId} className="flex flex-col gap-2 border-t py-4 last:pb-0">
+                        <h3 className="text-lg font-semibold wrap-break-word">{user.userName}</h3>
+                        <FiguresPanel figures={user} compact />
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </details>
+          </Card>
+
+          <Card size="sm" className="py-0">
+            <details className="group">
+              <summary className={disclosure}>
+                <h2 className="max-w-full min-w-0 wrap-break-word">Productos vendidos</h2>
+                <span className={`flex shrink-0 items-center gap-2 tabular-nums ${hint}`}>
+                  {day.items.length}
+                  {/* Points down once the part is open. */}
+                  <ChevronDrawing className="size-6 group-open:rotate-90" />
+                </span>
+              </summary>
+              <div className="px-(--card-spacing) pb-(--card-spacing)">
+                {day.items.length === 0 ? (
+                  <p className={hint}>No se vendió nada en estas fechas.</p>
+                ) : (
+                  <ul aria-label="Productos vendidos" className="flex flex-col">
+                    {day.items.map((item) => (
+                      <li
+                        key={item.itemId}
+                        className="flex flex-wrap items-baseline justify-between gap-x-3 border-t py-3 last:pb-0"
+                      >
+                        <span className="max-w-full min-w-0">
+                          <span className="block font-medium wrap-anywhere">{item.itemName}</span>
+                          <span className={`block ${hint}`}>{`Cantidad: ${item.quantity}`}</span>
+                        </span>
+                        <span className="max-w-full min-w-0 font-semibold wrap-anywhere tabular-nums">{formatMoney(item.sold)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </details>
+          </Card>
+        </div>
       )}
     </div>
   );
