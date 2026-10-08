@@ -38,5 +38,5 @@ it("every submit control of the app is a SubmitButton", () => {
   }
   expect(offences).toEqual([]);
   // Known uses, so that a change in how the component is written fails loudly.
-  expect(submitButtons).toBeGreaterThan(20);
+  expect(submitButtons).toBeGreaterThan(15);
 });

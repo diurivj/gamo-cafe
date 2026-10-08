@@ -37,6 +37,74 @@ describe("Usuarios, for an Admin", () => {
     expect(html).toContain("Beto Lista");
     expect(html).toContain("Administrador");
     expect(html).toContain("Empleado");
+    // Staff, not Customers; and no form is on the list.
+    expect(html).toContain("Los clientes se anotan en");
+    expect(html).toContain('href="/usuarios?paso=nuevo"');
+    expect(html).toContain(`href="/usuarios?paso=usuario&amp;id=${ana.user.id}"`);
+    expect(html).not.toContain('name="intent"');
+  });
+
+  it("keeps the deactivated Users apart, said in words", async () => {
+    const ana = await signedIn("admin", "Ana Aparte");
+    const beto = await signedIn("worker", "Beto Aparte");
+    await post(ana, { intent: "deactivate", userId: beto.user.id });
+
+    const html = await (await ana.fetch("/usuarios")).text();
+
+    expect(html).toContain("Usuarios desactivados");
+    expect(html.indexOf("Beto Aparte")).toBeGreaterThan(html.indexOf("Usuarios desactivados"));
+    expect(html.indexOf("Ana Aparte")).toBeLessThan(html.indexOf("Usuarios desactivados"));
+  });
+
+  it("adds a User in a step of its own, which says what each role may do and lands on the code", async () => {
+    const ana = await signedIn("admin", "Ana Paso");
+
+    const step = await (await ana.fetch("/usuarios?paso=nuevo")).text();
+    expect(step).toContain("Agregar usuario");
+    expect(step).toContain("Vende, cobra y ve su propio día.");
+    expect(step).toContain("administra productos y usuarios");
+
+    const response = await ana.fetch("/usuarios?paso=nuevo", {
+      method: "POST",
+      body: new URLSearchParams({ intent: "add", name: "Beto Paso", role: "worker" }),
+    });
+    expect(response.headers.get("Location")).toBe("/usuarios?paso=nuevo");
+    const html = await (await landing(ana, response)).text();
+    expect(html).toContain("Código de acceso para");
+    expect(html).toContain("Sirve una sola vez y dura 10 minutos.");
+    expect(html).toContain("Entrar");
+    expect(await signInWith(codeShownOn(html))).toBeDefined();
+  });
+
+  it("shows one User in a step of their own, with what each action does", async () => {
+    const ana = await signedIn("admin", "Ana Detalle");
+    const beto = await signedIn("worker", "Beto Detalle");
+
+    const html = await (await ana.fetch(`/usuarios?paso=usuario&id=${beto.user.id}`)).text();
+
+    expect(html).toContain("Beto Detalle");
+    for (const intent of ["new-code", "change-role", "sign-out-everywhere", "deactivate"]) {
+      expect(html, intent).toContain(`value="${intent}"`);
+    }
+    expect(html).toContain("Sus otros teléfonos siguen con su sesión.");
+    expect(html).toContain("Podrá ver el día de todos");
+    expect(html).toContain("Para volver a entrar necesitará un código.");
+    expect(html).toContain("Lo que registró se conserva");
+    expect((await ana.fetch("/usuarios?paso=usuario&id=nadie")).status).toBe(404);
+  });
+
+  it("offers a deactivated User no code and no sessions to close, only the way back in", async () => {
+    const ana = await signedIn("admin", "Ana Sin Código");
+    const beto = await signedIn("worker", "Beto Sin Código");
+    await post(ana, { intent: "deactivate", userId: beto.user.id });
+
+    const html = await (await ana.fetch(`/usuarios?paso=usuario&id=${beto.user.id}`)).text();
+
+    expect(html).toContain("Desactivado");
+    expect(html).toContain('value="reactivate"');
+    for (const intent of ["new-code", "sign-out-everywhere", "deactivate"]) {
+      expect(html, intent).not.toContain(`value="${intent}"`);
+    }
   });
 
   it("adds a User and shows a code that signs them in", async () => {
@@ -66,11 +134,16 @@ describe("Usuarios, for an Admin", () => {
   it("answers a name that is missing or taken in Spanish, and adds nobody", async () => {
     const ana = await signedIn("admin", "Ana Nombre");
 
-    const missing = await post(ana, { intent: "add", name: " ", role: "worker" });
-    const taken = await post(ana, { intent: "add", name: "ana nombre", role: "worker" });
+    const add = (name: string) =>
+      ana.fetch("/usuarios?paso=nuevo", { method: "POST", body: new URLSearchParams({ intent: "add", name, role: "worker" }) });
+    const missing = await add(" ");
+    const taken = await add("ana nombre");
 
     expect(missing.status).toBe(400);
-    expect(await missing.text()).toContain("Escribe el nombre");
+    const missingHtml = await missing.text();
+    expect(missingHtml).toContain("Escribe el nombre");
+    // Said on the field it is about.
+    expect(missingHtml).toContain('aria-invalid="true"');
     expect(taken.status).toBe(400);
     expect(await taken.text()).toContain("Ya hay un usuario con ese nombre");
   });
@@ -93,7 +166,7 @@ describe("Usuarios, for an Admin", () => {
 
     const response = await post(ana, { intent: "sign-out-everywhere", userId: beto.user.id });
 
-    expect(await (await landing(ana, response)).text()).toContain("Se cerró su sesión en todos los teléfonos.");
+    expect(await (await landing(ana, response)).text()).toContain("Se cerró su sesión en todos los teléfonos. Para volver a entrar necesita un código.");
     const next = await beto.fetch("/");
     expect(next.status).toBe(302);
     expect(next.headers.get("Location")).toBe("/entrar");
@@ -108,7 +181,7 @@ describe("Usuarios, for an Admin", () => {
     const response = await post(ana, { intent: "deactivate", userId: beto.user.id });
 
     const html = await (await landing(ana, response)).text();
-    expect(html).toContain("Usuario desactivado.");
+    expect(html).toContain("Usuario desactivado. Ya no puede entrar.");
     expect(html).toContain("Beto Baja");
     expect(html).toContain("Desactivado");
     const next = await beto.fetch("/");
@@ -157,12 +230,22 @@ describe("Usuarios, for a Worker", () => {
     await signedIn("admin", "Ana Oculta");
     const beto = await signedIn("worker", "Beto Curioso");
 
-    for (const path of ["/usuarios", "/usuarios.data"]) {
+    const ana = await signedIn("admin", "Ana Oculta Dos");
+    const step = `paso=usuario&id=${ana.user.id}`;
+    for (const path of ["/usuarios", "/usuarios.data", "/usuarios?paso=nuevo", `/usuarios?${step}`, `/usuarios.data?${step}`]) {
       const response = await beto.fetch(path);
 
       expect(response.status, path).toBe(403);
       expect(await response.text(), path).not.toContain("Ana Oculta");
     }
+  });
+
+  it("is refused before a form is read: one nobody understands is a 403 too", async () => {
+    const beto = await signedIn("worker", "Beto Raro");
+
+    const response = await post(beto, { intent: "delete" });
+
+    expect(response.status).toBe(403);
   });
 
   it("is refused every action, and nothing changes", async () => {

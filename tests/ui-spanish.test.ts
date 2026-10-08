@@ -181,6 +181,9 @@ it("every screen a User can open is in Spanish, with es-MX money and dates", asy
     `/productos?paso=categoria&id=${world.item.categoryId}`,
     `/productos/${world.item.id}`,
     "/usuarios",
+    "/usuarios?paso=nuevo",
+    `/usuarios?paso=usuario&id=${ana.user.id}`,
+    `/usuarios?paso=usuario&id=${beto.user.id}`,
     "/mas",
     "/inicio",
   ]);

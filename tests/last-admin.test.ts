@@ -135,6 +135,25 @@ describe("on Usuarios", () => {
     }
     expect((await ana.fetch("/usuarios")).status).toBe(200);
   });
+
+  it("the only Admin's own step says why, and offers neither change", async () => {
+    const ana = await signedIn("admin", "Ana");
+    const beto = await signedIn("worker", "Beto");
+
+    const own = await (await ana.fetch(`/usuarios?paso=usuario&id=${ana.user.id}`)).text();
+    expect(own).toContain("único administrador activo");
+    expect(own).not.toContain('value="deactivate"');
+    expect(own).not.toContain('value="change-role"');
+
+    // With a second active Admin both are offered again.
+    await ana.fetch("/usuarios", {
+      method: "POST",
+      body: new URLSearchParams({ intent: "change-role", userId: beto.user.id, role: "admin" }),
+    });
+    const now = await (await ana.fetch(`/usuarios?paso=usuario&id=${ana.user.id}`)).text();
+    expect(now).toContain('value="deactivate"');
+    expect(now).toContain('value="change-role"');
+  });
 });
 
 describe("two phones racing through the app", () => {

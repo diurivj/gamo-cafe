@@ -12,11 +12,12 @@ import { pay } from "./support/sell";
 // - the submit control that was tapped is pending by the next frame;
 // - money (a Payment, an Abono, a correction) shows nothing as recorded until
 //   the answer arrives;
-// - a harmless, reversible change (retiring a Customer, a User's role and
-//   active state) shows its result at once and goes back if it is refused.
+// - a harmless, reversible change (retiring a Customer) shows its result at
+//   once and goes back if it is refused.
 //
 // Vender's own pending state is in vender-recovery.spec.ts, an Adjustment's
-// and its cancellation's in inventario.spec.ts, and a Count's in conteo.spec.ts.
+// and its cancellation's in inventario.spec.ts, a Count's in conteo.spec.ts
+// and Usuarios' in usuarios.spec.ts.
 
 type Held = Awaited<ReturnType<typeof holdSubmissions>>;
 
@@ -244,83 +245,6 @@ test("a refused restore puts the Customer back as retired, with the message", as
   );
   await expect(retiredBadge).toBeVisible();
   await expect(page.getByRole("button", { name: "Restaurar cliente" })).toBeEnabled();
-});
-
-const userOnList = (page: Page, name: string) => page.getByRole("listitem", { name, exact: true });
-
-test("Usuarios shows a role and the active state at once, and what it recorded only after the answer", async ({
-  page,
-  signInAs,
-  addUser,
-}) => {
-  await signInAs("admin", "Ana");
-  await addUser("worker", "Beto");
-  await page.goto("/usuarios");
-  const held = await holdSubmissions(page);
-  const beto = userOnList(page, "Beto");
-
-  await page.getByLabel("Nombre").fill("Carla");
-  await tap(held, page.getByRole("button", { name: "Agregar y dar código" }));
-  await expect(userOnList(page, "Carla")).toHaveCount(0);
-  await held.release();
-  await expect(page.getByText("Código de acceso para Carla")).toBeVisible();
-  await settled(page);
-
-  await tap(held, beto.getByRole("button", { name: "Código nuevo" }));
-  await expect(page.getByText("Código de acceso para Beto")).toHaveCount(0);
-  await held.release();
-  await expect(page.getByText("Código de acceso para Beto")).toBeVisible();
-  await settled(page);
-
-  await tap(held, beto.getByRole("button", { name: "Cerrar sesión en todos los teléfonos" }));
-  await expect(page.getByText("Se cerró su sesión en todos los teléfonos.")).toHaveCount(0);
-  await held.release();
-  await expect(page.getByRole("status")).toHaveText("Se cerró su sesión en todos los teléfonos.");
-  await settled(page);
-
-  // The role: shown at once, said to be recorded only after the answer.
-  await tap(held, beto.getByRole("button", { name: "Hacer administrador" }));
-  await expect(beto).toContainText("Administrador");
-  await expect(page.getByRole("status")).not.toHaveText("Ahora es Administrador.");
-  await held.release();
-  await expect(page.getByRole("status")).toHaveText("Ahora es Administrador.");
-  await expect(beto.getByRole("button", { name: "Hacer empleado" })).toBeEnabled();
-
-  // The active state, both ways.
-  await tap(held, beto.getByRole("button", { name: "Desactivar" }));
-  await expect(beto).toContainText("Desactivado");
-  await expect(page.getByRole("status")).not.toHaveText("Usuario desactivado.");
-  await held.release();
-  await expect(page.getByRole("status")).toHaveText("Usuario desactivado.");
-  await expect(beto.getByRole("button", { name: "Reactivar" })).toBeEnabled();
-
-  await tap(held, beto.getByRole("button", { name: "Reactivar" }));
-  await expect(beto).not.toContainText("Desactivado");
-  await held.release();
-  await expect(page.getByRole("status")).toHaveText("Usuario reactivado. Dale un código nuevo para que entre.");
-  await expect(beto.getByRole("button", { name: "Desactivar" })).toBeEnabled();
-});
-
-test("a refused change of role goes back to what the User was", async ({ page, signInAs }) => {
-  await signInAs("admin", "Ana");
-  await page.goto("/usuarios");
-  const held = await holdSubmissions(page);
-  const ana = userOnList(page, "Ana");
-
-  await tap(held, ana.getByRole("button", { name: "Hacer empleado" }));
-  await expect(ana).toContainText("Empleado");
-  await expect(ana).not.toContainText("Administrador");
-  await held.release();
-
-  await expect(page.getByRole("alert")).toHaveText("Debe quedar al menos un administrador activo.");
-  await expect(ana).toContainText("Administrador");
-  await expect(ana.getByRole("button", { name: "Hacer empleado" })).toBeEnabled();
-
-  await tap(held, ana.getByRole("button", { name: "Desactivar" }));
-  await expect(ana).toContainText("Desactivado");
-  await held.release();
-  await expect(page.getByRole("alert")).toHaveText("Debe quedar al menos un administrador activo.");
-  await expect(ana).not.toContainText("Desactivado");
 });
 
 test("every form of Productos and of a Producto is pending from the tap", async ({

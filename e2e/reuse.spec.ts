@@ -127,9 +127,8 @@ test("a User whose role an Admin changed sees the right navigation on their next
   await expect(betos.getByText("Beto · Empleado")).toBeVisible();
   await expect(destinations(betos).getByRole("link", { name: "Día", exact: true })).toHaveCount(0);
 
-  await page.goto("/usuarios");
-  const row = page.getByRole("listitem", { name: "Beto", exact: true });
-  await row.getByRole("button", { name: "Hacer administrador" }).click();
+  await page.goto(`/usuarios?paso=usuario&id=${beto.id}`);
+  await page.getByRole("button", { name: "Hacer administrador" }).click();
   await expect(page.getByRole("status")).toHaveText("Ahora es Administrador.");
 
   await goTo(betos, "Mi día");
@@ -139,7 +138,7 @@ test("a User whose role an Admin changed sees the right navigation on their next
   await expect(destinations(betos).getByRole("link", { name: "Día", exact: true })).toBeVisible();
 
   // And back: what an Admin sees is gone on the navigation after the change.
-  await row.getByRole("button", { name: "Hacer empleado" }).click();
+  await page.getByRole("button", { name: "Hacer empleado" }).click();
   await expect(page.getByRole("status")).toHaveText("Ahora es Empleado.");
   await goTo(betos, "Clientes");
 
@@ -151,11 +150,13 @@ test("a User whose role an Admin changed sees the right navigation on their next
 
 test("an Admin who makes themselves a Worker sees a Worker's navigation at once", async ({ page, signInAs, addUser }) => {
   await addUser("admin", "Carla");
-  await signInAs("admin", "Ana");
-  await page.goto("/usuarios");
+  const ana = await signInAs("admin", "Ana");
+  await page.goto(`/usuarios?paso=usuario&id=${ana.id}`);
   await markDocument(page);
+  // Said before it is asked for: this screen is left behind.
+  await expect(page.getByRole("region", { name: "Rol" })).toContainText("saldrás de esta pantalla");
 
-  await page.getByRole("listitem", { name: "Ana", exact: true }).getByRole("button", { name: "Hacer empleado" }).click();
+  await page.getByRole("button", { name: "Hacer empleado" }).click();
 
   await expect(page.getByRole("heading", { name: "Vender", level: 1 })).toBeVisible();
   await expect(page.getByText("Ana · Empleado")).toBeVisible();
