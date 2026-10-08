@@ -1,5 +1,6 @@
 import type { BillPaymentRefusal, BillPaymentResult } from "~/shared/bill-payment";
 import type { CorrectionRefusal, CorrectionResult } from "~/shared/correction";
+import type { CustomerPaymentRefusal, CustomerPaymentResult } from "~/shared/customer-payment";
 import type { SaleRefusal, SaleResult } from "~/shared/sale";
 
 import type { SignedIn } from "./auth";
@@ -94,4 +95,33 @@ export async function recordCorrection(
   const response = await who.fetch(correctionPath(billId), { method: "POST", body: new URLSearchParams(fields) });
   const answer = (await response.clone().json()) as Partial<{ correction: CorrectionResult } & CorrectionRefusal>;
   return { response, correction: answer.correction, error: answer.error, changed: answer.changed };
+}
+
+/** Where a Customer's page sends an Abonar (`app/routes/resources/record-handover.ts`). */
+export const handoverPath = (customerId: string) => `/clientes/${customerId}/abonar`;
+
+/**
+ * Sends one Abonar as the Customer's page does and reads the route's JSON
+ * answer: what the handover recorded, or the refusal. `bills` is every Open
+ * Bill the page showed, as `billId:revision`.
+ *
+ *     const { handover } = await recordHandover(beto, ruiz.id, { amount: "60.00", bills: ["vieja:0", "nueva:0"] });
+ */
+export async function recordHandover(
+  who: Pick<SignedIn, "fetch">,
+  customerId: string,
+  fields: {
+    /** Defaults to cash. */
+    readonly method?: string;
+    readonly amount: string;
+    readonly bills: ReadonlyArray<string>;
+    readonly submissionKey?: string;
+  },
+) {
+  const body = new URLSearchParams({ method: fields.method ?? "cash", amount: fields.amount });
+  if (fields.submissionKey) body.set("submissionKey", fields.submissionKey);
+  for (const bill of fields.bills) body.append("bill", bill);
+  const response = await who.fetch(handoverPath(customerId), { method: "POST", body });
+  const answer = (await response.clone().json()) as Partial<{ handover: CustomerPaymentResult } & CustomerPaymentRefusal>;
+  return { response, handover: answer.handover, error: answer.error, changed: answer.changed };
 }

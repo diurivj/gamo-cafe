@@ -167,7 +167,7 @@ test("Cuenta shows no Payment and no correction as recorded before the server an
   await expect(page.getByText(/Cancelada por Ana/)).toBeVisible();
 });
 
-test("a Customer's page shows no Abono before the answer; retiring and restoring show at once", async ({
+test("a Customer's page shows a rename only after the answer; retiring and restoring show at once", async ({
   page,
   signInAs,
   addCustomer,
@@ -183,17 +183,7 @@ test("a Customer's page shows no Abono before the answer; retiring and restoring
   await page.goto(`/clientes/${ruiz.id}`);
   const held = await holdSubmissions(page);
 
-  // Abonar: money, so nothing before the answer.
-  const abonar = page.getByRole("region", { name: "Abonar" });
-  await abonar.getByLabel("Monto").fill("20.00");
-  await tap(held, abonar.getByRole("button", { name: "Abonar" }));
-  await expect(page.getByText("Debe $50.00 en 1 cuenta.")).toBeVisible();
-  await expect(page.getByText("Todavía no hay abonos.")).toBeVisible();
-  await expect(page.getByRole("status")).toHaveCount(0);
-  await held.release();
-  await expect(page.getByRole("status")).toHaveText("Abono de $20.00 registrado.");
-  await expect(page.getByText("Debe $30.00 en 1 cuenta.")).toBeVisible();
-  await settled(page);
+  // An Abonar is not a form of this page: its pending state is in abonar.spec.ts.
 
   // The name and the note.
   const manage = page.getByRole("region", { name: "Administrar cliente" });

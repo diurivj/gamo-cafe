@@ -15,7 +15,6 @@ import {
 } from "~/backend/seed";
 import { SESSION_COOKIE } from "~/session.server";
 
-import { appFetch } from "./support/auth";
 import { countingD1 } from "./support/d1";
 
 // The §10.7 budget, measured locally against the seeded year (ticket 21):
@@ -145,26 +144,28 @@ interface RequestCase {
   readonly status: number;
   readonly cap: number;
   /**
-   * The request itself. Any reading done first — as the browser read the
-   * Customer page before submitting it — happens outside the measurement.
+   * The request itself. Any reading done first — the Bills the Customer's
+   * page had shown before it sent the Abonar — happens outside the measurement.
    */
   request(cookie: string): Promise<Request> | Request;
 }
 
-/** What the Customer's page shows: every Open Bill and its revision. */
-async function abonarForm(customerId: string, cookie: string): Promise<FormData> {
-  const html = await (
-    await appFetch(`/clientes/${customerId}`, { headers: { Cookie: cookie } })
-  ).text();
-  const bills = [...html.matchAll(/name="bill" value="([^"]+)"/g)].map((match) => match[1]!);
+/** What the Customer's page sends: every Open Bill it showed, and its revision. */
+async function abonarForm(customerId: string): Promise<FormData> {
+  const { results: bills } = await env.DB.prepare(
+    `SELECT id, revision FROM bills
+     WHERE customer_id = ? AND state IN ('open', 'partial') AND total > paid
+     ORDER BY opened_at, rowid`,
+  )
+    .bind(customerId)
+    .all<{ id: string; revision: number }>();
   // The request the proof measures is this one: 30 Open Bills.
   expect(bills).toHaveLength(30);
   const form = new FormData();
-  form.set("intent", "abonar");
   form.set("method", "cash");
   // One centavo: the 30 Bills stay Open across every run.
   form.set("amount", "0.01");
-  for (const bill of bills) form.append("bill", bill);
+  for (const bill of bills) form.append("bill", `${bill.id}:${bill.revision}`);
   return form;
 }
 
@@ -189,10 +190,10 @@ const REQUESTS: ReadonlyArray<RequestCase> = [
   },
   {
     name: "Pay a Customer with 30 Open Bills",
-    status: 302,
+    status: 200,
     cap: 3_000,
     request: async (cookie) =>
-      post(`/clientes/${THIRTY_BILL_CUSTOMER_ID}`, cookie, await abonarForm(THIRTY_BILL_CUSTOMER_ID, cookie)),
+      post(`/clientes/${THIRTY_BILL_CUSTOMER_ID}/abonar`, cookie, await abonarForm(THIRTY_BILL_CUSTOMER_ID)),
   },
   {
     name: "Día for the busiest Day",

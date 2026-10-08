@@ -931,6 +931,8 @@ export interface CustomerPaymentShare {
 const HandoverAnswer = Schema.Struct({
   reference: Schema.String,
   amount: Schema.Int,
+  /** What the Customer's Open Bills still owed once it was recorded. */
+  owed: Schema.Int,
   shares: Schema.Array(
     Schema.Struct({ billId: Schema.String, paymentId: Schema.String, amount: Schema.Int }),
   ),
@@ -1010,7 +1012,7 @@ export const takeCustomerPayment = Effect.fn("takeCustomerPayment")(function* (
           = (SELECT COUNT(*) FROM json_each(?))`,
     params: [input.customerId, shown, shown],
   };
-  const answer = { reference, amount, shares };
+  const answer = { reference, amount, owed: owed - amount, shares };
   const [recorded] = yield* db.batch([
     ...handoverStatements(
       { reference, shares, method: input.method, by: user.id, at, day: dayOf(at) },

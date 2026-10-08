@@ -12,7 +12,7 @@ import type { Notice, TakenNotice } from "~/shared/notice";
  * with a notice: what that screen must say, in Spanish.
  *
  *     // the action
- *     return answerWithNotice(request, `/clientes/${id}`, { message: "Abono de $20.00 registrado." });
+ *     return answerWithNotice(request, `/cuentas/${id}`, { message: "Se guardaron los cambios de la cuenta." });
  *
  *     // the screen that sent it: the notice in the router's own data
  *     const notice = useActionData()?.notice;   // or a fetcher's `data.notice`
@@ -69,7 +69,7 @@ function redirectWithNoticeCookie(to: string, held: TakenNotice): Response {
  * router sent it, or a redirect carrying it in the cookie when the browser
  * posted the document (see the module comment).
  *
- *     return answerWithNotice(request, `/clientes/${id}`, { message: "Abono de $20.00 registrado." });
+ *     return answerWithNotice(request, `/cuentas/${id}`, { message: "Se guardaron los cambios de la cuenta." });
  */
 export function answerWithNotice(
   request: Request,

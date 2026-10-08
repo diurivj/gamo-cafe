@@ -36,19 +36,47 @@ test("a Worker searches Clientes as they type and adds a new Customer", async ({
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
-test("the name of an active Customer is shown as a match and cannot be added again", async ({ page, signInAs, addCustomer }) => {
+test("the name of an active Customer is shown as a match and cannot be added again", async ({
+  page,
+  signInAs,
+  addCustomer,
+  query,
+}) => {
   const beto = await signInAs("worker");
   await addCustomer("María Núñez", { by: beto });
 
   await page.goto("/clientes");
-  await page.getByLabel("Buscar o agregar").pressSequentially("maria nunez");
+  // The field has a visible label and says what it is for; no placeholder stands in for either.
+  const search = page.getByLabel("Buscar o agregar");
+  await expect(search).toHaveAccessibleDescription("Escribe el nombre. Si no está, lo puedes agregar.");
+  await expect(search).not.toHaveAttribute("placeholder");
+  await search.pressSequentially("maria nunez");
 
+  // Whatever its case or accents, the name is taken: the match is shown and nothing offers to add it.
   await expect(page.getByRole("list", { name: "Clientes" }).getByRole("link", { name: "María Núñez" })).toBeVisible();
+  await expect(page.getByText("Ya hay un cliente con ese nombre: está en la lista.")).toBeVisible();
   await expect(page.getByRole("button", { name: /Agregar/ })).toHaveCount(0);
 
-  // One more letter makes it a new name.
-  await page.getByLabel("Buscar o agregar").pressSequentially("s");
-  await expect(page.getByRole("button", { name: "Agregar «maria nunezs»" })).toBeVisible();
+  // A name that only starts like it shows the match before the form that adds.
+  await search.fill("María");
+  const add = page.getByRole("region", { name: "Agregar cliente nuevo" });
+  await expect(add).toContainText("Si es uno de la lista, ábrelo ahí. Si no, agrégalo.");
+  await expect(add.getByRole("button", { name: "Agregar «María»" })).toBeVisible();
+
+  // One more letter than the taken name makes it a new one.
+  await search.fill("maria nunezs");
+  await expect(add.getByRole("button", { name: "Agregar «maria nunezs»" })).toBeVisible();
+
+  // Another phone adds that very name first: the refusal is said, and the note is still there.
+  await add.getByLabel("Nota para «maria nunezs» (opcional)").fill("Mamá de Sofía");
+  await addCustomer("MARÍA NÚÑEZS", { by: beto });
+  await add.getByRole("button", { name: "Agregar «maria nunezs»" }).click();
+  await expect(page.getByRole("alert")).toHaveText("Ya hay un cliente con ese nombre.");
+  await expect(add.getByLabel("Nota para «maria nunezs» (opcional)")).toHaveValue("Mamá de Sofía");
+  expect(await query("SELECT name FROM customers ORDER BY added_at")).toEqual([
+    { name: "María Núñez" },
+    { name: "MARÍA NÚÑEZS" },
+  ]);
 });
 
 test("an Admin renames, retires and restores a Customer", async ({ page, signInAs, addCustomer }) => {
@@ -62,6 +90,7 @@ test("an Admin renames, retires and restores a Customer", async ({ page, signInA
   await page.getByLabel("Nombre").fill("irene vega");
   await page.getByRole("button", { name: "Guardar" }).click();
   await expect(page.getByRole("alert")).toHaveText("Ya hay un cliente con ese nombre.");
+  await expect(page.getByLabel("Nombre")).toHaveAccessibleDescription("Ya hay un cliente con ese nombre.");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hugo");
 
   await page.getByLabel("Nombre").fill("Hugo Méndez");
@@ -70,9 +99,13 @@ test("an Admin renames, retires and restores a Customer", async ({ page, signInA
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hugo Méndez");
   await expect(page.getByRole("alert")).toHaveCount(0);
 
+  // Retiring says what it does before it is done.
+  const manage = page.getByRole("region", { name: "Administrar cliente" });
+  await expect(manage).toContainText("Al retirarlo deja de ofrecerse al vender y su nombre queda libre para otro cliente.");
   await page.getByRole("button", { name: "Retirar cliente" }).click();
   await expect(page.getByText("Retirado", { exact: true })).toBeVisible();
   await expect(page.getByText("Ya no se puede elegir para cuentas nuevas.")).toBeVisible();
+  await expect(manage).toContainText("Al restaurarlo vuelve a ofrecerse al vender.");
 
   // Still listed on Clientes, marked.
   await goTo(page, "Clientes");
@@ -84,4 +117,9 @@ test("an Admin renames, retires and restores a Customer", async ({ page, signInA
   await page.getByRole("button", { name: "Restaurar cliente" }).click();
   await expect(page.getByRole("button", { name: "Retirar cliente" })).toBeVisible();
   await expect(page.getByText("Retirado", { exact: true })).toHaveCount(0);
+
+  // The way back is the list as it was searched.
+  await page.getByRole("main").getByRole("link", { name: "Clientes" }).click();
+  await expect(page).toHaveURL(/\/clientes\?q=hugo$/);
+  await expect(page.getByLabel("Buscar o agregar")).toHaveValue("hugo");
 });

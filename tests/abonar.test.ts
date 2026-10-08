@@ -99,6 +99,8 @@ describe("Abonar across a Customer's Open Bills", () => {
         // $50.00 covers the oldest Bill, $10.00 goes onto the next: it is left
         // Pago parcial and the third Bill is untouched (flow §8.3).
         expect(recorded.amount).toBe(6000);
+        // What the Customer still owes once it is recorded: $20.00 and $15.00.
+        expect(recorded.owed).toBe(3500);
         expect(recorded.shares.map((share) => [share.billId, share.amount])).toEqual([
           ["abono-a", 5000],
           ["abono-b", 1000],
@@ -137,6 +139,7 @@ describe("Abonar across a Customer's Open Bills", () => {
         }).pipe(as(ana));
 
         expect(recorded.amount).toBe(6000);
+        expect(recorded.owed).toBe(0);
         expect(recorded.shares.map((share) => share.amount)).toEqual([5000, 1000]);
         expect(yield* getBill("total-a").pipe(as(ana))).toMatchObject({ paid: 5000, owed: 0, state: "paid" });
         expect(yield* getBill("total-b").pipe(as(ana))).toMatchObject({ paid: 2000, owed: 0, state: "paid" });

@@ -1,11 +1,10 @@
-import { Fragment, type MouseEvent, type ReactNode, type RefObject, useEffect, useReducer, useRef, useState } from "react";
+import { type MouseEvent, type ReactNode, type RefObject, useEffect, useReducer, useRef, useState } from "react";
 import { Effect } from "effect";
 import {
   data,
   Form,
   Link,
   type ShouldRevalidateFunctionArgs,
-  useBlocker,
   useLocation,
   useNavigate,
   useRevalidator,
@@ -20,6 +19,7 @@ import { CustomerPicker } from "~/components/customer-picker";
 import { BackDrawing } from "~/components/icons";
 import { Notice } from "~/components/notice";
 import { PaymentEntry } from "~/components/payment-entry";
+import { Change, Pending, SentRows, useLeaveGuard, useReadAgainSince } from "~/components/recording";
 import { hint, pageTitle, sectionTitle } from "~/components/styles";
 import { SubmitButton } from "~/components/submit-button";
 import { Button, buttonClasses } from "~/components/ui/button";
@@ -725,18 +725,7 @@ function Sent({
   /** What it was, and what it carried: "Pago", "$20.00 · Efectivo". */
   readonly rows: ReadonlyArray<readonly [label: string, value: string]>;
 }) {
-  return (
-    <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
-      <dt className={hint}>Cuenta</dt>
-      <dd className="min-w-0 font-medium wrap-break-word">{`${whoseBill(bill)} · ${formatDay(bill.day)}`}</dd>
-      {rows.map(([label, value]) => (
-        <Fragment key={label}>
-          <dt className={hint}>{label}</dt>
-          <dd className="min-w-0 font-medium wrap-break-word">{value}</dd>
-        </Fragment>
-      ))}
-    </dl>
-  );
+  return <SentRows rows={[["Cuenta", `${whoseBill(bill)} · ${formatDay(bill.day)}`], ...rows]} />;
 }
 
 const sentPayment = (snapshot: BillPaymentSnapshot) =>
@@ -747,69 +736,6 @@ const sentCorrection = (snapshot: CorrectionSnapshot) =>
     [correctionTitle[snapshot.intent], snapshot.what],
     ...(snapshot.reason === null ? [] : [["Motivo", snapshot.reason] as const]),
   ] as const;
-
-/**
- * Something on its way, or of which nobody knows the outcome: frozen, with
- * only safe ways on. It never says recorded, and never says failed.
- */
-function Pending({
-  recording,
-  title,
-  unknown,
-  ended,
-  sessionEnded,
-  check,
-  heading,
-  onRetry,
-  children,
-}: {
-  readonly recording: boolean;
-  /** What is on its way: "Registrando pago de $20.00…". */
-  readonly title: string;
-  /** What is said when no answer came. */
-  readonly unknown: string;
-  /** What is said when the session ended before an answer came. */
-  readonly ended: string;
-  readonly sessionEnded: boolean;
-  /** Where a User can look for themselves, when there is such a place. */
-  readonly check: { readonly to: string; readonly label: string } | null;
-  readonly heading: Heading;
-  readonly onRetry: () => void;
-  readonly children: ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-6" aria-busy={recording}>
-      <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
-        {recording ? title : "No sabemos si se registró"}
-      </h1>
-      {recording ? (
-        <Notice tone="info">Espera la confirmación.</Notice>
-      ) : (
-        <>
-          <Notice tone="info">{sessionEnded ? ended : unknown}</Notice>
-          <div className="flex flex-col gap-3">
-            {sessionEnded ? (
-              // A document load: the way out of a session that ended.
-              <a href="/entrar" className={buttonClasses({ size: "touch" })}>
-                Entrar de nuevo
-              </a>
-            ) : (
-              <Button type="button" size="touch" onClick={onRetry}>
-                Volver a intentar
-              </Button>
-            )}
-            {check ? (
-              <Link to={check.to} className={buttonClasses({ variant: "outline", size: "touch" })}>
-                {check.label}
-              </Link>
-            ) : null}
-          </div>
-        </>
-      )}
-      {children}
-    </div>
-  );
-}
 
 /** What the server confirmed, kept until the User goes on (UI redesign §5.4). */
 function Confirmed({
@@ -840,14 +766,7 @@ function Confirmed({
       </h1>
       <Notice tone="success">{details}</Notice>
 
-      {change !== null ? (
-        <Card size="sm" role="region" aria-label="Cambio">
-          <CardContent className="flex items-baseline justify-between gap-3">
-            <span className="text-xl font-medium">Cambio</span>
-            <span className="font-heading text-4xl font-semibold tabular-nums">{change}</span>
-          </CardContent>
-        </Card>
-      ) : null}
+      {change !== null ? <Change amount={change} /> : null}
 
       <div className="flex flex-col gap-3">
         {list}
@@ -887,29 +806,22 @@ function Gone({
   );
 }
 
-/**
- * Whether the Bill was read again since `shown` became true: a result on
- * screen gives way to the Bill as it is now. What the loader had read when the
- * result arrived, however old or new, is not that.
- */
-function useReadAgainSince(shown: boolean, data: unknown): boolean {
-  const [readThen, setReadThen] = useState<unknown>(null);
-  useEffect(() => {
-    setReadThen(shown ? data : null);
-  }, [shown]);
-  return shown && readThen !== null && readThen !== data;
-}
-
 /** The lists a Bill is opened from, and what the way back to each is called. */
 const LISTS: Readonly<Record<string, string>> = {
   "/cuentas-abiertas": "Cuentas abiertas",
   "/historial": "Historial",
 };
 
+/** A Customer's page lists their Bills too, and is the way back from one it opened. */
+const isCustomerPage = (path: string) => /^\/clientes\/[^/?#]+$/.test(path);
+
+/** What the way back to a list is called: a path `listBehind` let through, or Cuentas abiertas. */
+const listName = (path: string) => (isCustomerPage(path) ? "Cliente" : LISTS[path]);
+
 /** The list whose row led here, when its link said so (`state={{ fromList }}`). */
 function listBehind(state: unknown): string | null {
   const from = (state as { readonly fromList?: unknown } | null)?.fromList;
-  return typeof from === "string" && Object.hasOwn(LISTS, from) ? from : null;
+  return typeof from === "string" && (Object.hasOwn(LISTS, from) || isCustomerPage(from)) ? from : null;
 }
 
 function BillScreen({ loaderData, actionData }: Route.ComponentProps) {
@@ -1027,20 +939,7 @@ function BillScreen({ loaderData, actionData }: Route.ComponentProps) {
   // What is on its way is not left by accident (UI redesign §6.2).
   const unsure = (phase: string) => phase === "recording" || phase === "unknown";
   const unfinished = unsure(payment.phase) ? "payment" : unsure(correction.phase) ? "correction" : null;
-  const blocker = useBlocker(unfinished !== null);
-  // Answered while the question was on screen: there is nothing left to ask
-  // about, and the answer is what the User has to see.
-  const asking = blocker.state === "blocked";
-  useEffect(() => {
-    if (asking && unfinished === null) blocker.reset();
-  }, [asking, unfinished]);
-  useEffect(() => {
-    if (unfinished === null) return;
-    // The browser decides whether to ask; a phone often does not.
-    const ask = (event: BeforeUnloadEvent) => event.preventDefault();
-    window.addEventListener("beforeunload", ask);
-    return () => window.removeEventListener("beforeunload", ask);
-  }, [unfinished]);
+  const guard = useLeaveGuard(unfinished !== null);
 
   // Whether a list is the history entry before this Bill, and whether the
   // step was reached from the Bill in this history: going back, not on to a
@@ -1067,7 +966,7 @@ function BillScreen({ loaderData, actionData }: Route.ComponentProps) {
   const listLink = (variant: "outline" | "default") => (
     <Link to={listReturn(listPath)} onClick={toList} className={`${buttonClasses({ size: "touch", variant })} ${variant === "outline" ? "self-start" : ""}`}>
       {variant === "outline" ? <BackDrawing /> : null}
-      {LISTS[listPath]}
+      {listName(listPath)}
     </Link>
   );
 
@@ -1217,7 +1116,7 @@ function BillScreen({ loaderData, actionData }: Route.ComponentProps) {
       )}
 
       <ConfirmDialog
-        open={asking && unfinished !== null}
+        open={guard.asking}
         title={unfinished === "correction" ? "La corrección puede estarse registrando" : "El pago puede estarse registrando"}
         description={
           unfinished === "correction"
@@ -1226,10 +1125,8 @@ function BillScreen({ loaderData, actionData }: Route.ComponentProps) {
         }
         confirm="Salir"
         cancel="Quedarme aquí"
-        onConfirm={() => blocker.proceed?.()}
-        onCancel={() => {
-          if (blocker.state === "blocked") blocker.reset();
-        }}
+        onConfirm={guard.leave}
+        onCancel={guard.stay}
       />
     </>
   );

@@ -40,32 +40,34 @@ test("a confirmed sale is not recorded again by a reload or by going back and fo
   expect(await query("SELECT id FROM payments")).toHaveLength(1);
 });
 
-test("a recorded form's words reach the tab that sent it, and no other", async ({
-  page,
-  context,
-  signInAs,
-  addCustomer,
-  query,
-}) => {
-  const beto = await signInAs("worker", "Beto de dos pestañas");
-  const ruiz = await addCustomer("Familia de dos pestañas", { by: beto });
-  await query(
-    `INSERT INTO bills (id, day, opened_by, opened_at, customer_id, total, paid, state, revision)
-     VALUES ('dos-pestanas', '2026-09-29', ?, 1000, ?, 5000, 0, 'open', 0)`,
-    [beto.id, ruiz.id],
+const SAVED = "Se guardaron los cambios de la cuenta.";
+
+/** An Open Bill with no Payment: any User may change its note (spec §4.1). */
+const openBill = (query: (sql: string, params?: Array<string | number | null>) => Promise<unknown>, id: string, by: string) =>
+  query(
+    `INSERT INTO bills (id, day, opened_by, opened_at, total, paid, state, revision)
+     VALUES (?, '2026-09-29', ?, 1000, 5000, 0, 'open', 0)`,
+    [id, by],
   );
 
-  await page.goto(`/clientes/${ruiz.id}`);
-  // The Abonar and the loads it answers with are held, so the words are on
+// Cuenta's **Cliente y nota** stands for every form the router sends: a sale,
+// a Payment, a correction and an Abonar are answered by their own routes
+// (vender-recovery, cuenta-cobrar, corrections and abonar specs).
+test("a recorded form's words reach the tab that sent it, and no other", async ({ page, context, signInAs, query }) => {
+  const beto = await signInAs("worker", "Beto de dos pestañas");
+  await openBill(query, "dos-pestanas", beto.id);
+
+  await page.goto("/cuentas/dos-pestanas");
+  // The form and the loads it answers with are held, so the words are on
   // their way while the other tab looks.
   const held = await holdSubmissions(page, { loads: true });
-  await page.getByRole("region", { name: "Abonar" }).getByLabel("Monto").fill("20.00");
-  await page.getByRole("region", { name: "Abonar" }).getByRole("button", { name: "Abonar" }).click();
+  await page.getByLabel("Nota (opcional)").fill("Mesa 4");
+  await page.getByRole("button", { name: "Guardar" }).click();
   await held.waitFor(1);
 
   const other = await context.newPage();
-  await other.goto(`/clientes/${ruiz.id}`);
-  await expect(other.getByText("Debe $50.00 en 1 cuenta.")).toBeVisible();
+  await other.goto("/cuentas/dos-pestanas");
+  await expect(other.getByRole("heading", { name: "Cuenta", level: 1 })).toBeVisible();
 
   await held.release();
   // The answer is in flight, still held; the other tab asks for the page and
@@ -75,73 +77,56 @@ test("a recorded form's words reach the tab that sent it, and no other", async (
   await expect(other.getByRole("status")).toHaveCount(0);
 
   await held.releaseAll();
-  await expect(page.getByRole("status")).toHaveText("Abono de $20.00 registrado.");
+  await expect(page.getByRole("status")).toHaveText(SAVED);
   await expect(page.getByRole("status")).toHaveCount(1);
   await expect(other.getByRole("status")).toHaveCount(0);
-  expect(await query("SELECT amount FROM payments")).toEqual([{ amount: 2000 }]);
+  expect(await query("SELECT note FROM bills")).toEqual([{ note: "Mesa 4" }]);
 });
 
-test("a refused form keeps what was typed and shows its message", async ({ page, signInAs, addCustomer, query }) => {
+test("a refused form keeps what was typed and shows its message", async ({ page, signInAs, query }) => {
   const beto = await signInAs("worker", "Beto");
-  const ruiz = await addCustomer("Familia Ruiz", { by: beto });
-  await query(
-    `INSERT INTO bills (id, day, opened_by, opened_at, customer_id, total, paid, state, revision)
-     VALUES ('ruiz-a', '2026-09-29', ?, 1000, ?, 5000, 0, 'open', 0)`,
-    [beto.id, ruiz.id],
-  );
+  await openBill(query, "rechazada", beto.id);
 
-  await page.goto(`/clientes/${ruiz.id}`);
-  const abonar = page.getByRole("region", { name: "Abonar" });
-  await abonar.getByLabel("Monto").fill("100.00");
-  await abonar.getByRole("radio", { name: "Transferencia" }).check();
-  await abonar.getByRole("button", { name: "Abonar" }).click();
+  await page.goto("/cuentas/rechazada");
+  await page.getByLabel("Nota (opcional)").fill("Mesa 9");
+  // Another phone changes the Bill before this form is sent.
+  await query("UPDATE bills SET revision = revision + 1 WHERE id = 'rechazada'");
+  await page.getByRole("button", { name: "Guardar" }).click();
 
-  await expect(page.getByRole("alert")).toHaveText("El abono no puede ser mayor que lo que debe el cliente.");
-  await expect(abonar.getByLabel("Monto")).toHaveValue("100.00");
-  await expect(abonar.getByRole("radio", { name: "Transferencia" })).toBeChecked();
-  expect(await query("SELECT id FROM payments")).toHaveLength(0);
+  await expect(page.getByRole("alert")).toContainText("La cuenta cambió mientras la editabas y no se guardó nada.");
+  await expect(page.getByLabel("Nota (opcional)")).toHaveValue("Mesa 9");
+  expect(await query("SELECT note FROM bills")).toEqual([{ note: null }]);
 
   // Once it is recorded, the refusal is gone and the message takes its place.
-  await abonar.getByLabel("Monto").fill("20.00");
-  await abonar.getByRole("button", { name: "Abonar" }).click();
-  await expect(page.getByRole("status")).toHaveText("Abono de $20.00 registrado.");
+  await page.getByRole("button", { name: "Guardar" }).click();
+  await expect(page.getByRole("status")).toHaveText(SAVED);
   await expect(page.getByRole("alert")).toHaveCount(0);
-  await expect(abonar.getByLabel("Monto")).toHaveValue("$30.00");
+  await expect(page.getByLabel("Nota (opcional)")).toHaveValue("Mesa 9");
 });
 
 test.describe("before JavaScript has loaded", () => {
   test.use({ javaScriptEnabled: false });
 
-  test("a document POST is answered with a redirect, and a reload records nothing", async ({
-    page,
-    signInAs,
-    addCustomer,
-    query,
-  }) => {
+  test("a document POST is answered with a redirect, and a reload records nothing", async ({ page, signInAs, query }) => {
     const beto = await signInAs("worker", "Beto");
-    const ruiz = await addCustomer("Familia Ruiz", { by: beto });
-    await query(
-      `INSERT INTO bills (id, day, opened_by, opened_at, customer_id, total, paid, state, revision)
-       VALUES ('ruiz-a', '2026-09-29', ?, 1000, ?, 5000, 0, 'open', 0)`,
-      [beto.id, ruiz.id],
-    );
+    await openBill(query, "sin-javascript", beto.id);
 
-    await page.goto(`/clientes/${ruiz.id}`);
-    await page.getByRole("region", { name: "Abonar" }).getByLabel("Monto").fill("20.00");
+    await page.goto("/cuentas/sin-javascript");
+    await page.getByLabel("Nota (opcional)").fill("Mesa 4");
     const [posted] = await Promise.all([
       page.waitForResponse((response) => response.request().method() === "POST"),
-      page.getByRole("region", { name: "Abonar" }).getByRole("button", { name: "Abonar" }).click(),
+      page.getByRole("button", { name: "Guardar" }).click(),
     ]);
 
     expect(posted.status()).toBe(302);
-    await expect(page.getByRole("status")).toHaveText("Abono de $20.00 registrado.");
-    await expect(page.getByText("Debe $30.00 en 1 cuenta.")).toBeVisible();
-    expect(await query("SELECT id FROM payments")).toHaveLength(1);
+    await expect(page.getByRole("status")).toHaveText(SAVED);
+    await expect(page.getByRole("main")).toContainText("Mesa 4");
+    expect(await query("SELECT note, revision FROM bills")).toEqual([{ note: "Mesa 4", revision: 1 }]);
 
     // The page was loaded with a GET: reloading it is not a submission.
     await page.reload();
-    await expect(page.getByText("Debe $30.00 en 1 cuenta.")).toBeVisible();
+    await expect(page.getByRole("main")).toContainText("Mesa 4");
     await expect(page.getByRole("status")).toHaveCount(0);
-    expect(await query("SELECT id FROM payments")).toHaveLength(1);
+    expect(await query("SELECT note, revision FROM bills")).toEqual([{ note: "Mesa 4", revision: 1 }]);
   });
 });

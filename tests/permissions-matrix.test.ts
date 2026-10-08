@@ -12,7 +12,7 @@ import { appFetch, as, landing, seedUser, type SignedIn, signedIn } from "./supp
 import { seedItem } from "./support/catalog";
 import { seedCustomer } from "./support/customers";
 import { runTest } from "./support/effect";
-import { correctionPath, recordPayment, recordSale, saleForm } from "./support/sales";
+import { correctionPath, recordHandover, recordPayment, recordSale, saleForm } from "./support/sales";
 
 /**
  * Spec §4.1 and §10.6: the server enforces the permissions matrix in every
@@ -156,9 +156,16 @@ const routes: Readonly<Record<string, RouteRule>> = {
     post: { worker: 400, admin: 400 },
   },
   "/clientes/x": {
-    about: "Un Cliente: Open Bills, Abonar, Admin management; unknown id",
+    about: "Un Cliente: what they owe, their Open Bills, Admin management; unknown id",
     signedOut: "redirect",
     get: { worker: 404, admin: 404 },
+    post: { worker: 400, admin: 400 },
+  },
+  "/clientes/x/abonar": {
+    about: "Where a Customer's page sends an Abonar",
+    signedOut: "redirect",
+    // An action and no loader: there is nothing to read here.
+    get: { worker: 400, admin: 400 },
     post: { worker: 400, admin: 400 },
   },
   "/mi-dia": {
@@ -447,18 +454,13 @@ const rows: ReadonlyArray<MatrixRow> = [
       expect(onBill.payment, label).toMatchObject({ amount: 500, owed: 1500, paid: false, canOpen: true });
 
       // For a Customer: one amount over their Open Bills, oldest first.
-      const forCustomer = await who.fetch(
-        `/clientes/${customer.id}`,
-        form({
-          intent: "abonar",
-          method: "cash",
-          amount: "5.00",
-          bill: `${theirs.id}:${theirs.revision}`,
-        }),
-      );
-      const forCustomerPage = await landed(forCustomer, who, label);
-      expect(await forCustomerPage.text(), label).toContain("Abono de $5.00 registrado.");
-      return forCustomer;
+      const forCustomer = await recordHandover(who, customer.id, {
+        amount: "5.00",
+        bills: [`${theirs.id}:${theirs.revision}`],
+      });
+      expect(forCustomer.response.status, label).toBe(200);
+      expect(forCustomer.handover, label).toEqual({ amount: 500, bills: 1, owed: 1500 });
+      return forCustomer.response;
     },
   },
   {
@@ -493,7 +495,8 @@ const rows: ReadonlyArray<MatrixRow> = [
       const page = await who.fetch(`/clientes/${customer.id}`);
       expect(page.status, label).toBe(200);
       const html = await page.text();
-      expect(html, label).toContain("Debe $10.00");
+      expect(html, label).toContain("$10.00");
+      expect(html, label).toContain("En 1 cuenta abierta.");
       expect(html, label).toContain(`/cuentas/${bill.id}`);
       return page;
     },

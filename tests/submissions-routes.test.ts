@@ -10,12 +10,12 @@ import { as, landing, signedIn, type SignedIn } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { savedCustomer } from "./support/customers";
 import { runTest } from "./support/effect";
-import { recordPayment, recordSale } from "./support/sales";
+import { recordHandover, recordPayment, recordSale } from "./support/sales";
 
-// One submission per rendered form, through the Worker (spec §3.4): each page
-// renders its form with a key, and the same form sent twice — a double tap, a
-// retry after a lost response — records once and is answered twice alike. The
-// operations are tested in submissions.test.ts.
+// One submission per form, through the Worker (spec §3.4): a page renders its
+// form with a key, or the screen makes one at the tap, and the same form sent
+// twice — a double tap, a retry after a lost response — records once and is
+// answered twice alike. The operations are tested in submissions.test.ts.
 
 /** The key the page rendered its form with. */
 const keyIn = (html: string) => {
@@ -26,14 +26,6 @@ const keyIn = (html: string) => {
 
 const post = (who: SignedIn, path: string, fields: Record<string, string>) =>
   who.fetch(path, { method: "POST", body: new URLSearchParams(fields) });
-
-/** Where a recorded form redirected, and what the page it lands on says. */
-async function answer(who: SignedIn, response: Response) {
-  const location = response.headers.get("Location");
-  const html = await (await landing(who, response)).text();
-  return { location, message: /role="status"[^>]*>([^<]*)</.exec(html)?.[1], html };
-}
-
 
 describe("a used key with changed content", () => {
   it("records the changed sale sent under a used key, not the earlier answer", async () => {
@@ -97,25 +89,20 @@ describe("a used key with changed content", () => {
     const bill = await runTest(
       recordSelection({ items: [{ itemId: cafe.id, quantity: 4 }], customerId: lupita.id }).pipe(as(ana.user)),
     );
-    const path = `/clientes/${lupita.id}`;
-    const handover = {
-      intent: "abonar",
-      method: "cash",
-      amount: "40.00",
-      bill: `${bill.id}:${bill.revision}`,
-      submissionKey: keyIn(await (await ana.fetch(path)).text()),
-    };
+    // The key is the browser's, made at the tap (`customerPaymentSnapshot`).
+    const handover = { amount: "40.00", bills: [`${bill.id}:${bill.revision}`], submissionKey: "llave-de-abono" };
 
-    const first = await answer(ana, await post(ana, path, handover));
-    expect(first.message).toBe("Abono de $40.00 registrado.");
+    const first = await recordHandover(ana, lupita.id, handover);
+    expect(first.handover).toEqual({ amount: 4000, bills: 1, owed: 6000 });
 
-    const changed = await post(ana, path, { ...handover, amount: "30.00" });
-    expect(changed.status).toBe(400);
-    expect(await changed.text()).toContain("Las cuentas del cliente cambiaron");
+    // The same key with another amount: the first Abonar moved the Bill, so
+    // this is refused visibly, not answered as the first.
+    const changed = await recordHandover(ana, lupita.id, { ...handover, amount: "30.00" });
+    expect([changed.response.status, changed.error]).toEqual([400, paymentMessages.CustomerBillsChanged]);
     expect(await runTest(listCustomerHandovers(lupita.id).pipe(as(ana.user)))).toHaveLength(1);
 
-    const repeat = await answer(ana, await post(ana, path, handover));
-    expect(repeat.message).toBe(first.message);
+    const repeat = await recordHandover(ana, lupita.id, handover);
+    expect(repeat.handover).toEqual(first.handover);
     expect(await runTest(listCustomerHandovers(lupita.id).pipe(as(ana.user)))).toHaveLength(1);
   });
 
@@ -269,23 +256,17 @@ describe("Abonar", () => {
     const bill = await runTest(
       recordSelection({ items: [{ itemId: cafe.id, quantity: 4 }], customerId: lupita.id }).pipe(as(ana.user)),
     );
-    const path = `/clientes/${lupita.id}`;
-    const handover = {
-      intent: "abonar",
-      method: "cash",
-      amount: "40.00",
-      bill: `${bill.id}:${bill.revision}`,
-      submissionKey: keyIn(await (await ana.fetch(path)).text()),
-    };
+    // One snapshot, sent twice: a double tap, or a retry after a lost answer.
+    const handover = { amount: "40.00", bills: [`${bill.id}:${bill.revision}`], submissionKey: "llave-de-abono-doble" };
 
-    const first = await answer(ana, await post(ana, path, handover));
-    const second = await answer(ana, await post(ana, path, handover));
+    const answers = [await recordHandover(ana, lupita.id, handover), await recordHandover(ana, lupita.id, handover)];
 
-    expect(first.message).toContain("$40.00");
-    expect([second.location, second.message]).toEqual([first.location, first.message]);
+    expect(answers.map(({ response, handover: recorded }) => [response.status, recorded])).toEqual([
+      [200, { amount: 4000, bills: 1, owed: 6000 }],
+      [200, { amount: 4000, bills: 1, owed: 6000 }],
+    ]);
     expect(await runTest(listCustomerOpenBills(lupita.id).pipe(as(ana.user)))).toMatchObject([{ owed: 6000 }]);
     expect(await runTest(listCustomerHandovers(lupita.id).pipe(as(ana.user)))).toHaveLength(1);
-    expect(keyIn(first.html)).not.toBe(handover.submissionKey);
   });
 });
 
