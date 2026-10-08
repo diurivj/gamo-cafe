@@ -1,6 +1,7 @@
 import { expect, test } from "./fixtures";
 import { payBill, removeLine, removePayment, seeBill, voidBill } from "./support/bill";
 import { goTo } from "./support/navigate";
+import { adjust, cancelAdjustment, openAdjustments, seeStock } from "./support/stock";
 import { leaveOpen } from "./support/sell";
 
 // Historial (spec §6.2, §8.4, §8.5, §8.6, §10.4): every correction and
@@ -53,15 +54,10 @@ test("§10.4: each correction and Adjustment appears in Historial with its autho
 
   // An Adjustment, and its cancellation (spec §8.6).
   await page.goto("/inventario");
-  await page.getByLabel("Producto").selectOption({ label: "Agua mineral" });
-  await page.getByLabel("Unidades").fill("5");
-  await page.getByLabel("Nota (opcional)").fill("Compra semanal");
-  await page.getByRole("button", { name: "Registrar ajuste" }).click();
-
-  const reciente = page.locator("li").filter({ hasText: "Entrada +5" }).first();
-  await reciente.getByLabel("Motivo de la cancelación").fill("Se contó dos veces");
-  await reciente.getByRole("button", { name: "Cancelar ajuste" }).click();
-  await expect(reciente).toContainText("Se contó dos veces");
+  await adjust(page, { item: "Agua mineral", units: "5", note: "Compra semanal" });
+  await seeStock(page);
+  await openAdjustments(page);
+  await cancelAdjustment(page, "Entrada de 5 de Agua mineral", "Se contó dos veces");
 
   // Historial: newest first, each with who, when and why.
   await goTo(page, "Historial");

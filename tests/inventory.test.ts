@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { getItem, retireItem, updateItem } from "~/backend/catalog";
 import {
+  adjustmentStanding,
   cancelAdjustment,
   listInventory,
   listRecentAdjustments,
@@ -261,6 +262,34 @@ describe("a Worker", () => {
         expect((yield* Effect.flip(cancelAdjustment(id, "porque sí").pipe(as(beto))))._tag).toBe("AdminOnly");
 
         expect(yield* stockOf(item.id).pipe(as(ana))).toBe(2);
+      }),
+    ));
+});
+
+describe("adjustmentStanding", () => {
+  it("answers the Item's Stock now, and who cancelled the Adjustment and why", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const item = yield* seedItem({ name: "Con ajuste vigente", startingStock: 3, by: ana });
+        const { id } = yield* recordAdjustment({ itemId: item.id, reason: "restock", units: 4 }).pipe(as(ana));
+
+        expect(yield* adjustmentStanding(id).pipe(as(ana))).toEqual({ stock: 7, cancellation: null });
+
+        yield* cancelAdjustment(id, " Se contó dos veces ").pipe(as(ana));
+        expect(yield* adjustmentStanding(id).pipe(as(ana))).toEqual({
+          stock: 3,
+          cancellation: { by: ana.id, reason: "Se contó dos veces" },
+        });
+        expect((yield* Effect.flip(adjustmentStanding("no-existe").pipe(as(ana))))._tag).toBe("AdjustmentNotFound");
+      }),
+    ));
+
+  it("is refused to a Worker", () =>
+    runTest(
+      Effect.gen(function* () {
+        const beto = yield* seedUser("worker");
+        expect((yield* Effect.flip(adjustmentStanding("cualquiera").pipe(as(beto))))._tag).toBe("AdminOnly");
       }),
     ));
 });

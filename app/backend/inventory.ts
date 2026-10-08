@@ -89,9 +89,9 @@ export interface NewAdjustmentInput {
   /** Trimmed; empty or absent is no note. */
   readonly note?: string | null;
   /**
-   * The key of the form this Adjustment came from, made when the form was
-   * rendered (spec §3.4). A second Adjustment with the same key records
-   * nothing and is answered as the first.
+   * The key of the submission this Adjustment came from, made by the screen
+   * at the tap (spec §3.4). A second Adjustment with the same key and content
+   * records nothing and is answered as the first.
    */
   readonly submissionKey?: string | null;
 }
@@ -205,6 +205,37 @@ export const cancelAdjustment = Effect.fn("cancelAdjustment")(function* (adjustm
     if (!state || state.exists === 0) return yield* new AdjustmentNotFound();
     return yield* new AdjustmentAlreadyCancelled();
   }
+});
+
+const StandingRow = Schema.Struct({
+  stock: Schema.Int,
+  cancelledBy: Schema.NullOr(Schema.String),
+  cancelReason: Schema.NullOr(Schema.String),
+});
+
+/**
+ * How an Adjustment stands now: its Item's Stock, and who cancelled it and
+ * why, when someone did. It is what the
+ * route answers a recorded change with, and how it tells a cancellation sent
+ * again after its answer was lost from one somebody else made.
+ */
+export const adjustmentStanding = Effect.fn("adjustmentStanding")(function* (adjustmentId: string) {
+  yield* requireAdmin;
+  const db = yield* Db;
+  const row = yield* db.first(
+    StandingRow,
+    `SELECT COALESCE(s.units, 0) AS stock, c.cancelled_by AS cancelledBy, c.reason AS cancelReason
+     FROM adjustments a
+     LEFT JOIN stock_levels s ON s.item_id = a.item_id
+     LEFT JOIN adjustment_cancellations c ON c.adjustment_id = a.id
+     WHERE a.id = ?`,
+    adjustmentId,
+  );
+  if (!row) return yield* new AdjustmentNotFound();
+  return {
+    stock: row.stock,
+    cancellation: row.cancelledBy === null ? null : { by: row.cancelledBy, reason: row.cancelReason ?? "" },
+  };
 });
 
 const RecentRow = Schema.Struct({

@@ -148,10 +148,10 @@ it("a Worker's pages carry no Stock, no other User's totals, no History and no P
   );
   expect(voided.status, "the Admin voids Carla's Bill").toBe(200);
   const adjusted = await ana.fetch(
-    "/inventario",
-    form({ intent: "record-adjustment", itemId: mine.id, reason: "waste", units: "2" }),
+    "/inventario/ajustar",
+    form({ intent: "registrar", itemId: mine.id, reason: "waste", units: "2" }),
   );
-  expect(adjusted.status, "the Admin records an Adjustment").toBe(302);
+  expect(adjusted.status, "the Admin records an Adjustment").toBe(200);
 
   // The Voided Bill leaves her list, and its page stays out of her reach.
   const openAfter = await carla.fetch("/cuentas-abiertas");

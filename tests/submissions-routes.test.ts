@@ -10,7 +10,7 @@ import { as, landing, signedIn, type SignedIn } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { savedCustomer } from "./support/customers";
 import { runTest } from "./support/effect";
-import { recordHandover, recordPayment, recordSale } from "./support/sales";
+import { recordHandover, recordPayment, recordSale, recordStockChange } from "./support/sales";
 
 // One submission per form, through the Worker (spec §3.4): a page renders its
 // form with a key, or the screen makes one at the tap, and the same form sent
@@ -109,26 +109,21 @@ describe("a used key with changed content", () => {
   it("records a changed Adjustment sent under a used key, and answers the first content alike", async () => {
     const ana = await signedIn("admin", "Ana");
     const cafe = await runTest(seedItem({ by: ana.user }));
-    const restock = {
-      intent: "record-adjustment",
-      itemId: cafe.id,
-      reason: "restock",
-      units: "12",
-      submissionKey: keyIn(await (await ana.fetch("/inventario")).text()),
-    };
+    // The key is the browser's, made at the tap (`adjustmentSnapshot`).
+    const restock = { intent: "registrar", itemId: cafe.id, reason: "restock", units: "12", submissionKey: "llave-de-ajuste" };
 
-    const first = await post(ana, "/inventario", restock);
-    const changed = await post(ana, "/inventario", { ...restock, units: "5" });
+    const first = await recordStockChange(ana, restock);
+    const changed = await recordStockChange(ana, { ...restock, units: "5" });
 
-    expect([first.status, changed.status]).toEqual([302, 302]);
-    expect(await runTest(stockOf(cafe.id).pipe(as(ana.user)))).toBe(17);
+    expect([first.change, changed.change]).toEqual([{ stock: 12 }, { stock: 17 }]);
     const recorded = (await runTest(listRecentAdjustments().pipe(as(ana.user)))).filter(
       (row) => row.itemId === cafe.id,
     );
     expect(recorded.map((row) => row.units).sort((a, b) => a - b)).toEqual([5, 12]);
 
-    const repeat = await post(ana, "/inventario", restock);
-    expect(repeat.status).toBe(302);
+    // The repeat records nothing; it answers the Stock as it is now.
+    const repeat = await recordStockChange(ana, restock);
+    expect(repeat.change).toEqual({ stock: 17 });
     expect(await runTest(stockOf(cafe.id).pipe(as(ana.user)))).toBe(17);
   });
 
@@ -271,26 +266,22 @@ describe("Abonar", () => {
 });
 
 describe("Inventario", () => {
-  it("records an Adjustment sent twice once", async () => {
+  it("records an Adjustment sent twice once, alone or at the same moment", async () => {
     const ana = await signedIn("admin", "Ana");
     const cafe = await runTest(seedItem({ by: ana.user }));
-    const restock = {
-      intent: "record-adjustment",
-      itemId: cafe.id,
-      reason: "restock",
-      units: "12",
-      submissionKey: keyIn(await (await ana.fetch("/inventario")).text()),
-    };
+    const restock = { intent: "registrar", itemId: cafe.id, reason: "restock", units: "12", submissionKey: "llave-doble" };
 
-    const first = await post(ana, "/inventario", restock);
-    const second = await post(ana, "/inventario", restock);
+    const [first, second] = await Promise.all([recordStockChange(ana, restock), recordStockChange(ana, restock)]);
+    const third = await recordStockChange(ana, restock);
 
-    expect([first.status, second.status]).toEqual([302, 302]);
-    expect(second.headers.get("Location")).toBe(first.headers.get("Location"));
+    expect([first, second, third].map((sent) => [sent.response.status, sent.change])).toEqual([
+      [200, { stock: 12 }],
+      [200, { stock: 12 }],
+      [200, { stock: 12 }],
+    ]);
     expect(await runTest(stockOf(cafe.id).pipe(as(ana.user)))).toBe(12);
     const recorded = await runTest(listRecentAdjustments().pipe(as(ana.user)));
     expect(recorded.filter((row) => row.itemId === cafe.id)).toHaveLength(1);
-    expect(keyIn(await (await landing(ana, first)).text())).not.toBe(restock.submissionKey);
   });
 });
 

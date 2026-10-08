@@ -1,7 +1,9 @@
 import type { BillPaymentRefusal, BillPaymentResult } from "~/shared/bill-payment";
 import type { CorrectionRefusal, CorrectionResult } from "~/shared/correction";
 import type { CustomerPaymentRefusal, CustomerPaymentResult } from "~/shared/customer-payment";
+import type { Refusal } from "~/shared/record-request";
 import type { SaleRefusal, SaleResult } from "~/shared/sale";
+import { STOCK_CHANGE_PATH, type StockChangeResult } from "~/shared/stock-change";
 
 import type { SignedIn } from "./auth";
 
@@ -124,4 +126,21 @@ export async function recordHandover(
   const response = await who.fetch(handoverPath(customerId), { method: "POST", body });
   const answer = (await response.clone().json()) as Partial<{ handover: CustomerPaymentResult } & CustomerPaymentRefusal>;
   return { response, handover: answer.handover, error: answer.error, changed: answer.changed };
+}
+
+/**
+ * Sends one change of Stock as Inventario does and reads the route's JSON
+ * answer: the Item's Stock as the change left it, or the refusal. A Worker is
+ * answered 403 with no JSON, so `change` and `error` are both undefined.
+ *
+ *     const { change } = await recordStockChange(ana, { intent: "registrar", itemId, reason: "restock", units: "4" });
+ *     await recordStockChange(ana, { intent: "cancelar", adjustmentId, reason: "Se contó dos veces" });
+ */
+export async function recordStockChange(who: Pick<SignedIn, "fetch">, fields: Record<string, string>) {
+  const response = await who.fetch(STOCK_CHANGE_PATH, { method: "POST", body: new URLSearchParams(fields) });
+  const answer = (await response
+    .clone()
+    .json()
+    .catch(() => ({}))) as Partial<{ change: StockChangeResult } & Refusal>;
+  return { response, change: answer.change, error: answer.error };
 }

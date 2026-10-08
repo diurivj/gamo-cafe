@@ -192,6 +192,12 @@ const routes: Readonly<Record<string, RouteRule>> = {
     about: "Inventario: Stock, Minimums, Adjustments, Admin only",
     signedOut: "redirect",
     get: { worker: 403, admin: 200 },
+  },
+  "/inventario/ajustar": {
+    about: "Where Inventario sends an Adjustment or its cancellation, Admin only",
+    signedOut: "redirect",
+    // An action and no loader: there is nothing to read here.
+    get: { worker: 400, admin: 400 },
     post: { worker: 403, admin: 400 },
   },
   "/inventario/conteo": {
@@ -726,8 +732,9 @@ const rows: ReadonlyArray<MatrixRow> = [
       expect(stock.status, label).toBe(200);
       const stockHtml = await stock.text();
       expect(stockHtml, label).toContain(item.name);
-      expect(stockHtml, label).toContain("Existencias: 3 · Mínimo: 2");
-      expect(stockHtml, label).toContain("Entrada +3");
+      expect(stockHtml, label).toContain("Mínimo 2");
+      const adjustments = await who.fetch("/inventario?paso=ajustes");
+      expect(await adjustments.text(), label).toContain(`Entrada +3 · ${item.name}`);
 
       const counts = await who.fetch("/inventario/conteo");
       expect(counts.status, label).toBe(200);
@@ -741,28 +748,30 @@ const rows: ReadonlyArray<MatrixRow> = [
     admin: "yes",
     async check(who, label) {
       const item = await seedItemFor({ startingStock: 0 });
-      const adjustment = { intent: "record-adjustment", itemId: item.id, reason: "restock", units: "5" };
+      const adjustment = { intent: "registrar", itemId: item.id, reason: "restock", units: "5" };
 
       if (who.user.role === "worker") {
-        const recorded = await who.fetch("/inventario", form(adjustment));
+        const recorded = await who.fetch("/inventario/ajustar", form(adjustment));
         expect(recorded.status, label).toBe(403);
         const count = await who.fetch("/inventario/conteo", form({ intent: "review", [`units.${item.id}`]: "5" }));
         expect(count.status, label).toBe(403);
         return count;
       }
 
-      const recorded = await who.fetch("/inventario", form(adjustment));
-      const recordedPage = await landed(recorded, who, label);
-      const recordedHtml = await recordedPage.text();
-      expect(recordedHtml, label).toContain("Entrada +5");
+      const recorded = await who.fetch("/inventario/ajustar", form(adjustment));
+      expect([recorded.status, await recorded.json()], label).toEqual([200, { change: { stock: 5 } }]);
+      const recordedHtml = await (await who.fetch("/inventario?paso=ajustes")).text();
+      expect(recordedHtml, label).toContain(`Entrada +5 · ${item.name}`);
 
-      const adjustmentId = fieldOf(recordedHtml, "adjustmentId");
+      const adjustmentId = /paso=cancelar&amp;ajuste=([^"&]+)"/.exec(recordedHtml)?.[1] ?? "";
       const cancelled = await who.fetch(
-        "/inventario",
-        form({ intent: "cancel-adjustment", adjustmentId, reason: "Se contó dos veces" }),
+        "/inventario/ajustar",
+        form({ intent: "cancelar", adjustmentId, reason: "Se contó dos veces" }),
       );
-      const cancelledPage = await landed(cancelled, who, label);
-      expect(await cancelledPage.text(), label).toContain("Cancelado: Se contó dos veces");
+      expect([cancelled.status, await cancelled.json()], label).toEqual([200, { change: { stock: 0 } }]);
+      expect(await (await who.fetch("/inventario?paso=ajustes")).text(), label).toContain(
+        "Cancelado: Se contó dos veces",
+      );
 
       const review = await who.fetch(
         "/inventario/conteo",

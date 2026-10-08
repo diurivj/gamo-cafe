@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { adjust, expectStock, seeStock } from "./support/stock";
 
 // Flow §8.7: an Admin starts a Conteo on Inventario, enters the units found
 // without seeing expected numbers, reviews expected/found/difference, confirms,
@@ -18,7 +19,7 @@ test("an Admin counts the shelf without expected numbers, confirms, and reads th
   await addItem({ name: "Refresco", price: 1800, category, stock: { units: 7, by: ana } });
 
   await page.goto("/inventario");
-  await page.getByRole("link", { name: "Iniciar conteo" }).click();
+  await page.getByRole("link", { name: "Contar existencias" }).click();
   await expect(page.getByRole("heading", { name: "Conteo", level: 1 })).toBeVisible();
 
   // The entry step shows the Item names and nothing about the expected numbers.
@@ -49,9 +50,9 @@ test("an Admin counts the shelf without expected numbers, confirms, and reads th
 
   // Stock takes the counted value.
   await page.goto("/inventario");
-  await expect(page.getByRole("listitem", { name: "Café de olla", exact: true })).toContainText("Existencias: 7");
-  await expect(page.getByRole("listitem", { name: "Pan dulce", exact: true })).toContainText("Existencias: 6");
-  await expect(page.getByRole("listitem", { name: "Refresco", exact: true })).toContainText("Existencias: 7");
+  await expectStock(page, "Café de olla", 7);
+  await expectStock(page, "Pan dulce", 6);
+  await expectStock(page, "Refresco", 7);
 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
@@ -75,13 +76,9 @@ test("reads the Stock expected at the moment of confirming, even when Stock move
   // A sale (an Entrada stands in for it) lands from another phone before confirming.
   const other = await context.newPage();
   await other.goto("/inventario");
-  await other.getByRole("combobox", { name: "Producto" }).selectOption({ label: "Agua embotellada" });
-  await other.getByRole("combobox", { name: "Motivo" }).selectOption({ label: "Entrada" });
-  await other.getByLabel("Unidades").fill("5");
-  await other.getByRole("button", { name: "Registrar ajuste" }).click();
-  await expect(other.getByRole("listitem", { name: "Agua embotellada", exact: true })).toContainText(
-    "Existencias: 15",
-  );
+  await adjust(other, { item: "Agua embotellada", units: "5" });
+  await seeStock(other);
+  await expectStock(other, "Agua embotellada", 15);
 
   await page.getByRole("button", { name: "Confirmar conteo" }).click();
 

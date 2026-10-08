@@ -33,7 +33,10 @@ export function Notice({ tone, id, className, children }: Props) {
       className={className}
     >
       <ToneDrawing tone={tone} />
-      <AlertDescription className={tone === "error" ? "font-medium" : "text-foreground"}>{children}</AlertDescription>
+      {/* A long name in its words breaks instead of sticking out of a narrow phone. */}
+      <AlertDescription className={`min-w-0 wrap-anywhere ${tone === "error" ? "font-medium" : "text-foreground"}`}>
+        {children}
+      </AlertDescription>
     </Alert>
   );
 }
