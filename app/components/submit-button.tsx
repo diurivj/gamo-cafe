@@ -19,7 +19,9 @@ interface Props extends Omit<ComponentProps<"button">, "type"> {
  * The button that was tapped is pending from the tap until the page has the
  * answer: `aria-busy`, disabled and pulsing. Every other submit button is
  * disabled while a form is on its way, so nothing is sent twice. It shows
- * that the form is on its way and never what the form will record.
+ * that the form is on its way and never what the form will record. When the
+ * answer is on the page and nothing else took the focus, the button that was
+ * tapped has it again.
  *
  * Inside a `<Form>` it follows the navigation by itself. Inside a
  * `<fetcher.Form>`, pass `fetcher={fetcher}`. The form must be sent by the
@@ -35,6 +37,8 @@ export function SubmitButton({ fetcher, pendingLabel, disabled, className = "", 
   // Whether this button sent the form that is on its way. It is set in the
   // same turn as the tap; the router's own state follows a moment later.
   const [tapped, setTapped] = useState(false);
+  /** Whether the keyboard was on this button when it sent its form. */
+  const hadFocus = useRef(false);
 
   useEffect(() => {
     // On the window, so it runs after the router has read the form: a button
@@ -42,7 +46,9 @@ export function SubmitButton({ fetcher, pendingLabel, disabled, className = "", 
     // and `value` say which form this is. The router cancels the browser's
     // own submission of a form it sends.
     const sent = (event: SubmitEvent) => {
-      if (event.submitter === button.current) setTapped(event.defaultPrevented);
+      if (event.submitter !== button.current) return;
+      setTapped(event.defaultPrevented);
+      hadFocus.current = document.activeElement === button.current;
     };
     window.addEventListener("submit", sent);
     return () => window.removeEventListener("submit", sent);
@@ -51,6 +57,15 @@ export function SubmitButton({ fetcher, pendingLabel, disabled, className = "", 
   useEffect(() => {
     if (!onItsWay) setTapped(false);
   }, [onItsWay]);
+  // A disabled button cannot hold the focus, so the keyboard that sent the
+  // form gets it back once the button can take it, unless the answer's screen
+  // took it elsewhere.
+  useEffect(() => {
+    if (tapped || onItsWay || !hadFocus.current) return;
+    hadFocus.current = false;
+    const active = document.activeElement;
+    if (active === null || active === document.body) button.current?.focus({ preventScroll: true });
+  }, [tapped, onItsWay]);
 
   return (
     <button

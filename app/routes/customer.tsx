@@ -571,8 +571,17 @@ function Confirmed({
   );
 }
 
-/** Whether Clientes is the history entry behind this page: its link says so (`state={{ fromList }}`). */
-const cameFromList = (state: unknown) => (state as { readonly fromList?: unknown } | null)?.fromList === "/clientes";
+/** The lists a Customer is opened from, and what the way back to each is called. */
+const LISTS: Readonly<Record<string, string>> = {
+  "/clientes": "Clientes",
+  "/por-cobrar": "Por cobrar",
+};
+
+/** The list whose row led here, when its link said so (`state={{ fromList }}`). */
+function listBehind(state: unknown): string | null {
+  const from = (state as { readonly fromList?: unknown } | null)?.fromList;
+  return typeof from === "string" && Object.hasOwn(LISTS, from) ? from : null;
+}
 
 function CustomerScreen({ loaderData, actionData }: Route.ComponentProps) {
   const { customer, openBills, owed, notice: landingNotice } = loaderData;
@@ -657,10 +666,11 @@ function CustomerScreen({ loaderData, actionData }: Route.ComponentProps) {
   // What is on its way is not left by accident (UI redesign §6.2).
   const guard = useLeaveGuard(handover.phase === "recording" || handover.phase === "unknown");
 
-  // Whether Clientes is the history entry before this Customer, and whether
+  // Whether a list is the history entry before this Customer, and whether
   // the step was reached from the Customer in this history: going back, not
   // on to a new entry, is what keeps the list's search and its place.
-  const [fromList] = useState(() => cameFromList(location.state));
+  const [cameFrom] = useState(() => listBehind(location.state));
+  const listPath = cameFrom ?? "/clientes";
   const cameFromCustomer = useRef(false);
   /** From the step to the Customer, without leaving a second entry of the Customer behind. */
   function leaveStep() {
@@ -685,7 +695,7 @@ function CustomerScreen({ loaderData, actionData }: Route.ComponentProps) {
   };
   const toList = (event: MouseEvent) => {
     const entriesBack = !atStep ? 1 : cameFromCustomer.current ? 2 : null;
-    if (!fromList || entriesBack === null) return;
+    if (cameFrom === null || entriesBack === null) return;
     event.preventDefault();
     void navigate(-entriesBack);
   };
@@ -752,12 +762,12 @@ function CustomerScreen({ loaderData, actionData }: Route.ComponentProps) {
           state={state}
           list={
             <Link
-              to={listReturn("/clientes")}
+              to={listReturn(listPath)}
               onClick={toList}
               className={`${buttonClasses({ size: "touch", variant: "outline" })} self-start`}
             >
               <BackDrawing />
-              Clientes
+              {LISTS[listPath]}
             </Link>
           }
           abonarHref={abonarHref}

@@ -5,18 +5,24 @@ import { CurrentUser } from "~/backend/current-user";
 import { listOwed } from "~/backend/owed";
 import { run } from "~/backend/run.server";
 import { refuseRead, requireAdminUser } from "~/catalog-forms.server";
+import { ChevronDrawing } from "~/components/icons";
 import { LoadMore, usePagedList } from "~/components/paged-list";
+import { hint, pageTitle } from "~/components/styles";
+import { Badge } from "~/components/ui/badge";
+import { Card, CardContent } from "~/components/ui/card";
 import { CURSOR_PARAM, cursorOf, nextText } from "~/shared/cursor";
 import { formatDay } from "~/shared/day";
 import { formatMoney } from "~/shared/money";
 
 import type { Route } from "./+types/owed";
 
-// Por cobrar (spec §6.2): each Customer with what they owe and the Day of
-// their oldest Open Bill, then the Open Bills with no Customer, flagged when
-// from an earlier Day. Overall Owed at the top. Admin only (spec §4.1). The
+// Por cobrar (spec §6.2, UI redesign §7.1): what is owed now, whatever Day
+// it was consumed on. The overall Owed leads; then each Customer with what
+// they owe and the Day of their oldest Open Bill; then the Open Bills with no
+// Customer, by their note, flagged when from an earlier Day. It has no date
+// to choose: it is not a figure of a Day. Admin only (spec §4.1). The
 // Customers are bounded by who buys on credit; the loose Bills come a page at
-// a time.
+// a time. A row leads to the Customer or the Bill, where the money is taken.
 
 export const meta: Route.MetaFunction = () => [{ title: "Por cobrar · Gamo Cafe" }];
 
@@ -34,39 +40,65 @@ type Data = Route.ComponentProps["loaderData"];
 const pageOf = (data: Data) => ({ rows: data.owed.bills, next: data.owed.next });
 const hrefFor = (cursor: string) => `/por-cobrar?${CURSOR_PARAM}=${encodeURIComponent(cursor)}`;
 
-const row = "block rounded-2xl border border-stone-300 bg-white p-4 active:bg-stone-100";
+// A label and its amount side by side, or the amount under it when both do not fit.
+const figureRow = "flex flex-wrap items-baseline justify-between gap-x-3";
+// An amount too long for its line breaks where it must: it is never cut.
+const amountClasses = "max-w-full min-w-0 font-heading font-semibold wrap-anywhere tabular-nums";
+const rowCard = "transition-colors hover:bg-muted/60 active:bg-muted";
+const leadsOn = "inline-flex items-center gap-1 font-medium";
 
 export default function Owed({ loaderData }: Route.ComponentProps) {
   const { total, customers } = loaderData.owed;
   const { rows: bills, more } = usePagedList({ id: "sin-cliente", data: loaderData, pageOf, hrefFor });
 
   return (
-    <div className="flex flex-col gap-8">
-      <h1 className="text-3xl font-semibold tracking-tight">Por cobrar</h1>
+    <div className="flex flex-col gap-6">
+      <h1 className={pageTitle}>Por cobrar</h1>
 
-      <p className="rounded-2xl border border-stone-200 bg-white p-4 text-lg">
-        {"Total por cobrar: "}
-        <span className="font-semibold tabular-nums">{formatMoney(total)}</span>
-      </p>
+      <Card size="sm">
+        <CardContent>
+          <dl className={figureRow}>
+            <dt className="text-xl font-medium">Se debe ahora</dt>
+            <dd data-figure="owed" className={`${amountClasses} text-4xl`}>
+              {formatMoney(total)}
+            </dd>
+            <dd className={`basis-full ${hint}`}>Lo que falta por pagar de las cuentas abiertas, de cualquier fecha.</dd>
+          </dl>
+        </CardContent>
+      </Card>
 
-      <section aria-labelledby="clientes-por-cobrar">
+      <section aria-labelledby="clientes-por-cobrar" className="flex flex-col gap-3">
         <h2 id="clientes-por-cobrar" className="text-xl font-semibold">
           Clientes
         </h2>
         {customers.length === 0 ? (
-          <p className="mt-3 text-stone-600">Ningún cliente debe nada.</p>
+          <p className={hint}>Ningún cliente debe nada.</p>
         ) : (
-          <ul aria-label="Clientes por cobrar" className="mt-3 flex flex-col gap-2">
+          <ul aria-label="Clientes por cobrar" className="flex flex-col gap-3">
             {customers.map((customer) => (
               <li key={customer.customerId}>
-                <Link to={`/clientes/${customer.customerId}`} className={row}>
-                  <span className="flex items-start justify-between gap-3">
-                    <span className="min-w-0 truncate text-lg font-medium">{customer.name}</span>
-                    <span className="shrink-0 font-semibold tabular-nums">{formatMoney(customer.owed)}</span>
-                  </span>
-                  <span className="mt-1 block text-stone-600">
-                    {`Cuenta más antigua: ${formatDay(customer.oldestDay)}`}
-                  </span>
+                {/* The Customer's page goes back to this entry, not on to Clientes. */}
+                <Link
+                  to={`/clientes/${customer.customerId}`}
+                  state={{ fromList: "/por-cobrar" }}
+                  className="block rounded-2xl"
+                >
+                  <Card size="sm" className={rowCard}>
+                    <CardContent className="flex flex-col gap-2">
+                      <span className="max-w-full min-w-0 text-xl font-semibold wrap-anywhere">{customer.name}</span>
+                      <span className={`${figureRow} border-t pt-2`}>
+                        <span className="font-medium">Debe</span>{" "}
+                        <span className={`${amountClasses} text-2xl`}>{formatMoney(customer.owed)}</span>
+                      </span>
+                      <span className="flex flex-wrap items-center justify-between gap-x-3">
+                        <span className={hint}>{`Cuenta más antigua: ${formatDay(customer.oldestDay)}`}</span>
+                        <span className={leadsOn}>
+                          Ver cliente
+                          <ChevronDrawing className="size-5" />
+                        </span>
+                      </span>
+                    </CardContent>
+                  </Card>
                 </Link>
               </li>
             ))}
@@ -74,28 +106,43 @@ export default function Owed({ loaderData }: Route.ComponentProps) {
         )}
       </section>
 
-      <section aria-labelledby="cuentas-sin-cliente">
+      <section aria-labelledby="cuentas-sin-cliente" className="flex flex-col gap-3">
         <h2 id="cuentas-sin-cliente" className="text-xl font-semibold">
           Cuentas sin cliente
         </h2>
         {bills.length === 0 ? (
-          <p className="mt-3 text-stone-600">No hay cuentas abiertas sin cliente.</p>
+          <p className={hint}>No hay cuentas abiertas sin cliente.</p>
         ) : (
-          <ul aria-label="Cuentas sin cliente" className="mt-3 flex flex-col gap-2">
+          <ul aria-label="Cuentas sin cliente" className="flex flex-col gap-3">
             {bills.map((bill) => (
               <li key={bill.id} data-owed-bill-id={bill.id}>
-                <Link to={`/cuentas/${bill.id}`} className={row}>
-                  <span className="flex items-start justify-between gap-3">
-                    <span className="block text-stone-600">{formatDay(bill.day)}</span>
-                    {bill.fromEarlierDay ? (
-                      <span className="shrink-0 rounded-full bg-amber-100 px-3 py-1 text-sm font-medium">
-                        De un día anterior
+                {/* Cuenta goes back to this entry, not on to a new list. */}
+                <Link to={`/cuentas/${bill.id}`} state={{ fromList: "/por-cobrar" }} className="block rounded-2xl">
+                  <Card size="sm" className={rowCard}>
+                    <CardContent className="flex flex-col gap-2">
+                      {/* The note is all that says whose it is. */}
+                      <span className="max-w-full min-w-0 text-xl font-semibold wrap-anywhere">
+                        {bill.note ?? "Sin nota"}
                       </span>
-                    ) : null}
-                  </span>
-                  <span className="mt-2 block tabular-nums text-stone-700">
-                    {`Total ${formatMoney(bill.total)} · Pagado ${formatMoney(bill.paid)} · Debe ${formatMoney(bill.owed)}`}
-                  </span>
+                      <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <span className={hint}>{formatDay(bill.day)}</span>
+                        {bill.fromEarlierDay ? <Badge variant="secondary">De un día anterior</Badge> : null}
+                      </span>
+                      <span className={`${figureRow} border-t pt-2`}>
+                        <span className="font-medium">Debe</span>{" "}
+                        <span className={`${amountClasses} text-2xl`}>{formatMoney(bill.owed)}</span>
+                      </span>
+                      <span className="flex flex-wrap items-center justify-between gap-x-3">
+                        <span className={`max-w-full min-w-0 wrap-anywhere tabular-nums ${hint}`}>
+                          {`Total ${formatMoney(bill.total)} · Pagado ${formatMoney(bill.paid)}`}
+                        </span>
+                        <span className={leadsOn}>
+                          Ver cuenta
+                          <ChevronDrawing className="size-5" />
+                        </span>
+                      </span>
+                    </CardContent>
+                  </Card>
                 </Link>
               </li>
             ))}

@@ -3,10 +3,12 @@ import { env } from "cloudflare:workers";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { recordSelection, takePayment } from "~/backend/bills";
+import { getBill, recordSelection, takePayment } from "~/backend/bills";
+import { removeLine } from "~/backend/corrections";
 import type { CurrentUser } from "~/backend/current-user";
 import { retireCustomer } from "~/backend/customers";
 import { Db } from "~/backend/db";
+import { homeSummary } from "~/backend/home";
 import { listOwed, OWED_BILLS_PER_PAGE } from "~/backend/owed";
 import type { Cursor } from "~/shared/cursor";
 
@@ -126,6 +128,64 @@ describe("listOwed", () => {
 
         const nextDay = yield* listOwed().pipe(as(ana));
         expect(nextDay.bills).toMatchObject([{ id: bill.id, day: "2026-10-05", fromEarlierDay: true }]);
+      }),
+    ));
+
+  it("says the note of a Bill with no Customer, which is what tells it from the others", () =>
+    runTest(
+      Effect.gen(function* () {
+        yield* setClock("2026-10-05T12:00:00");
+        const ana = yield* seedUser("admin");
+        const item = yield* seedItem({ name: "Suelta con nota", price: 1000, by: ana });
+        const noted = yield* recordSelection({
+          items: [{ itemId: item.id, quantity: 1 }],
+          note: "Se lo llevó Sofía",
+        }).pipe(as(ana));
+        yield* advanceClock("1 minute");
+        const plain = yield* recordSelection({ items: [{ itemId: item.id, quantity: 1 }] }).pipe(as(ana));
+
+        const owed = yield* listOwed().pipe(as(ana));
+
+        expect(owed.bills.map(({ id, note }) => ({ id, note }))).toEqual([
+          { id: noted.id, note: "Se lo llevó Sofía" },
+          { id: plain.id, note: null },
+        ]);
+      }),
+    ));
+
+  it("owes in all what Inicio says the Open Bills owe, a Bill left without Lines included", () =>
+    runTest(
+      Effect.gen(function* () {
+        yield* setClock("2026-10-05T12:00:00");
+        const ana = yield* seedUser("admin");
+        const item = yield* seedItem({ name: "De las dos sumas", price: 1000, by: ana });
+        const ruiz = yield* seedCustomer("Familia de las dos sumas", { by: ana });
+        const partly = yield* recordSelection({
+          items: [{ itemId: item.id, quantity: 3 }],
+          customerId: ruiz.id,
+        }).pipe(as(ana));
+        yield* takePayment({
+          billId: partly.id,
+          amount: 700,
+          method: "cash",
+          expectedRevision: partly.revision,
+        }).pipe(as(ana));
+        yield* recordSelection({ items: [{ itemId: item.id, quantity: 1 }] }).pipe(as(ana));
+        // Its only Line removed: nothing is left to owe.
+        const emptied = yield* recordSelection({ items: [{ itemId: item.id, quantity: 2 }], note: "Vacía" }).pipe(
+          as(ana),
+        );
+        const seen = yield* getBill(emptied.id).pipe(as(ana));
+        yield* removeLine({ billId: emptied.id, lineId: seen.lines[0]!.id, expectedRevision: seen.revision }).pipe(
+          as(ana),
+        );
+
+        const owed = yield* listOwed().pipe(as(ana));
+        const home = yield* homeSummary.pipe(as(ana));
+
+        expect(owed.total).toBe(2300 + 1000);
+        expect(home.openBills).toEqual({ count: 2, owed: owed.total });
+        expect(owed.bills).toHaveLength(1);
       }),
     ));
 

@@ -53,9 +53,9 @@ describe("Por cobrar", () => {
 
     expect(response.status).toBe(200);
     expect(html).toContain("Por cobrar");
-    // Overall Owed at the top: $18.50 + $18.50 + $18.50.
-    expect(html).toContain("Total por cobrar");
-    expect(html).toContain("$55.50");
+    // Overall Owed at the top, as what is owed now: $18.50 + $18.50 + $18.50.
+    expect(html).toContain("Se debe ahora");
+    expect(html).toMatch(/data-figure="owed"[^>]*>\$55\.50</);
     // The Customer row links to their page and shows what they owe and the Day
     // of their oldest Open Bill.
     expect(html).toContain(`href="/clientes/${ruiz.id}"`);

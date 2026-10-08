@@ -809,6 +809,8 @@ function Gone({
 /** The lists a Bill is opened from, and what the way back to each is called. */
 const LISTS: Readonly<Record<string, string>> = {
   "/cuentas-abiertas": "Cuentas abiertas",
+  "/cuentas": "Cuentas",
+  "/por-cobrar": "Por cobrar",
   "/historial": "Historial",
 };
 

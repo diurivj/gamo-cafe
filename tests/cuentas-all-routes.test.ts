@@ -105,6 +105,14 @@ describe("Cuentas", () => {
     ).text();
     expect(listedIds(none)).toEqual([]);
     expect(none).toContain("No hay cuentas con esos filtros.");
+
+    // A date the calendar does not have is no filter, and the field does not say it is one.
+    const noSuchDay = await (await ana.fetch("/cuentas?dia=2026-09-31")).text();
+    expect(listedIds(noSuchDay)).toEqual(listedIds(html));
+    expect(noSuchDay).not.toContain('value="2026-09-31"');
+    expect(noSuchDay).not.toContain("Quitar filtros");
+    expect(byDay).toContain('value="2026-09-30"');
+    expect(byDay).toContain("Quitar filtros");
   });
 
   it("holds 50 Bills per page and links to the next one, keeping the filters", async () => {

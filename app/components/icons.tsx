@@ -90,6 +90,15 @@ export function BackDrawing({ className }: { readonly className?: string }) {
   );
 }
 
+/** Says a field opens a list of choices. */
+export function UnfoldDrawing({ className }: { readonly className?: string }) {
+  return (
+    <Drawing className={className}>
+      <path d="M8 9.5l4-4 4 4M8 14.5l4 4 4-4" />
+    </Drawing>
+  );
+}
+
 /** One more unit, or one less. The button that holds it says of what. */
 export function StepDrawing({ by }: { readonly by: 1 | -1 }) {
   return <Drawing>{by === 1 ? <path d="M12 5v14M5 12h14" /> : <path d="M5 12h14" />}</Drawing>;

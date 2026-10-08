@@ -32,6 +32,8 @@ export interface OwedCustomer {
 export interface OwedBill {
   readonly id: string;
   readonly day: Day;
+  /** What was written on it when it was left Open: all that says whose it is. */
+  readonly note: string | null;
   readonly total: Centavos;
   readonly paid: Centavos;
   readonly owed: Centavos;
@@ -65,6 +67,7 @@ const OwedGroup = Schema.Struct({
 const LooseRow = Schema.Struct({
   id: Schema.String,
   day: Schema.String,
+  note: Schema.NullOr(Schema.String),
   total: Schema.Int,
   paid: Schema.Int,
   at: Schema.Int,
@@ -85,6 +88,10 @@ const LooseRow = Schema.Struct({
  * group of no Customer is what the loose Bills owe together. The loose Bills
  * grow with time, so they come a page at a time, one arm per Open state on
  * `bills_by_state`, seeking to the cursor: `opened_at`, then `rowid`.
+ *
+ * A Bill is Open only while it owes something, so `total` is what Inicio's
+ * card of the Open Bills says they owe (`homeSummary`): the same Bills, read
+ * there without the Customers.
  */
 export const listOwed = Effect.fn("listOwed")(function* (cursor: Cursor | null = null) {
   yield* requireAdmin;
@@ -107,7 +114,7 @@ export const listOwed = Effect.fn("listOwed")(function* (cursor: Cursor | null =
   const after = cursor !== null && Number.isSafeInteger(rowid);
   const limit = OWED_BILLS_PER_PAGE + 1;
   const arm = `SELECT * FROM (
-      SELECT b.id AS id, b.day AS day, b.total AS total, b.paid AS paid, b.opened_at AS at, b.rowid AS rowid
+      SELECT b.id AS id, b.day AS day, b.note AS note, b.total AS total, b.paid AS paid, b.opened_at AS at, b.rowid AS rowid
       FROM bills b
       WHERE b.state = ? AND b.customer_id IS NULL AND b.total > b.paid${
         after ? " AND b.opened_at >= ? AND (b.opened_at > ? OR b.rowid > ?)" : ""
@@ -153,6 +160,7 @@ export const listOwed = Effect.fn("listOwed")(function* (cursor: Cursor | null =
       (row): OwedBill => ({
         id: row.id,
         day: row.day,
+        note: row.note,
         total: row.total,
         paid: row.paid,
         owed: row.total - row.paid,
