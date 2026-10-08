@@ -82,7 +82,7 @@ async function expectScreensSpanish(who: SignedIn | undefined, paths: ReadonlyAr
 }
 
 interface World {
-  readonly item: { id: string; name: string };
+  readonly item: { id: string; name: string; categoryId: string };
   readonly customer: { id: string; name: string };
   readonly openBill: string;
   readonly paidBill: string;
@@ -148,7 +148,7 @@ it("every screen a User can open is in Spanish, with es-MX money and dates", asy
       yield* recordCount({ lines: [{ itemId: item.id, found: 8 }], note: "Conteo de prueba" }).pipe(as(ana.user));
 
       return {
-        item: { id: item.id, name: item.name },
+        item: { id: item.id, name: item.name, categoryId: item.categoryId },
         customer: { id: customer.id, name: customer.name },
         openBill: open.id,
         paidBill: paid.id,
@@ -176,6 +176,9 @@ it("every screen a User can open is in Spanish, with es-MX money and dates", asy
     "/inventario/conteo",
     "/por-cobrar",
     "/productos",
+    "/productos?paso=nuevo",
+    "/productos?paso=categorias",
+    `/productos?paso=categoria&id=${world.item.categoryId}`,
     `/productos/${world.item.id}`,
     "/usuarios",
     "/mas",

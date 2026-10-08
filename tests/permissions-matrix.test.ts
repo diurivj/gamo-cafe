@@ -829,7 +829,7 @@ const rows: ReadonlyArray<MatrixRow> = [
 
       const retired = await who.fetch(`/productos/${item.id}`, form({ intent: "retire-item" }));
       const retiredPage = await landed(retired, who, label);
-      expect(await retiredPage.text(), label).toContain("Retirado: no aparece en Vender.");
+      expect(await retiredPage.text(), label).toContain("Producto retirado. Ya no aparece en Vender.");
       return retired;
     },
   },

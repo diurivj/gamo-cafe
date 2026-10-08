@@ -41,6 +41,8 @@ export interface NewSeededItem {
   readonly minimum?: number;
   /** Starting Stock, recorded as a Restock by this Admin, as Productos does. */
   readonly stock?: { readonly units: number; readonly by: SeededUser };
+  /** Retired already: off Vender, still in the catalog. */
+  readonly retired?: boolean;
 }
 
 type TestFixtures = {
@@ -62,7 +64,7 @@ type TestFixtures = {
    * Adds a Category after the ones already there:
    * `const bebidas = await addCategory("Bebidas")`.
    */
-  addCategory: (name?: string) => Promise<SeededCategory>;
+  addCategory: (name?: string, options?: { readonly retired?: boolean }) => Promise<SeededCategory>;
   /**
    * Adds an active Item: `await addItem({ name: "Agua", price: 1850, category: bebidas })`.
    * Every field has a default. Its name must not be an active Item's already.
@@ -206,13 +208,13 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 
   addCategory: async ({ server }, use) => {
     let serial = 0;
-    await use(async (name = `Categoría ${++serial}`) => {
+    await use(async (name = `Categoría ${++serial}`, { retired = false } = {}) => {
       const DB = await database(server);
       const category = { id: crypto.randomUUID(), name };
       await DB.prepare(
-        "INSERT INTO categories (id, name, position) SELECT ?, ?, COALESCE(MAX(position), 0) + 1 FROM categories",
+        "INSERT INTO categories (id, name, position, retired_at) SELECT ?, ?, COALESCE(MAX(position), 0) + 1, ? FROM categories",
       )
-        .bind(category.id, category.name)
+        .bind(category.id, category.name, retired ? Date.now() : null)
         .run();
       return category;
     });
@@ -226,9 +228,9 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       const category = item.category ?? (await addCategory());
       const id = crypto.randomUUID();
       await DB.prepare(
-        "INSERT INTO items (id, name, normalized_name, price, category_id, stock_tracked, minimum) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO items (id, name, normalized_name, price, category_id, stock_tracked, minimum, retired_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       )
-        .bind(id, name, normalizeName(name), price, category.id, stockTracked ? 1 : 0, minimum)
+        .bind(id, name, normalizeName(name), price, category.id, stockTracked ? 1 : 0, minimum, item.retired ? Date.now() : null)
         .run();
       if (stock && stockTracked) {
         // The fact and its projection, as app/backend/stock.ts writes them.

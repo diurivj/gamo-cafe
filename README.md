@@ -91,7 +91,9 @@ app/
     confirm-dialog.tsx  ConfirmDialog, the question before unfinished work is discarded or left
     recording.tsx  what the screens that record with sendForRecord share: Pending, SentRows, Change, useLeaveGuard, useReadAgainSince
     figures.tsx    FiguresPanel, Collected and Sold as Día and Mi día say them: Cobrado and its split, then Vendido
-    item-fields.tsx  ItemFields, the fields of an Item's form, new or existing
+    item-fields.tsx  ItemFields, the fields of an Item's form, new or existing, each saying what a change does not reach
+    field-error.tsx  a `<Form>`'s refusal on the field it is about: refusedField, FieldError, FormError, useFocusOnRefusal
+    back-link.tsx  BackLink, the way back from a step or a detail that is a plain link
     count-line.tsx  CountLineItem, one line of a Count as Conteo and Diferencias show it: expected, found and the Discrepancy in words
     paged-list.tsx  usePagedList and LoadMore: a list's pages and its Cargar más
     ui/            shadcn/ui components, copied in by its CLI and adjusted here (see "The look and the navigation")
@@ -103,7 +105,7 @@ app/
   notice.server.ts  what a recorded form says on the screen that sent it: answerWithNotice, takeNotice
   shell.server.ts  shellMiddleware: reloads the page of a phone whose shell shows a User as they no longer are
   navigation.server.ts  what each role's navigation holds: its four destinations and the groups of its Más
-  catalog-forms.server.ts  the shared Admin gate (`requireAdminUser`, `refuseRead`) and the Productos forms' parsing and error messages
+  catalog-forms.server.ts  the shared Admin gate (`requireAdminUser`, `refuseRead`) and the Productos forms' parsing, error messages and the field each is about
   lib/utils.ts   cn, shadcn's class-name merge
   routes/      Route modules; resources/ holds routes without UI
     shell.tsx      the signed-in layout: who is signed in and the role's four destinations
@@ -127,6 +129,8 @@ app/
     resources/record-count.ts  where Conteo asks for a Count's review and sends the Count; answers JSON
     diferencias.tsx  Diferencias: every Count, with who recorded it and each Item's Discrepancy
     cuentas.tsx    Cuentas: every Bill in any state, filtered by Day, state or Customer
+    productos.tsx  Productos: the catalog, and the steps that add an Item, order the Categories and change one
+    producto.tsx   Producto: one Item's fields, and retiring or restoring it
     owed.tsx       Por cobrar: what is owed now, by Customer and by Bill with no Customer
   routes.ts    Route table
 workers/app.ts   Worker entry; rejects non-GET requests from another origin
@@ -237,7 +241,7 @@ export async function action({ context, params, request }: Route.ActionArgs) {
 
 ## The look and the navigation
 
-The redesign's rules are in `.scratch/ui-redesign/spec.md` (§3, §4 and §8). Entrar, the shell, Inicio, Más, Vender, Cuentas abiertas, Cuenta, Historial, Clientes, Cliente, Día, Mi día, Cuentas, Por cobrar, Inventario, Conteo, Diferencias, the Customer picker and the error pages follow them; the other screens are moved over one ticket at a time, and keep working meanwhile.
+The redesign's rules are in `.scratch/ui-redesign/spec.md` (§3, §4 and §8). Entrar, the shell, Inicio, Más, Vender, Cuentas abiertas, Cuenta, Historial, Clientes, Cliente, Día, Mi día, Cuentas, Por cobrar, Inventario, Conteo, Diferencias, Productos, Producto, the Customer picker and the error pages follow them; the other screens are moved over one ticket at a time, and keep working meanwhile.
 
 - **The look is shadcn/ui's**, in its Maia preset over Base UI (`components.json`). Its components are copied into `app/components/ui/` and are this repo's code from then on. Add one with `npx shadcn@latest add <name>` (answer no when it offers to overwrite `button.tsx`), and build screens from them — `Card`, `Button`, `Input`, `NativeSelect`, `Textarea`, `Label`, `Alert`, `Badge`, `RadioGroup`, `AlertDialog` are there — instead of styling by hand. The colors are the variables the CLI wrote in `app/app.css` (`background`, `foreground`, `primary`, `muted`, `border`, …); use those names (`bg-muted`, `text-muted-foreground`), never a raw color. The font is Figtree, bundled by `@fontsource-variable/figtree`.
 - **What differs from the preset**, because the spec's §8 asks for it (18px text, 48px targets, contrast): `Button` has a `touch` size (56px tall, 18px text) for every action and `icon-touch` (48px square) for one that is only a drawing; a `RadioGroupItem` is 24px inside a `Label` that is the 48px target; an `AlertDialog` has 18px text, `touch` actions, and scrolls when large text makes it tall; `Input` is 56px tall with 18px text and a white fill, `NativeSelect` is the same and has that one size, and `Textarea` has the same text and fill and grows with what is typed; `Label`, `Card` and `Alert` text is 18px; a `Badge` is 28px tall with 16px text, and its words break when they are wider than their room; the outline `Button` is white with the field's edge; and `--muted-foreground`, `--input` and `--ring` are darker. Each change is commented where it is made. A component added later starts at the preset's sizes: bring it to these.
@@ -436,6 +440,20 @@ Inventario (`app/routes/inventario.tsx`) is the Stock of every stock-tracked Ite
 
 Browser tests drive it with `e2e/support/stock.ts` (`adjust`, `typeAdjustment`, `seeStock`, `expectStock`, `openAdjustments`, `cancelAdjustment`); `e2e/inventario.spec.ts` holds, drops and loses requests to cover each outcome. Through the Worker a test sends one with `recordStockChange` from `tests/support/sales.ts`.
 
+## Productos: the catalog and its steps
+
+Productos (`app/routes/productos.tsx`) is the catalog, and says it is not where a sale is made. The list is every active Category with the Items it sells, then the retired Items, each a row that opens its Producto; no form is on it. **Agregar producto** and **Categorías** lead it. The steps are addresses of the same screen: `?paso=nuevo`, `?paso=categorias` and `?paso=categoria&id=…`, which answers 404 for a Category that is not there. Producto (`app/routes/producto.tsx`, `/productos/:itemId`) is one Item.
+
+- **These are `<Form>`s, answered by the page's own action with a notice**, not `sendForRecord`: a catalog change is no Bill, Payment or Stock count, sending one twice changes nothing more, and the forms work without JavaScript. The one fact among them is the Entrada of a new Item's starting Stock, which `addItem` writes in the Item's own batch; a second send of that form is refused by the Item's name.
+- **What a form recorded is said from the operation's answer**, on the step that sent it: "Se agregó «Agua mineral». Se registró una entrada de 24 en existencias." The Entrada is said only for an Item that counts its units and only once recorded; nothing says so while the form is on its way. The step that adds stays, empty, for the next Item.
+- **A refusal names its field** (`Refusal.field` in `~/catalog-forms.server`, sent as `field` beside `error` and `form`). `~/components/field-error` shows it under that field, marks the field invalid and described by it, and `useFocusOnRefusal` takes the keyboard there. What was typed stays: the forms that start over once recorded (a new Item, a new Category) are keyed by the last form *recorded* (`useSaidNotice`), never by the last answer, and the forms that change something are keyed by what is stored.
+- **After a recorded form the keyboard is on what was said**, because the form that starts over took its button with it. A Category that moved keeps the keyboard on the button that moved it, or on its other one when the move left that button disabled at an end of the list.
+- **Consequences are said where the change is made** (`ItemFields`): a new price reaches only what is sold afterwards, switching stock tracking rewrites nothing recorded, and retiring an Item takes it off Vender and erases nothing. Mínimo and Existencias iniciales show only while **Lleva inventario** is ticked, by CSS (`group-has-[#stockTracked:checked]`), so the box is the browser's own and needs no script. Stock itself is never changed here; Producto links to the Item's step on Inventario.
+- **Categories** are ordered with **Subir** and **Bajar**, one place per tap, each row saying "2 de 3". A Category with active Items cannot be retired: its step says how many and what to do first, and has no action; the operation refuses it again. An Item in a retired Category says so in place of **Restaurar producto**, and a name taken since is said when the restore is refused. A Category with no active Item is not on Vender, and Categorías says so.
+- A Category needs only its name; `categoryDrawing` (`~/shared/category-drawing`) gives Vender a drawing when the name fits one, and nothing when it does not.
+
+Browser tests drive them with `e2e/support/catalog.ts` (`openNewItem`, `typeItem`, `addItemOnScreen`, `openCategories`, `openCategory`, `backTo`, `catalogItem`, `categoryOrder`, `said`); `e2e/productos.spec.ts` follows each change to Vender, Inventario and the facts.
+
 ## Conteo: a Count and its review
 
 Conteo (`app/routes/conteo.tsx`, `/inventario/conteo`) is two steps and then a result. The first is a field per stock-tracked Item, named by the Item alone, found by a search of the screen's own; the second, at `?paso=revisar`, shows expected, found and difference and has the one action, "Registrar conteo de 3 productos". The result stays, with **Volver a Inventario** and **Ver diferencias**.
@@ -579,4 +597,4 @@ it("does not show Inventario to a Worker", async () => {
 - `tests/support/customers.ts` has the Customers: `seedCustomer(name, { by?, note?, retired? })` inside a `runTest` program, and `savedCustomer(...)`, the same as a promise, for tests that go through the Worker. In `e2e/fixtures.ts` it is the `addCustomer(name, { by, note?, retired? })` fixture.
 - A rule about the whole table (the last active Admin) needs a file whose tests each start from an empty database: `reset()` and `applyD1Migrations` from `cloudflare:test` in a `beforeEach`, as in `tests/last-admin.test.ts`.
 - The Worker reads the real clock, so a test that goes through it cannot move time. Rules about time are tested on operations with `runTest`.
-- Browser tests live in `e2e/*.spec.ts` and import `test` and `expect` from `./fixtures`, which serves the built Worker over local HTTPS and gives every test an empty migrated D1. Its `signInAs(role, name?)` fixture adds a User and signs the test's browser in without going through Entrar; `addUser` and `issueCode` are there for tests about signing in. `addCategory(name?)` and `addItem({ name?, price?, category?, stockTracked?, minimum?, stock? })` seed the catalog by writing rows directly. `query(sql, params?)` reads rows from the Worker's D1, for what no screen shows yet. `holdSubmissions(page)` from `e2e/support/held.ts` holds every form the page sends until the test releases it, to look at the screen before the server has answered. A sale on Vender is `leaveOpen(page, { items })` or `pay(page, { items })` from `e2e/support/sell.ts`, which answer the Bill's id.
+- Browser tests live in `e2e/*.spec.ts` and import `test` and `expect` from `./fixtures`, which serves the built Worker over local HTTPS and gives every test an empty migrated D1. Its `signInAs(role, name?)` fixture adds a User and signs the test's browser in without going through Entrar; `addUser` and `issueCode` are there for tests about signing in. `addCategory(name?, { retired? })` and `addItem({ name?, price?, category?, stockTracked?, minimum?, stock?, retired? })` seed the catalog by writing rows directly. `query(sql, params?)` reads rows from the Worker's D1, for what no screen shows yet. `holdSubmissions(page)` from `e2e/support/held.ts` holds every form the page sends until the test releases it, to look at the screen before the server has answered. A sale on Vender is `leaveOpen(page, { items })` or `pay(page, { items })` from `e2e/support/sell.ts`, which answer the Bill's id.

@@ -34,17 +34,23 @@ export function requireAdminUser(context: Readonly<RouterContextProvider>) {
 
 const forbidden = () => new Response(null, { status: 403 });
 
+/** The fields of the Productos forms, by the `name` each is sent under. */
+export type CatalogField = "name" | "price" | "categoryId" | "minimum" | "startingStock";
+
 /** What cannot be done, in words for the Admin who asked. */
 export interface Refusal {
   readonly error: string;
+  /** The field the refusal is about, when it is about one. */
+  readonly field?: CatalogField;
 }
 
 /**
- * A refusal as an action answers it: a 400 carrying the message and the key of
- * the form that was sent, so the page shows the message on that form.
+ * A refusal as an action answers it: a 400 carrying the message, the key of
+ * the form that was sent and the field it is about, so the page shows the
+ * message on that field of that form.
  */
-export function refused({ error }: Refusal, form: string) {
-  return data({ error, form }, { status: 400 });
+export function refused({ error, field }: Refusal, form: string) {
+  return data({ error, form, field: field ?? null }, { status: 400 });
 }
 
 export type CatalogError =
@@ -60,7 +66,7 @@ export type CatalogError =
 
 /**
  * The answer to each rule violation of `~/backend/catalog`, for `run`: a 403,
- * a 404, or the Spanish message to show on the form.
+ * a 404, or the Spanish message to show on the form, with the field it is about.
  */
 export function answerCatalogError(error: CatalogError): Refusal {
   switch (error._tag) {
@@ -70,15 +76,15 @@ export function answerCatalogError(error: CatalogError): Refusal {
     case "CategoryNotFound":
       throw new Response(null, { status: 404 });
     case "NameMissing":
-      return { error: "Escribe un nombre." };
+      return { error: "Escribe un nombre.", field: "name" };
     case "InvalidPrice":
-      return { error: "El precio debe ser mayor a cero." };
+      return { error: "El precio debe ser mayor a cero.", field: "price" };
     case "InvalidUnits":
-      return { error: unitsMessage[error.field] };
+      return { error: unitsMessage[error.field], field: error.field };
     case "ItemNameTaken":
-      return { error: "Ya hay un producto activo con ese nombre." };
+      return { error: "Ya hay un producto activo con ese nombre.", field: "name" };
     case "CategoryUnavailable":
-      return { error: "Esa categoría no existe o está retirada." };
+      return { error: "Esa categoría no existe o está retirada.", field: "categoryId" };
     case "CategoryHasActiveItems":
       return { error: "Esta categoría tiene productos activos. Retíralos o cámbialos de categoría primero." };
   }
@@ -109,10 +115,10 @@ type Parsed<A> = { readonly value: A } | Refusal;
  */
 export function parseItemForm(form: FormData): Parsed<ItemChange> {
   const price = parsePesos(text(form, "price"));
-  if (price === undefined) return { error: "Escribe el precio en pesos, por ejemplo 18.50." };
+  if (price === undefined) return { error: "Escribe el precio en pesos, por ejemplo 18.50.", field: "price" };
 
   const minimum = optionalUnits(text(form, "minimum"));
-  if (minimum === undefined) return { error: unitsMessage.minimum };
+  if (minimum === undefined) return { error: unitsMessage.minimum, field: "minimum" };
 
   return {
     value: {
@@ -128,7 +134,7 @@ export function parseItemForm(form: FormData): Parsed<ItemChange> {
 /** The starting Stock of a new Item: an empty field is none. */
 export function parseStartingStock(form: FormData): Parsed<number> {
   const units = optionalUnits(text(form, "startingStock"));
-  if (units === undefined) return { error: unitsMessage.startingStock };
+  if (units === undefined) return { error: unitsMessage.startingStock, field: "startingStock" };
   return { value: units ?? 0 };
 }
 

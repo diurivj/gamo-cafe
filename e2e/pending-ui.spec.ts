@@ -336,39 +336,46 @@ test("every form of Productos and of a Producto is pending from the tap", async 
   await page.goto("/productos");
   const held = await holdSubmissions(page);
 
+  await page.getByRole("link", { name: "Categorías", exact: true }).click();
   const newCategory = page.getByRole("region", { name: "Nueva categoría" });
   await newCategory.getByLabel("Nombre de la categoría").fill("Postres");
   await tapThrough(page, held, newCategory.getByRole("button", { name: "Agregar categoría" }));
-  await expect(page.getByRole("heading", { name: "Postres", level: 2 })).toBeVisible();
+  await expect(page.getByRole("listitem", { name: "Postres", exact: true })).toBeVisible();
 
-  await page.getByText("Nuevo producto").click();
-  const newItem = page.locator("details", { hasText: "Nuevo producto" });
-  await newItem.getByLabel("Nombre", { exact: true }).fill("Flan");
-  await newItem.getByLabel("Precio").fill("30.00");
-  await tapThrough(page, held, newItem.getByRole("button", { name: "Agregar producto" }));
-  await expect(page.getByText("Flan")).toBeVisible();
-
-  const section = page.getByRole("region", { name: "Bebidas", exact: true });
-  await section.getByText("Cambiar categoría").click();
-  await tapThrough(page, held, section.getByRole("button", { name: "Bajar Bebidas" }));
-  await tapThrough(page, held, section.getByRole("button", { name: "Subir Bebidas" }));
-  await tapThrough(page, held, section.getByRole("button", { name: "Guardar nombre" }));
+  await tapThrough(page, held, page.getByRole("button", { name: "Bajar Bebidas" }));
+  await tapThrough(page, held, page.getByRole("button", { name: "Subir Bebidas" }));
+  await page.getByRole("listitem", { name: "Bebidas", exact: true }).getByRole("link").click();
+  await tapThrough(page, held, page.getByRole("button", { name: "Guardar nombre" }));
   // Only a Category with no active Item can be retired.
-  const empty = page.getByRole("region", { name: "Temporada", exact: true });
-  await empty.getByText("Cambiar categoría").click();
-  await tapThrough(page, held, empty.getByRole("button", { name: "Retirar Temporada" }));
-  await tapThrough(page, held, page.getByRole("button", { name: "Restaurar Temporada" }));
-  await expect(empty).toBeVisible();
+  await page.goto("/productos?paso=categorias");
+  await page.getByRole("listitem", { name: "Temporada", exact: true }).getByRole("link").click();
+  await tapThrough(page, held, page.getByRole("button", { name: "Retirar categoría" }));
+  await tapThrough(page, held, page.getByRole("button", { name: "Restaurar categoría" }));
+  await expect(page.getByRole("status")).toHaveText("Categoría restaurada.");
+
+  // An Item and its starting Stock: nothing says recorded before the answer.
+  await page.goto("/productos?paso=nuevo");
+  await page.getByLabel("Nombre", { exact: true }).fill("Flan");
+  await page.getByLabel("Precio", { exact: true }).fill("30.00");
+  await page.getByLabel("Existencias iniciales (opcional)").fill("12");
+  const add = page.getByRole("button", { name: "Agregar producto" });
+  await tap(held, add);
+  await expect(page.locator("button[type=submit]", { hasText: "Agregando…" })).toBeVisible();
+  await expect(page.getByText(/Se agregó|Se registró/)).toHaveCount(0);
+  await expect(page.getByLabel("Nombre", { exact: true })).toHaveValue("Flan");
+  await held.release();
+  await settled(page);
+  await expect(page.getByRole("status")).toHaveText("Se agregó «Flan». Se registró una entrada de 12 en existencias.");
 
   await page.goto(`/productos/${agua.id}`);
   await tapThrough(page, held, page.getByRole("button", { name: "Retirar producto" }));
-  await expect(page.getByText("Retirado: no aparece en Vender.")).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText("Producto retirado. Ya no aparece en Vender.");
   await tapThrough(page, held, page.getByRole("button", { name: "Restaurar producto" }));
-  await expect(page.getByText("Retirado: no aparece en Vender.")).toHaveCount(0);
-  await page.getByLabel("Mínimo").fill("3");
-  await tapThrough(page, held, page.getByRole("button", { name: "Guardar" }));
-  await expect(page).toHaveURL(/\/productos$/);
-  await expect(page.getByText("Mínimo 3")).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText("Producto restaurado. Ya aparece en Vender.");
+  await page.getByLabel("Mínimo (opcional)").fill("3");
+  await tapThrough(page, held, page.getByRole("button", { name: "Guardar cambios" }));
+  await expect(page.getByRole("status")).toHaveText("Cambios guardados.");
+  await expect(page.getByLabel("Mínimo (opcional)")).toHaveValue("3");
 });
 
 test("the filters of Cuentas and Día are pending while their page loads", async ({ page, signInAs }) => {

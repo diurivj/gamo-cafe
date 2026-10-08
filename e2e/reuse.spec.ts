@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
+import { addItemOnScreen, backTo, catalogItem } from "./support/catalog";
 import { destinations, goTo } from "./support/navigate";
 import { itemButton, newSale, pay } from "./support/sell";
 
@@ -64,24 +65,22 @@ test("an Item added, repriced or retired on Productos is right on Vender when it
 
   // Added.
   await goTo(page, "Productos");
-  await page.getByText("Nuevo producto").click();
-  const form = page.locator("details", { hasText: "Nuevo producto" });
-  await form.getByLabel("Nombre", { exact: true }).fill("Té helado");
-  await form.getByLabel("Precio").fill("22");
-  await form.getByRole("button", { name: "Agregar producto" }).click();
-  await expect(page.getByRole("link", { name: /Té helado/ })).toBeVisible();
+  await addItemOnScreen(page, { name: "Té helado", price: "22" });
+  await expect(catalogItem(page, "Té helado")).toBeVisible();
 
   // Repriced.
-  await page.getByRole("link", { name: /Agua mineral/ }).click();
+  await catalogItem(page, "Agua mineral").click();
   await expect(page.getByRole("heading", { name: "Agua mineral" })).toBeVisible();
-  await page.getByLabel("Precio").fill("19.5");
-  await page.getByRole("button", { name: "Guardar" }).click();
-  await expect(page.getByRole("link", { name: /Agua mineral/ })).toContainText("$19.50");
+  await page.getByLabel("Precio", { exact: true }).fill("19.5");
+  await page.getByRole("button", { name: "Guardar cambios" }).click();
+  await expect(page.getByRole("status")).toHaveText("Cambios guardados.");
+  await backTo(page, "Productos");
+  await expect(catalogItem(page, "Agua mineral")).toContainText("$19.50");
 
   // Retired.
-  await page.getByRole("link", { name: /Jugo verde/ }).click();
+  await catalogItem(page, "Jugo verde").click();
   await page.getByRole("button", { name: "Retirar producto" }).click();
-  await expect(page.getByText("Retirado: no aparece en Vender.")).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText("Producto retirado. Ya no aparece en Vender.");
 
   await goTo(page, "Vender");
 

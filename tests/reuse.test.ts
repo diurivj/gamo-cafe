@@ -157,6 +157,8 @@ describe("what is about Bills, Payments or Stock", () => {
       "/diferencias",
       "/historial",
       "/productos",
+      "/productos?paso=nuevo",
+      "/productos?paso=categorias",
       `/productos/${item.id}`,
     ];
     for (const page of pages) {
