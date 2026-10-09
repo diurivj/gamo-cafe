@@ -15,12 +15,14 @@ import { CurrentUser } from "~/backend/current-user";
 import { run } from "~/backend/run.server";
 import { BillStateBadge } from "~/components/bill-state-badge";
 import { ConfirmDialog } from "~/components/confirm-dialog";
+import { CLOSED_BILL } from "~/components/error-screen";
 import { CustomerPicker } from "~/components/customer-picker";
 import { BackDrawing } from "~/components/icons";
 import { Notice } from "~/components/notice";
 import { PaymentEntry } from "~/components/payment-entry";
 import { Change, Pending, SentRows, useLeaveGuard, useReadAgainSince } from "~/components/recording";
-import { hint, pageTitle, sectionTitle } from "~/components/styles";
+import { useRecorded } from "~/shared/recorded";
+import { amount, figureRow, hint, pageTitle, sectionTitle } from "~/components/styles";
 import { SubmitButton } from "~/components/submit-button";
 import { Button, buttonClasses } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
@@ -111,7 +113,10 @@ export async function loader({ context, params }: Route.LoaderArgs) {
         case "BillNotFound":
           throw new Response(null, { status: 404 });
         case "BillNotVisible":
-          throw new Response(null, { status: 403 });
+          // A Worker may not open a Bill that is no longer Open (spec §4.1),
+          // and is told that much: the browser's Back leads here from the
+          // result of the Payment that closed it.
+          throw data(CLOSED_BILL, { status: 403 });
       }
     },
   );
@@ -251,11 +256,11 @@ const removalText = (billDay: string, removal: NonNullable<LoadedLine["removal"]
 function LineRecord({ bill, line }: { readonly bill: LoadedBill; readonly line: LoadedLine }) {
   return (
     <>
-      <div className={`flex items-baseline justify-between gap-3 ${line.removal ? "text-muted-foreground line-through" : ""}`}>
+      <div className={`${figureRow} ${line.removal ? "text-muted-foreground line-through" : ""}`}>
         <span className="min-w-0 wrap-break-word">
           <span className="font-semibold tabular-nums">{`${line.quantity} ×`}</span> {line.itemName}
-        </span>
-        <span className="shrink-0 font-medium tabular-nums">{formatMoney(line.unitPrice * line.quantity)}</span>
+        </span>{" "}
+        <span className={`ml-auto font-medium ${amount}`}>{formatMoney(line.unitPrice * line.quantity)}</span>
       </div>
       <p className={hint}>{`${formatMoney(line.unitPrice)} c/u`}</p>
       <p className={`${hint} wrap-break-word`}>{`${line.byName} · ${recordedAt(bill.day, line.at)}`}</p>
@@ -267,9 +272,9 @@ function LineRecord({ bill, line }: { readonly bill: LoadedBill; readonly line: 
 function PaymentRecord({ bill, payment }: { readonly bill: LoadedBill; readonly payment: LoadedPayment }) {
   return (
     <>
-      <div className={`flex items-baseline justify-between gap-3 ${payment.removal ? "text-muted-foreground line-through" : ""}`}>
-        <span className="font-semibold">{paymentMethodLabel[payment.method]}</span>
-        <span className="shrink-0 font-medium tabular-nums">{formatMoney(payment.amount)}</span>
+      <div className={`${figureRow} ${payment.removal ? "text-muted-foreground line-through" : ""}`}>
+        <span className="font-semibold">{paymentMethodLabel[payment.method]}</span>{" "}
+        <span className={`ml-auto font-medium ${amount}`}>{formatMoney(payment.amount)}</span>
       </div>
       <p className={`${hint} wrap-break-word`}>{`${payment.byName} · ${recordedAt(bill.day, payment.at)}`}</p>
     </>
@@ -279,9 +284,9 @@ function PaymentRecord({ bill, payment }: { readonly bill: LoadedBill; readonly 
 /** A row of the summary: what the figure is, and the figure. */
 function Figure({ label, lead = false, children }: { readonly label: string; readonly lead?: boolean; readonly children: ReactNode }) {
   return (
-    <div className={`flex flex-wrap items-baseline justify-between gap-x-3 ${lead ? "border-b pb-3" : ""}`}>
+    <div className={`${figureRow} ${lead ? "border-b pb-3" : ""}`}>
       <dt className={lead ? "text-xl font-medium" : hint}>{label}</dt>{" "}
-      <dd className={`tabular-nums ${lead ? "font-heading text-4xl font-semibold" : "font-medium"}`}>{children}</dd>
+      <dd className={`${amount} ${lead ? "font-heading text-4xl font-semibold" : "font-medium"}`}>{children}</dd>
     </div>
   );
 }
@@ -517,9 +522,9 @@ function BillToPay({ bill }: { readonly bill: LoadedBill }) {
       <CardContent className="flex flex-col gap-1">
         <p className="text-xl font-semibold wrap-break-word">{whoseBill(bill)}</p>
         <p className={hint}>{formatDay(bill.day)}</p>
-        <p className="mt-2 flex flex-wrap items-baseline justify-between gap-x-3 border-t pt-3">
+        <p className={`mt-2 ${figureRow} border-t pt-3`}>
           <span className="text-xl font-medium">Debe</span>{" "}
-          <span className="font-heading text-4xl font-semibold tabular-nums">{formatMoney(bill.owed)}</span>
+          <span className={`font-heading text-4xl font-semibold ${amount}`}>{formatMoney(bill.owed)}</span>
         </p>
       </CardContent>
     </Card>
@@ -759,6 +764,7 @@ function Confirmed({
   readonly onOpenBill: () => void;
   readonly children: ReactNode;
 }) {
+  useRecorded(title, details);
   return (
     <div className="flex flex-col gap-6">
       <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
@@ -844,15 +850,23 @@ function BillScreen({ loaderData, actionData }: Route.ComponentProps) {
   const plan = target ? correctionPlan(bill, target, isAdmin) : null;
   const atStep = atPay || asked !== null;
 
-  // The Bill was read again after a result came on screen: the result gives
-  // way to the Bill as it is now, and the next Payment or correction is new.
-  const paidAndLeft = useReadAgainSince(payment.phase === "confirmed", loaderData);
+  // A result stays until the User goes on (UI redesign §5.4): only a read
+  // they asked for, with **Ver cuenta**, makes it give way to the Bill as it
+  // is now, and the next Payment or correction is new. A read that was already
+  // on its way when the answer came — the step left while it was recording —
+  // is not that, and takes neither the result nor its change off the screen.
+  const [goingOn, setGoingOn] = useState(false);
+  const paidAndLeft = useReadAgainSince(payment.phase === "confirmed" && goingOn, loaderData);
   useEffect(() => {
-    if (paidAndLeft) dispatch({ type: "started" });
+    if (!paidAndLeft) return;
+    dispatch({ type: "started" });
+    setGoingOn(false);
   }, [paidAndLeft]);
-  const correctedAndLeft = useReadAgainSince(correction.phase === "confirmed", loaderData);
+  const correctedAndLeft = useReadAgainSince(correction.phase === "confirmed" && goingOn, loaderData);
   useEffect(() => {
-    if (correctedAndLeft) dispatchCorrection({ type: "started" });
+    if (!correctedAndLeft) return;
+    dispatchCorrection({ type: "started" });
+    setGoingOn(false);
   }, [correctedAndLeft]);
 
   // What was sent stays on screen whatever the address says.
@@ -955,6 +969,7 @@ function BillScreen({ loaderData, actionData }: Route.ComponentProps) {
     else void navigate(billPath, { replace: true });
   }
   const toBill = () => {
+    setGoingOn(true);
     // Left while it was on its way: this is the Bill's entry already.
     if (!atStep) void revalidate();
     else leaveStep();

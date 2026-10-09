@@ -83,13 +83,13 @@ export default function Inicio({ loaderData }: Route.ComponentProps) {
 
       {/* Two columns where two fit: one on a narrow phone, or with large text. */}
       <div className="mt-5 grid gap-4 min-[22rem]:grid-cols-2">
-        <Link to="/" className="rounded-2xl min-[22rem]:col-span-2">
+        <Link to="/" className="min-w-0 rounded-2xl min-[22rem]:col-span-2">
           <Card className="min-h-32 justify-between bg-primary text-primary-foreground transition-colors hover:bg-primary/90">
             <CardHeader>
               <NavigationDrawing icon="bag" className="size-8" />
             </CardHeader>
             <CardContent className="flex items-end justify-between gap-3">
-              <span>
+              <span className="min-w-0 wrap-anywhere">
                 <span className="block font-heading text-2xl leading-tight font-semibold tracking-tight">Nueva venta</span>
                 <span className="text-primary-foreground/90">Hoy llevas vendido {formatMoney(mine.sold)}</span>
               </span>

@@ -12,7 +12,7 @@ import {
   typeCount,
 } from "./support/count";
 import { holdSubmissions } from "./support/held";
-import { cutOff } from "./support/layout";
+import { cutOff, inSight } from "./support/layout";
 import { destinations } from "./support/navigate";
 import { adjust, expectStock } from "./support/stock";
 
@@ -575,13 +575,6 @@ test("on a 320px phone with text twice as large long names and large numbers sta
   for (let n = 1; n <= 12; n++) await addItem({ name: `Producto de relleno ${n}`, stock: { units: n, by: ana } });
   const enlarge = () => page.addStyleTag({ content: "html { font-size: 200% }" });
   const main = page.getByRole("main");
-  const bar = destinations(page);
-  /** The control is whole and above the bar at the bottom. */
-  const inSight = async (control: Locator) => {
-    const box = (await control.boundingBox())!;
-    expect(box.y).toBeGreaterThanOrEqual(0);
-    expect(box.y + box.height).toBeLessThanOrEqual((await bar.boundingBox())!.y);
-  };
 
   await page.goto("/inventario/conteo");
   expect(await nothingSideways(page)).toBe(true);
@@ -590,6 +583,8 @@ test("on a 320px phone with text twice as large long names and large numbers sta
     expect((await control.boundingBox())!.height, await control.innerText()).toBeGreaterThanOrEqual(48);
   }
   await enlarge();
+  // The page is measured in its own font: one that arrives later moves what was already brought into sight.
+  await page.evaluate(() => document.fonts.ready);
   expect(await nothingSideways(page)).toBe(true);
   expect(await cutOff(main)).toEqual([]);
 
@@ -602,6 +597,8 @@ test("on a 320px phone with text twice as large long names and large numbers sta
   await page.keyboard.type("0");
   await inSight(countField(page, word));
   const review = page.getByRole("button", { name: "Revisar conteo" });
+  // The bar has said what was typed, and so is as tall as it will be, before the focus goes to it.
+  await expect(page.getByRole("region", { name: "Conteo" })).toContainText("Contados: 2 de 14");
   await review.focus();
   await inSight(review);
   await page.keyboard.press("Enter");

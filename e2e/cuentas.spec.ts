@@ -167,8 +167,14 @@ test("a Worker is refused a Paid Bill's page, and an Admin opens it", async ({
 
   const refused = await page.goto(`/cuentas/${billId}`);
 
+  // Refused, and told why: this is where the browser's Back leads a Worker
+  // who has just taken the Bill's last Payment.
   expect(refused?.status()).toBe(403);
-  await expect(page.getByRole("heading", { name: "No tienes acceso a esta página" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Esta cuenta ya no está abierta", level: 1 })).toBeVisible();
+  const main = page.getByRole("main");
+  await expect(main).toContainText("Se pagó o se canceló. Lo registrado se conserva, y solo un administrador puede abrirla.");
+  await expect(main).not.toContainText("Producto pagado");
+  await expect(main.getByRole("link")).toHaveText(["Cuentas abiertas", "Ir a Vender"]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   // It is not offered on Cuentas abiertas either.
   await page.goto("/cuentas-abiertas");

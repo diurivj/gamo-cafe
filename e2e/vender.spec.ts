@@ -1,3 +1,5 @@
+import type { Locator } from "@playwright/test";
+
 import { expect, test } from "./fixtures";
 import {
   chooseCustomer,
@@ -373,4 +375,59 @@ test("without a menu Vender says who can add one", async ({ page, signInAs }) =>
 
   await expect(page.getByText("Todavía no hay productos. Pídele a un administrador que agregue el menú.")).toBeVisible();
   await expect(page.getByLabel("Buscar producto")).toHaveCount(0);
+});
+
+test("a sale is made with the keyboard alone, the focus in sight at every stop", async ({
+  page,
+  signInAs,
+  addItem,
+  query,
+  browserName,
+}) => {
+  await signInAs("worker", "Beto");
+  const agua = await addItem({ name: "Agua mineral", price: 1850 });
+  await addItem({ name: "Café de olla", price: 2500, category: agua.category });
+  await page.goto("/");
+
+  // Safari stops at links and buttons with Option+Tab unless its setting says otherwise.
+  const tab = browserName === "webkit" ? "Alt+Tab" : "Tab";
+  /** Tabs forward until the control has the focus, and it is then whole on screen. */
+  const tabTo = async (control: Locator) => {
+    for (let stops = 0; stops < 40; stops++) {
+      if (await control.evaluate((element) => element === document.activeElement)) break;
+      await page.keyboard.press(tab);
+    }
+    await expect(control).toBeFocused();
+    await expect(control).toBeInViewport({ ratio: 1 });
+  };
+
+  // Two units of one Item and one of another, then on to the review.
+  await tabTo(itemButton(page, "Agua mineral"));
+  await page.keyboard.press("Enter");
+  await tabTo(page.getByRole("button", { name: "Agregar uno de Agua mineral" }));
+  await page.keyboard.press("Space");
+  await tabTo(itemButton(page, "Café de olla"));
+  await page.keyboard.press("Enter");
+  await expect(totalBar(page)).toContainText("$62.00");
+  await tabTo(totalBar(page).getByRole("button", { name: "Cobrar" }));
+  await page.keyboard.press("Enter");
+
+  // The step's heading has the focus; the method is chosen with the arrows.
+  await expect(page.getByRole("heading", { name: "Cobrar", level: 1 })).toBeFocused();
+  await tabTo(page.getByRole("radio", { name: "Efectivo" }));
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("radio", { name: "Transferencia" })).toBeChecked();
+  await page.keyboard.press("ArrowUp");
+  await expect(page.getByRole("radio", { name: "Efectivo" })).toBeChecked();
+  await tabTo(page.getByLabel("Efectivo que te entregan (opcional)"));
+  await page.keyboard.type("100");
+  await expect(page.getByText("Cambio: $38.00")).toBeVisible();
+  await tabTo(page.getByRole("button", { name: "Registrar pago de $62.00" }));
+  await page.keyboard.press("Enter");
+
+  await expect(page.getByRole("heading", { name: "Pago registrado", level: 1 })).toBeFocused();
+  expect(await query("SELECT total, paid, state FROM bills")).toEqual([{ total: 6200, paid: 6200, state: "paid" }]);
+  await tabTo(page.getByRole("button", { name: "Nueva venta" }));
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Vender", level: 1 })).toBeFocused();
 });

@@ -11,7 +11,9 @@ import { CountLineItem } from "~/components/count-line";
 import { BackDrawing } from "~/components/icons";
 import { Notice } from "~/components/notice";
 import { Pending, SentRows, useLeaveGuard } from "~/components/recording";
+import { useRecorded } from "~/shared/recorded";
 import { hint, pageTitle, sectionTitle } from "~/components/styles";
+import { StickyBar } from "~/components/sticky-bar";
 import { Badge } from "~/components/ui/badge";
 import { Button, buttonClasses } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
@@ -139,7 +141,7 @@ function Entry({
         : null;
 
   return (
-    <div data-sticky-total className="flex flex-col gap-5">
+    <div className="flex flex-col gap-5">
       <Link to={STOCK_PATH} className={`${buttonClasses({ variant: "outline", size: "touch" })} max-w-full shrink self-start`}>
         <BackDrawing />
         <span className="min-w-0 wrap-anywhere">Inventario</span>
@@ -245,7 +247,7 @@ function Entry({
           </div>
 
           {/* Rests just above the navigation bar, never under it. */}
-          <div className="sticky bottom-(--above-bar) z-2">
+          <StickyBar>
             <Card size="sm" role="region" aria-label="Conteo" className="shadow-lg ring-foreground/25">
               <CardContent className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
                 {insist && problem ? (
@@ -273,7 +275,7 @@ function Entry({
                 </Button>
               </CardContent>
             </Card>
-          </div>
+          </StickyBar>
         </>
       )}
     </div>
@@ -393,6 +395,7 @@ function Confirmed({
   readonly heading: Heading;
 }) {
   const outcome = countOutcome(count.snapshot, count.result);
+  useRecorded(outcome.title, outcome.details);
   return (
     <div className="flex flex-col gap-6">
       <h1 ref={heading} tabIndex={-1} className={title}>

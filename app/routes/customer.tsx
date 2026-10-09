@@ -13,7 +13,8 @@ import { Notice } from "~/components/notice";
 import { LoadMore, usePagedList } from "~/components/paged-list";
 import { PaymentEntry } from "~/components/payment-entry";
 import { Change, Pending, SentRows, useLeaveGuard, useReadAgainSince } from "~/components/recording";
-import { hint, pageTitle, sectionTitle } from "~/components/styles";
+import { useRecorded } from "~/shared/recorded";
+import { amount, figureRow, hint, pageTitle, sectionTitle } from "~/components/styles";
 import { SubmitButton } from "~/components/submit-button";
 import { Badge } from "~/components/ui/badge";
 import { Button, buttonClasses } from "~/components/ui/button";
@@ -194,9 +195,9 @@ function Owed({ data, named = false }: { readonly data: Data; readonly named?: b
     <Card size="sm" role="region" aria-label={named ? "Cliente" : "Resumen"}>
       <CardContent className="flex flex-col gap-1">
         {named ? <p className="border-b pb-3 text-xl font-semibold wrap-break-word">{customer.name}</p> : null}
-        <p className="flex flex-wrap items-baseline justify-between gap-x-3">
+        <p className={figureRow}>
           <span className="text-xl font-medium">Debe</span>{" "}
-          <span className="font-heading text-4xl font-semibold tabular-nums">{formatMoney(owed)}</span>
+          <span className={`font-heading text-4xl font-semibold ${amount}`}>{formatMoney(owed)}</span>
         </p>
         <p className={hint}>{openBills.length === 0 ? "No debe nada." : `En ${openBillsText(openBills.length)}.`}</p>
       </CardContent>
@@ -215,13 +216,13 @@ function BillRow({ bill, from }: { readonly bill: OpenBill | PastBill; readonly 
             <BillStateBadge state={bill.state} />
           </span>
           {bill.state === "voided" || bill.state === "paid" ? null : (
-            <span className="flex flex-wrap items-baseline justify-between gap-x-3 border-t pt-2">
+            <span className={`${figureRow} border-t pt-2`}>
               <span className="font-medium">Debe</span>{" "}
-              <span className="font-heading text-2xl font-semibold tabular-nums">{formatMoney(bill.owed)}</span>
+              <span className={`font-heading text-2xl font-semibold ${amount}`}>{formatMoney(bill.owed)}</span>
             </span>
           )}
           <span className="flex flex-wrap items-center justify-between gap-x-3">
-            <span className={`tabular-nums ${hint}`}>
+            <span className={`${amount} ${hint}`}>
               {`Total ${formatMoney(bill.total)} · Pagado ${formatMoney(bill.paid)}`}
             </span>
             <span className="inline-flex items-center gap-1 font-medium">
@@ -411,9 +412,9 @@ function Overview({
                     data-handover-event={event.reference ?? "uno"}
                     className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0"
                   >
-                    <div className="flex items-baseline justify-between gap-3">
-                      <span className="font-semibold">{paymentMethodLabel[event.method]}</span>
-                      <span className="shrink-0 font-medium tabular-nums">{formatMoney(event.amount)}</span>
+                    <div className={figureRow}>
+                      <span className="font-semibold">{paymentMethodLabel[event.method]}</span>{" "}
+                      <span className={`ml-auto font-medium ${amount}`}>{formatMoney(event.amount)}</span>
                     </div>
                     <p className={`${hint} wrap-break-word`}>
                       {`${event.byName} · ${formatDay(event.day)} ${formatTime(event.at)}`}
@@ -547,6 +548,7 @@ function Confirmed({
   readonly onAnother: () => void;
 }) {
   const { title, details, change } = customerPaymentOutcome(handover.snapshot, handover.result);
+  useRecorded(title, details);
   return (
     <div className="flex flex-col gap-6">
       <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>

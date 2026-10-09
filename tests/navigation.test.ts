@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import { destinationAt } from "~/shared/navigation";
 
 import { appFetch, signedIn, type SignedIn } from "./support/auth";
+import { seedItem } from "./support/catalog";
+import { runTest } from "./support/effect";
+import { recordSale, saleForm } from "./support/sales";
 
 /**
  * UI redesign §4 and §7: each role's four destinations, what Más holds for
@@ -214,6 +217,23 @@ describe("the pages for what cannot be shown", () => {
     const html = await response.text();
     expect(textOf(html)).toContain("No encontramos esta página");
     expect(linksIn(html)).toContainEqual({ to: "/", label: "Ir a Vender" });
+  });
+
+  it("a Bill that is no longer Open tells a Worker so, and leads to the ones that are", async () => {
+    const beto = await signedIn("worker", "Beto Cobrador");
+    const item = await runTest(seedItem({ name: "Cobrado por Beto", price: 1000 }));
+    const { sale } = await recordSale(beto, saleForm({ itemId: item.id, intent: "cobrar" }));
+    const response = await beto.fetch(`/cuentas/${sale!.billId}`);
+
+    expect(response.status).toBe(403);
+    const html = await response.text();
+    expect(textOf(html)).toContain("Esta cuenta ya no está abierta");
+    expect(textOf(html)).toContain("solo un administrador puede abrirla");
+    expect(textOf(html)).not.toContain("No tienes acceso a esta página");
+    expect(linksIn(main(html))).toEqual([
+      { to: "/cuentas-abiertas", label: "Cuentas abiertas" },
+      { to: "/", label: "Ir a Vender" },
+    ]);
   });
 
   it("a screen a Worker may not open says so inside their own navigation", async () => {

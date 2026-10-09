@@ -45,7 +45,7 @@ export interface NewSeededItem {
   readonly retired?: boolean;
 }
 
-type TestFixtures = {
+export type TestFixtures = {
   /** Runs around every test: migrated D1 before, storage wiped after. */
   database: void;
   /**
@@ -58,6 +58,11 @@ type TestFixtures = {
    * through Entrar: `const ana = await signInAs("admin")`, then `page.goto`.
    */
   signInAs: (role: Role, name?: string) => Promise<SeededUser>;
+  /**
+   * Signs this test's browser in as a User who is already there, in place of
+   * whoever was: `await signIn(beto)`.
+   */
+  signIn: (user: SeededUser) => Promise<void>;
   /** A fresh sign-in code for a User, as an Admin or the command line issues it. */
   issueCode: (user: SeededUser) => Promise<string>;
   /**
@@ -179,10 +184,17 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     });
   },
 
-  signInAs: async ({ server, addUser, context, baseURL }, use) => {
+  signInAs: async ({ addUser, signIn }, use) => {
     await use(async (role, name) => {
-      const DB = await database(server);
       const user = await addUser(role, name);
+      await signIn(user);
+      return user;
+    });
+  },
+
+  signIn: async ({ server, context, baseURL }, use) => {
+    await use(async (user) => {
+      const DB = await database(server);
       const token = newSessionToken();
       const at = Date.now();
       await DB.prepare(
@@ -193,7 +205,6 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       await context.addCookies([
         { name: SESSION_COOKIE, value: token, url: baseURL, httpOnly: true, secure: true, sameSite: "Lax" },
       ]);
-      return user;
     });
   },
 

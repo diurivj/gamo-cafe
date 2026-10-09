@@ -493,6 +493,42 @@ test("a Payment confirmed after its step was left still shows its result and its
   await expect(page.getByRole("main")).toContainText("Pagada");
 });
 
+test("a Payment confirmed while a read of the Bill was on its way keeps its result and its change, until the User goes on", async ({
+  page,
+  signInAs,
+  query,
+}) => {
+  const ana = await signInAs("admin", "Ana");
+  await openBill(query, { id: "carrera", by: ana.id, total: 5000 });
+  await page.goto("/cuentas/carrera");
+  await openPay(page);
+  await typePayment(page, { handed: "100" });
+
+  // On its way, and the User goes back to the Bill anyway: the read that
+  // navigation starts is held too, so it lands after the answer does.
+  const held = await holdSubmissions(page, { loads: true });
+  await page.getByRole("button", { name: "Registrar pago de $50.00" }).click();
+  await held.waitFor(1);
+  await page.goBack();
+  await dialog(page).getByRole("button", { name: "Salir", exact: true }).click();
+  await held.waitFor(2);
+
+  await held.release();
+  await expect(title(page, "Pago registrado")).toBeVisible();
+  // The Bill, read before or after: the result is what the screen is about.
+  await held.releaseAll();
+  await expect(page).toHaveURL(/\/cuentas\/carrera$/);
+  await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
+  await held.stop();
+  await expect(title(page, "Pago registrado")).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText("$50.00 en efectivo. Cuenta pagada.");
+  await expect(page.getByRole("region", { name: "Cambio" })).toContainText("$50.00");
+  expect(await query("SELECT amount FROM payments")).toEqual([{ amount: 5000 }]);
+
+  await seeBill(page);
+  await expect(page.getByRole("main")).toContainText("Pagada");
+});
+
 test("a Worker whose Bill was paid from another phone is told nothing was recorded, without an error page", async ({
   page,
   signInAs,

@@ -18,7 +18,10 @@ import { CustomerPicker } from "~/components/customer-picker";
 import { BackDrawing, CategoryDrawing, CheckDrawing, StepDrawing } from "~/components/icons";
 import { Notice } from "~/components/notice";
 import { PaymentEntry } from "~/components/payment-entry";
-import { hint, pageTitle, sectionTitle } from "~/components/styles";
+import { useRecorded } from "~/shared/recorded";
+import { amount, figureRow, hint, pageTitle, sectionTitle } from "~/components/styles";
+import { Change } from "~/components/recording";
+import { StickyBar } from "~/components/sticky-bar";
 import { Button, buttonClasses } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
@@ -142,17 +145,16 @@ function Selection({ snapshot }: { readonly snapshot: Pick<SaleSnapshot, "lines"
         </h2>
         <ul className="flex flex-col gap-2">
           {snapshot.lines.map((line) => (
-            <li key={line.itemId} className="flex items-baseline justify-between gap-3">
+            <li key={line.itemId} className={figureRow}>
               <span className="min-w-0 wrap-break-word">
                 <span className="font-semibold tabular-nums">{line.quantity} ×</span> {line.name}
-              </span>
-              <span className="shrink-0 tabular-nums">{formatMoney(line.unitPrice * line.quantity)}</span>
+              </span>{" "}
+              <span className={`ml-auto ${amount}`}>{formatMoney(line.unitPrice * line.quantity)}</span>
             </li>
           ))}
         </ul>
-        <p className="flex items-baseline justify-between gap-3 border-t pt-3 text-xl font-semibold">
-          <span>Total</span>
-          <span className="tabular-nums">{formatMoney(snapshot.total)}</span>
+        <p className={`${figureRow} border-t pt-3 text-xl font-semibold`}>
+          <span>Total</span> <span className={amount}>{formatMoney(snapshot.total)}</span>
         </p>
       </CardContent>
     </Card>
@@ -195,7 +197,7 @@ function Catalog({
     .filter((category) => category.items.length > 0);
 
   return (
-    <div data-sticky-total className="flex flex-col gap-5">
+    <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
           Vender
@@ -326,12 +328,12 @@ function Catalog({
       </p>
       {units > 0 ? (
         // Rests just above the navigation bar, never under it.
-        <div className="sticky bottom-(--above-bar) z-2">
+        <StickyBar>
           <Card size="sm" role="region" aria-label="Total" className="shadow-lg ring-foreground/25">
             <CardContent className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
               <p className="min-w-0">
                 <span className={`block ${hint}`}>{unitsText(units)}</span>
-                <span className="block font-heading text-2xl leading-tight font-semibold tabular-nums">
+                <span className={`block font-heading text-2xl leading-tight font-semibold ${amount}`}>
                   {formatMoney(total)}
                 </span>
               </p>
@@ -340,7 +342,7 @@ function Catalog({
               </Button>
             </CardContent>
           </Card>
-        </div>
+        </StickyBar>
       ) : offered.length > 0 ? (
         <p className={hint}>Toca un producto para agregarlo.</p>
       ) : null}
@@ -572,6 +574,7 @@ function Confirmed({
 }) {
   const { snapshot, result } = sale;
   const outcome = saleOutcome(snapshot, result);
+  useRecorded(outcome.title, outcome.details);
 
   return (
     // The Bill, for what follows the sale: a test, or a tool, reads it here.
@@ -582,12 +585,7 @@ function Confirmed({
       <Notice tone="success">{outcome.details}</Notice>
 
       {outcome.change !== null ? (
-        <Card size="sm" role="region" aria-label="Cambio">
-          <CardContent className="flex items-baseline justify-between gap-3">
-            <span className="text-xl font-medium">Cambio</span>
-            <span className="font-heading text-4xl font-semibold tabular-nums">{outcome.change}</span>
-          </CardContent>
-        </Card>
+        <Change amount={outcome.change} />
       ) : null}
 
       <div className="flex flex-col gap-3">

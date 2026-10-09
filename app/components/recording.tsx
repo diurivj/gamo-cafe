@@ -2,7 +2,7 @@ import { Fragment, type ReactNode, type RefObject, useEffect, useState } from "r
 import { Link, useBlocker } from "react-router";
 
 import { Notice } from "~/components/notice";
-import { hint, pageTitle } from "~/components/styles";
+import { amount as amountClasses, figureRow, hint, pageTitle } from "~/components/styles";
 import { Button, buttonClasses } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
 
@@ -103,9 +103,9 @@ export function Pending({
 export function Change({ amount }: { readonly amount: string }) {
   return (
     <Card size="sm" role="region" aria-label="Cambio">
-      <CardContent className="flex items-baseline justify-between gap-3">
-        <span className="text-xl font-medium">Cambio</span>
-        <span className="font-heading text-4xl font-semibold tabular-nums">{amount}</span>
+      <CardContent className={figureRow}>
+        <span className="text-xl font-medium">Cambio</span>{" "}
+        <span className={`font-heading text-4xl font-semibold ${amountClasses}`}>{amount}</span>
       </CardContent>
     </Card>
   );

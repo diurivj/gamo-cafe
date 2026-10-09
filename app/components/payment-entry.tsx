@@ -57,7 +57,7 @@ export function PaymentEntry({ value, onChange, full, tooMuch, insist = false }:
             // edge and words as well as the filled mark.
             <Label
               key={method}
-              className="min-h-14 cursor-pointer gap-3 rounded-2xl border border-input bg-background px-4 py-3 has-data-checked:border-foreground has-data-checked:bg-muted has-data-checked:font-semibold has-data-checked:ring-1 has-data-checked:ring-foreground"
+              className="min-h-14 min-w-0 cursor-pointer gap-3 rounded-2xl border border-input wrap-anywhere bg-background px-4 py-3 has-data-checked:border-foreground has-data-checked:bg-muted has-data-checked:font-semibold has-data-checked:ring-1 has-data-checked:ring-foreground"
             >
               <RadioGroupItem value={method} />
               {paymentMethodLabel[method]}

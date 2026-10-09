@@ -2,7 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
 import { holdSubmissions } from "./support/held";
-import { cutOff } from "./support/layout";
+import { cutOff, inSight } from "./support/layout";
 import { destinations, goTo } from "./support/navigate";
 import {
   anotherPhone,
@@ -375,7 +375,6 @@ test("on a 320px phone with text twice as large long names and the code stay who
   const other = await addUser("worker", word);
   const enlarge = () => page.addStyleTag({ content: "html { font-size: 200% }" });
   const main = page.getByRole("main");
-  const bar = destinations(page);
   /** Nothing is cut or sticks out, and every control that is not a row is a 48px target. */
   const fits = async (what: string) => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), what).toBe(true);
@@ -388,12 +387,6 @@ test("on a 320px phone with text twice as large long names and the code stay who
       if ((await control.getAttribute("href")) === "/clientes") continue;
       expect((await control.boundingBox())!.height, `${what}: ${await control.innerText()}`).toBeGreaterThanOrEqual(48);
     }
-  };
-  /** The control is whole and above the bar at the bottom. */
-  const inSight = async (control: Locator) => {
-    const box = (await control.boundingBox())!;
-    expect(box.y).toBeGreaterThanOrEqual(0);
-    expect(box.y + box.height).toBeLessThanOrEqual((await bar.boundingBox())!.y);
   };
 
   for (const path of ["/usuarios", `/usuarios?paso=usuario&id=${me.id}`, `/usuarios?paso=usuario&id=${other.id}`, "/usuarios?paso=nuevo"]) {

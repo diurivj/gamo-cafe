@@ -5,7 +5,7 @@ import { run } from "~/backend/run.server";
 import { BillStateBadge } from "~/components/bill-state-badge";
 import { ChevronDrawing } from "~/components/icons";
 import { LoadMore, usePagedList } from "~/components/paged-list";
-import { hint, pageTitle } from "~/components/styles";
+import { amount, figureRow, hint, pageTitle } from "~/components/styles";
 import { Card, CardContent } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
@@ -115,12 +115,12 @@ export default function OpenBills({ loaderData }: Route.ComponentProps) {
                     </span>
                     {bill.customer && bill.note ? <span className="wrap-break-word">{bill.note}</span> : null}
                     <span className={hint}>{formatDay(bill.day)}</span>
-                    <span className="flex flex-wrap items-baseline justify-between gap-x-3 border-t pt-2">
+                    <span className={`${figureRow} border-t pt-2`}>
                       <span className="font-medium">Debe</span>{" "}
-                      <span className="font-heading text-2xl font-semibold tabular-nums">{formatMoney(bill.owed)}</span>
+                      <span className={`font-heading text-2xl font-semibold ${amount}`}>{formatMoney(bill.owed)}</span>
                     </span>
                     <span className="flex flex-wrap items-center justify-between gap-x-3">
-                      <span className={`tabular-nums ${hint}`}>
+                      <span className={`${amount} ${hint}`}>
                         {`Total ${formatMoney(bill.total)} · Pagado ${formatMoney(bill.paid)}`}
                       </span>
                       <span className="inline-flex items-center gap-1 font-medium">

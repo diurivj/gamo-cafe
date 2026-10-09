@@ -368,7 +368,13 @@ test("with text twice as large Vender's two steps keep every word and action, an
   expect(await nothingSideways(page)).toBe(true);
   await expect(page.getByLabel("2 de Jugo de naranja natural grande")).toBeVisible();
   await expect(totalBar(page)).toContainText("$2,487.50");
-  expect(await clearOfTheBar(page, totalBar(page).getByRole("button", { name: "Cobrar" }))).toBe(true);
+  // Text this large makes the total and the bar too tall to share the screen
+  // with the Items: the total stops sticking and rests after the list, a
+  // scroll away, and the bar never covers it (`StickyBar`).
+  const forward = totalBar(page).getByRole("button", { name: "Cobrar" });
+  await forward.focus();
+  await expect(forward).toBeInViewport({ ratio: 1 });
+  expect(await clearOfTheBar(page, forward)).toBe(true);
 
   await review(page);
   expect(await nothingSideways(page)).toBe(true);

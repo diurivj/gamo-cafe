@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Link, Outlet, type ShouldRevalidateFunctionArgs, useLocation, useNavigation } from "react-router";
 
 import { NavigationDrawing } from "~/components/icons";
+import { keepFocusClear } from "~/components/sticky-bar";
 import { destinationsFor } from "~/navigation.server";
 import { requireUser } from "~/session.server";
 import { type Destination, destinationAt } from "~/shared/navigation";
@@ -44,8 +45,32 @@ function Destinations({ destinations }: { readonly destinations: ReadonlyArray<D
   // A tapped destination is marked from the tap, before its screen arrives.
   const marked = going === undefined ? here : destinationAt(destinations, going);
 
+  // The bar says how tall it stands, so the screen leaves it that room and
+  // nothing rests or takes the focus under it (`--bar-height` in `app.css`):
+  // text twice as large makes it taller than any fixed number. At the side of
+  // a wider screen it takes no room from below.
+  const bar = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const element = bar.current;
+    if (!element) return;
+    const page = document.documentElement;
+    const tell = () => {
+      if (getComputedStyle(element).position === "fixed") page.style.setProperty("--bar-height", `${element.offsetHeight}px`);
+      else page.style.removeProperty("--bar-height");
+      keepFocusClear();
+    };
+    tell();
+    const observer = new ResizeObserver(tell);
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      page.style.removeProperty("--bar-height");
+    };
+  }, []);
+
   return (
     <nav
+      ref={bar}
       aria-label="Principal"
       className="fixed inset-x-0 bottom-0 z-10 border-t bg-background pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] lg:static lg:border-0 lg:bg-transparent lg:p-3"
     >
@@ -91,6 +116,22 @@ export default function Shell({ loaderData }: Route.ComponentProps) {
       main.current.focus({ preventScroll: true });
     }
   }, [pathname]);
+
+  // A field that takes the focus is brought clear of the bar and of what
+  // sticks above it. Browsers do that by themselves for a button or a link
+  // (`scroll-padding-bottom`); WebKit shows a field's caret wherever it is,
+  // the bar over it or not. Where the browser already did, this moves nothing.
+  useEffect(() => {
+    const reveal = (event: FocusEvent) => {
+      const field = event.target;
+      if (!(field instanceof HTMLElement) || !field.matches("input, textarea, select")) return;
+      requestAnimationFrame(() => {
+        if (document.activeElement === field) field.scrollIntoView({ block: "nearest" });
+      });
+    };
+    document.addEventListener("focusin", reveal);
+    return () => document.removeEventListener("focusin", reveal);
+  }, []);
 
   return (
     <div className="min-h-dvh lg:pl-64">

@@ -339,6 +339,43 @@ test("a correction on its way is said at once, shows nothing as recorded and is 
   await expect(page).toHaveURL(/\/cuentas\/en-camino$/);
 });
 
+test("a correction confirmed while a read of the Bill was on its way keeps its result, until the User goes on", async ({
+  page,
+  signInAs,
+  addItem,
+  query,
+}) => {
+  const ana = await signInAs("admin", "Ana");
+  const item = await addItem({ name: "Torta", stockTracked: false });
+  await seedBill(query, { id: "carrera", by: ana.id, itemId: item.id, lines: [2] });
+  await page.goto("/cuentas/carrera");
+  await openCorrection(page, "Cancelar esta cuenta", "Cancelar cuenta");
+  await page.getByLabel("Motivo").fill("Era una prueba");
+
+  // On its way, and the Admin goes back to the Bill anyway: the read that
+  // navigation starts is held too, so it lands after the answer does.
+  const held = await holdSubmissions(page, { loads: true });
+  await page.getByRole("button", { name: "Cancelar cuenta", exact: true }).click();
+  await held.waitFor(1);
+  await page.goBack();
+  await dialog(page).getByRole("button", { name: "Salir", exact: true }).click();
+  await held.waitFor(2);
+
+  await held.release();
+  await expect(title(page, "Cuenta cancelada")).toBeVisible();
+  await held.releaseAll();
+  await expect(page).toHaveURL(/\/cuentas\/carrera$/);
+  await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
+  await held.stop();
+  // The Bill, read before or after: the result is what the screen is about.
+  await expect(title(page, "Cuenta cancelada")).toBeVisible();
+  expect(await query("SELECT reason FROM bill_voids")).toEqual([{ reason: "Era una prueba" }]);
+
+  await page.getByRole("button", { name: "Ver cuenta" }).click();
+  await expect(title(page, "Cuenta")).toBeVisible();
+  await expect(page.getByRole("main")).toContainText("Cancelada");
+});
+
 test("a correction that got no answer is of unknown outcome, never failed, and sent again it is recorded once", async ({
   page,
   signInAs,

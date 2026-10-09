@@ -42,7 +42,7 @@ export default function Mas({ loaderData }: Route.ComponentProps) {
                     to={to}
                     className="flex min-h-14 items-center justify-between gap-3 px-5 py-3 font-medium -outline-offset-2 hover:bg-muted/60"
                   >
-                    {label}
+                    <span className="min-w-0 wrap-anywhere">{label}</span>
                     <ChevronDrawing className="size-5 text-muted-foreground" />
                   </Link>
                 </li>

@@ -10,6 +10,7 @@ import { ConfirmDialog } from "~/components/confirm-dialog";
 import { BackDrawing, ChevronDrawing } from "~/components/icons";
 import { Notice } from "~/components/notice";
 import { Pending, SentRows, useLeaveGuard, useReadAgainSince } from "~/components/recording";
+import { useRecorded } from "~/shared/recorded";
 import { hint, pageTitle, sectionTitle } from "~/components/styles";
 import { Badge } from "~/components/ui/badge";
 import { Button, buttonClasses } from "~/components/ui/button";
@@ -593,6 +594,7 @@ function Confirmed({
   readonly onAnother: () => void;
 }) {
   const { title, details } = stockChangeOutcome(change.snapshot, change.result);
+  useRecorded(title, details);
   const cancelled = change.snapshot.kind === "cancellation";
   return (
     <div className="flex flex-col gap-6">

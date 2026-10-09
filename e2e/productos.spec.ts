@@ -14,8 +14,8 @@ import {
   title,
   typeItem,
 } from "./support/catalog";
-import { cutOff } from "./support/layout";
-import { destinations, goTo } from "./support/navigate";
+import { cutOff, inSight } from "./support/layout";
+import { goTo } from "./support/navigate";
 import { itemButton, pay } from "./support/sell";
 import { expectStock, stockRow } from "./support/stock";
 
@@ -423,7 +423,6 @@ test("on a 320px phone with text twice as large long names stay whole, and an It
   await addCategory(word);
   const enlarge = () => page.addStyleTag({ content: "html { font-size: 200% }" });
   const main = page.getByRole("main");
-  const bar = destinations(page);
   /** Nothing is cut or sticks out, and every control that is not a row is a 48px target. */
   const fits = async (what: string) => {
     expect(await nothingSideways(page), what).toBe(true);
@@ -436,12 +435,6 @@ test("on a 320px phone with text twice as large long names stay whole, and an It
       if ((await control.getAttribute("href")) === "/") continue;
       expect((await control.boundingBox())!.height, `${what}: ${await control.innerText()}`).toBeGreaterThanOrEqual(48);
     }
-  };
-  /** The control is whole and above the bar at the bottom. */
-  const inSight = async (control: Locator) => {
-    const box = (await control.boundingBox())!;
-    expect(box.y).toBeGreaterThanOrEqual(0);
-    expect(box.y + box.height).toBeLessThanOrEqual((await bar.boundingBox())!.y);
   };
 
   for (const path of ["/productos", "/productos?paso=categorias", `/productos?paso=categoria&id=${category.id}`, `/productos/${item.id}`, "/productos?paso=nuevo"]) {

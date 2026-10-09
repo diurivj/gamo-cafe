@@ -10,16 +10,23 @@
 /*
  * The visual system (UI redesign §3.2) is shadcn/ui's, in its Maia preset:
  * the variables below are the ones `npx shadcn init` wrote, and every
- * component under `~/components/ui` reads them. Three were darkened from the
+ * component under `~/components/ui` reads them. Four were darkened from the
  * preset so they pass the contrast the spec asks for (§8): `--muted-foreground`
- * (text, 4.5:1 on `--muted` too), `--input` (a field's edge, 3:1) and `--ring`
- * (the focus mark, 3:1).
+ * (text, 4.5:1 on `--muted` too), `--input` (a field's edge, 3:1), `--ring`
+ * (the focus mark, 3:1) and `--destructive` (text, 4.5:1 on its own tint too,
+ * which is what a destructive `Button` and `Badge` are filled with).
  */
 :root {
-  /* The room the bar at the bottom of a phone takes; none where it stands at the side (`lg`). */
-  --bar-room: calc(6rem + env(safe-area-inset-bottom));
+  /*
+   * How tall the bar at the bottom of a phone stands. The shell measures it
+   * (`routes/shell.tsx`), since large text makes it taller; until it has, this
+   * is its height with ordinary text.
+   */
+  --bar-height: calc(4.25rem + env(safe-area-inset-bottom));
+  /* The room that bar takes; none where it stands at the side (`lg`). */
+  --bar-room: calc(var(--bar-height) + 1.75rem);
   /* Where what sticks to the bottom of a screen rests: just above that bar. */
-  --above-bar: calc(4.75rem + env(safe-area-inset-bottom));
+  --above-bar: calc(var(--bar-height) + 0.5rem);
   --background:
     oklch(1 0 0);
   --foreground:
@@ -49,7 +56,7 @@
   --accent-foreground:
     oklch(0.205 0 0);
   --destructive:
-    oklch(0.577 0.245 27.325);
+    oklch(0.505 0.213 27.518);
   --border:
     oklch(0.922 0 0);
   --input:
@@ -101,9 +108,13 @@ html {
   scroll-padding-bottom: var(--bar-room);
 }
 
-/* Vender's total sticks above the bar: what takes the focus stays clear of both. */
-html:has([data-sticky-total]) {
-  scroll-padding-bottom: calc(var(--bar-room) + 5.5rem);
+/*
+ * What sticks above the bar (`StickyBar`) says how much room it takes: what
+ * takes the focus stays clear of both. Until it has said so, it is taken to
+ * be as tall as it is with ordinary text.
+ */
+html:has([data-sticky-bar]) {
+  scroll-padding-bottom: var(--sticky-room, calc(var(--bar-room) + 5.5rem));
 }
 
 /*
