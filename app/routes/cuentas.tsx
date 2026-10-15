@@ -10,7 +10,7 @@ import { BillStateBadge } from "~/components/bill-state-badge";
 import { CustomerPicker } from "~/components/customer-picker";
 import { ChevronDrawing } from "~/components/icons";
 import { LoadMore, usePagedList } from "~/components/paged-list";
-import { hint, pageTitle } from "~/components/styles";
+import { hint, pageTitle, rowCard } from "~/components/styles";
 import { SubmitButton } from "~/components/submit-button";
 import { buttonClasses } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
@@ -164,7 +164,7 @@ export default function Cuentas({ loaderData }: Route.ComponentProps) {
               <li key={bill.id} data-bill-id={bill.id}>
                 {/* Cuenta goes back to this entry, not on to a new list. */}
                 <Link to={`/cuentas/${bill.id}`} state={{ fromList: "/cuentas" }} className="block rounded-2xl">
-                  <Card size="sm" className="transition-colors hover:bg-muted/60 active:bg-muted">
+                  <Card size="sm" className={rowCard}>
                     <CardContent className="flex flex-col gap-2">
                       <span className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
                         <span className="max-w-full min-w-0 text-xl font-semibold wrap-anywhere">

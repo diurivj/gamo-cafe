@@ -8,7 +8,7 @@ export function BackLink({ to, label }: { readonly to: string; readonly label: s
   return (
     // Its one word may be wider than a narrow phone with large text: it breaks instead of sticking out.
     <Link to={to} className={`${buttonClasses({ variant: "outline", size: "touch" })} max-w-full shrink self-start`}>
-      <BackDrawing />
+      <BackDrawing className="size-5" />
       <span className="min-w-0 wrap-anywhere">{label}</span>
     </Link>
   );

@@ -3,9 +3,11 @@ import { data, Form, redirect } from "react-router";
 
 import { run } from "~/backend/run.server";
 import { useSignInCode } from "~/backend/sign-in";
+import { Monogram, Wordmark } from "~/components/brand";
 import { Notice } from "~/components/notice";
-import { hint, pageTitle } from "~/components/styles";
+import { hint } from "~/components/styles";
 import { buttonClasses } from "~/components/ui/button";
+import { Card, CardContent } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { SubmitButton } from "~/components/submit-button";
@@ -57,46 +59,61 @@ export default function SignIn({ loaderData, actionData }: Route.ComponentProps)
   }, [actionData]);
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-5 py-10">
-      <p className="font-heading text-xl font-semibold">Gamo Cafe</p>
-      <h1 className={`mt-1 ${pageTitle}`}>Entrar</h1>
+    <main className="relative isolate flex min-h-dvh w-full flex-col justify-center px-5 pt-[max(2.5rem,env(safe-area-inset-top))] pb-[max(2.5rem,env(safe-area-inset-bottom))]">
+      {/* The light of the counter, warm over the paper: only a drawing. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[28rem] bg-[radial-gradient(60rem_22rem_at_50%_-6rem,rgb(214_150_96/0.22),transparent_70%)]"
+      />
+      <div className="mx-auto flex w-full max-w-md animate-enter flex-col">
+        <div className="flex items-center gap-3">
+          <Monogram />
+          <Wordmark />
+        </div>
+        <h1 className="mt-10 font-display text-[3.25rem] leading-none tracking-[-0.015em] wrap-break-word">Entrar</h1>
 
-      {loaderData.sessionEnded ? (
-        <Notice tone="info" className="mt-6">
-          Tu sesión terminó. Entra con un código nuevo.
-        </Notice>
-      ) : null}
-
-      <Form method="post" className="mt-8 flex flex-col gap-3">
-        <Label htmlFor="code">Código de acceso</Label>
-        <p id="code-help" className={hint}>
-          Pídeselo a un administrador. Sirve una sola vez y dura 10 minutos.
-        </p>
-        <Input
-          ref={field}
-          id="code"
-          name="code"
-          required
-          autoFocus
-          defaultValue={actionData?.code}
-          autoComplete="one-time-code"
-          autoCapitalize="characters"
-          autoCorrect="off"
-          spellCheck={false}
-          enterKeyHint="go"
-          aria-describedby={actionData?.error ? "code-help code-error" : "code-help"}
-          aria-invalid={actionData?.error ? true : undefined}
-          className="h-16 text-center font-mono text-2xl tracking-widest uppercase"
-        />
-        {actionData?.error ? (
-          <Notice tone="error" id="code-error">
-            {actionData.error}
+        {loaderData.sessionEnded ? (
+          <Notice tone="info" className="mt-6">
+            Tu sesión terminó. Entra con un código nuevo.
           </Notice>
         ) : null}
-        <SubmitButton pendingLabel="Entrando…" className={buttonClasses({ size: "touch", className: "mt-2" })}>
-          Entrar
-        </SubmitButton>
-      </Form>
+
+        <Card className="mt-7">
+          <CardContent>
+            {/* A long word breaks rather than be cut by the card, with text twice as large on a narrow phone. */}
+            <Form method="post" className="flex flex-col gap-3 wrap-anywhere">
+              <Label htmlFor="code">Código de acceso</Label>
+              <p id="code-help" className={hint}>
+                Pídeselo a un administrador. Sirve una sola vez y dura 10 minutos.
+              </p>
+              <Input
+                ref={field}
+                id="code"
+                name="code"
+                required
+                autoFocus
+                defaultValue={actionData?.code}
+                autoComplete="one-time-code"
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                enterKeyHint="go"
+                aria-describedby={actionData?.error ? "code-help code-error" : "code-help"}
+                aria-invalid={actionData?.error ? true : undefined}
+                className="mt-1 h-16 text-center text-[1.75rem] font-semibold tracking-[0.3em] uppercase figures"
+              />
+              {actionData?.error ? (
+                <Notice tone="error" id="code-error">
+                  {actionData.error}
+                </Notice>
+              ) : null}
+              <SubmitButton pendingLabel="Entrando…" className={buttonClasses({ size: "touch", className: "mt-2 w-full" })}>
+                Entrar
+              </SubmitButton>
+            </Form>
+          </CardContent>
+        </Card>
+      </div>
     </main>
   );
 }

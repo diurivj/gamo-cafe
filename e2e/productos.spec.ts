@@ -43,18 +43,22 @@ test("an Admin adds a Category and an Item with its starting Stock, and finds it
   // No form is on the list.
   await expect(page.getByRole("main").getByRole("textbox")).toHaveCount(0);
 
-  // An Item goes in a Category: with none, the step says so and leads to them.
+  // An Item goes in a Category: with none, the step says so and asks for
+  // one first, right there. A Category needs a name and nothing else: no
+  // drawing is asked for.
   await openNewItem(page);
   await expect(page.getByText("Un producto va en una categoría, y todavía no hay ninguna.")).toBeVisible();
-  await page.getByRole("link", { name: "Agregar una categoría" }).click();
-  await expect(title(page, "Categorías")).toBeFocused();
-
-  // A Category needs a name and nothing else: no drawing is asked for.
+  await expect(page.getByLabel("Nombre", { exact: true })).toHaveCount(0);
   await page.getByLabel("Nombre de la categoría").fill("Antojitos de la casa");
   await page.getByRole("button", { name: "Agregar categoría" }).click();
   await expect(said(page)).toHaveText("Se agregó la categoría «Antojitos de la casa».");
+  // The step then asks for the Item, in that Category.
+  await expect(title(page, "Agregar producto")).toBeVisible();
+  await expect(page.getByLabel("Categoría", { exact: true })).toContainText("Antojitos de la casa");
+
+  await backTo(page, "Productos");
+  await openCategories(page);
   await expect(categoryRow(page, "Antojitos de la casa")).toContainText("1 de 1 · 0 productos");
-  // The form is ready for the next Category.
   await expect(page.getByLabel("Nombre de la categoría")).toHaveValue("");
 
   await backTo(page, "Productos");

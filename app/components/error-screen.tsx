@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { isRouteErrorResponse, useLocation } from "react-router";
 
+import { LockDrawing, SearchDrawing, ToneDrawing } from "~/components/icons";
 import { Notice } from "~/components/notice";
 import { buttonClasses } from "~/components/ui/button";
 import { lastRecorded } from "~/shared/recorded";
@@ -63,6 +64,18 @@ export function ErrorScreen({ error }: { readonly error: unknown }) {
   // whatever state the failure left this one in.
   return (
     <div className="flex flex-col gap-4">
+      {/* What kind of answer this is, before its words: only a drawing. */}
+      <span className="grid size-16 place-items-center rounded-full bg-muted text-foreground">
+        {status === 403 ? (
+          <LockDrawing className="size-8" />
+        ) : status === 404 ? (
+          <SearchDrawing className="size-8" />
+        ) : (
+          <span className="text-destructive">
+            <ToneDrawing tone="error" className="size-8" />
+          </span>
+        )}
+      </span>
       <h1 className={pageTitle}>{title}</h1>
       {recorded ? <Notice tone="success">{`${recorded.title}. ${recorded.details}`}</Notice> : null}
       <p className={hint}>{details}</p>
@@ -93,7 +106,7 @@ export function ErrorScreen({ error }: { readonly error: unknown }) {
 /** The same, as a whole page: for a failure with no navigation to stand in. */
 export function ErrorPage({ error }: { readonly error: unknown }) {
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-5 py-10">
+    <main className="mx-auto flex min-h-dvh w-full max-w-md animate-enter flex-col justify-center px-5 py-10">
       <ErrorScreen error={error} />
     </main>
   );

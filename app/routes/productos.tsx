@@ -29,10 +29,10 @@ import {
 } from "~/catalog-forms.server";
 import { BackLink } from "~/components/back-link";
 import { FieldError, FormError, type FormRefusal, refusedField, useFocusOnRefusal } from "~/components/field-error";
-import { ChevronDrawing } from "~/components/icons";
+import { ChevronDrawing, NavigationDrawing } from "~/components/icons";
 import { ItemFields } from "~/components/item-fields";
 import { Notice } from "~/components/notice";
-import { hint, pageTitle, sectionTitle } from "~/components/styles";
+import { hint, pageTitle, rowCard, sectionTitle } from "~/components/styles";
 import { SubmitButton } from "~/components/submit-button";
 import { Badge } from "~/components/ui/badge";
 import { buttonClasses } from "~/components/ui/button";
@@ -226,6 +226,7 @@ export default function Productos({ loaderData, actionData }: Route.ComponentPro
         categories={active}
         heading={heading}
         refusal={refusalOf("add-item:")}
+        categoryRefusal={refusalOf("add-category:")}
         recorded={recorded}
         formKey={fresh("add-item:")}
       />
@@ -303,7 +304,16 @@ function Catalog({
       </div>
 
       {active.length === 0 ? (
-        <p className={hint}>Todavía no hay categorías. Agrega una en Categorías y después sus productos.</p>
+        <Card>
+          <CardContent className="flex flex-col items-start gap-3">
+            <span className="grid size-12 place-items-center rounded-2xl bg-muted">
+              <NavigationDrawing icon="tag" className="size-6" />
+            </span>
+            <p className={`${hint} wrap-anywhere`}>
+              Todavía no hay categorías. Toca Agregar producto: primero se pide su categoría, y después el producto.
+            </p>
+          </CardContent>
+        </Card>
       ) : null}
 
       {active.map((category) => {
@@ -354,7 +364,7 @@ function ItemRow({ item, categoryName }: { readonly item: CatalogItem; readonly 
   return (
     <li>
       <Link to={`${PRODUCTOS}/${item.id}`} className="block rounded-2xl">
-        <Card size="sm" className="transition-colors hover:bg-muted/60 active:bg-muted">
+        <Card size="sm" className={rowCard}>
           <CardContent className="flex items-center justify-between gap-3">
             <span className="flex min-w-0 flex-col gap-1">
               <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -376,17 +386,24 @@ function ItemRow({ item, categoryName }: { readonly item: CatalogItem; readonly 
   );
 }
 
-/** The step that adds an Item. It stays after each one, ready for the next. */
+/**
+ * The step that adds an Item. It stays after each one, ready for the next.
+ * With no Category yet, it first asks for one, right here: the first thing
+ * an Admin does with an empty catalog, without a trip to Categorías.
+ */
 function NewItem({
   categories,
   heading,
   refusal,
+  categoryRefusal,
   recorded,
   formKey,
 }: {
   readonly categories: ReadonlyArray<CatalogCategory>;
   readonly heading: Heading;
   readonly refusal: FormRefusal | undefined;
+  /** What the form that adds the first Category was refused for. */
+  readonly categoryRefusal: FormRefusal | undefined;
   readonly recorded: ReactNode;
   readonly formKey: string;
 }) {
@@ -399,12 +416,32 @@ function NewItem({
       {recorded}
 
       {categories.length === 0 ? (
-        <>
+        <section aria-labelledby="primera-categoria" className="flex flex-col gap-4">
+          <h2 id="primera-categoria" className={sectionTitle}>
+            Primero, una categoría
+          </h2>
           <p>Un producto va en una categoría, y todavía no hay ninguna.</p>
-          <Link to={CATEGORIES_HREF} className={buttonClasses({ size: "touch" })}>
-            Agregar una categoría
-          </Link>
-        </>
+          <p className={hint}>Por ejemplo Bebidas, Desayunos o Postres. Agrupa los productos en Vender.</p>
+          <Form method="post" preventScrollReset className="flex flex-col gap-4">
+            <input type="hidden" name="intent" value="add-category" />
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="name">Nombre de la categoría</Label>
+              <Input
+                id="name"
+                name="name"
+                required
+                maxLength={40}
+                autoComplete="off"
+                {...refusedField(categoryRefusal, "name")}
+              />
+              <FieldError refusal={categoryRefusal} field="name" />
+            </div>
+            <FormError refusal={categoryRefusal} />
+            <SubmitButton pendingLabel="Agregando…" className={buttonClasses({ size: "touch" })}>
+              Agregar categoría
+            </SubmitButton>
+          </Form>
+        </section>
       ) : (
         <Form method="post" key={formKey} className="flex flex-col gap-6">
           <input type="hidden" name="intent" value="add-item" />
@@ -545,7 +582,7 @@ function Categories({
             {retired.map((category) => (
               <li key={category.id}>
                 <Link to={categoryHref(category.id)} className="block rounded-2xl">
-                  <Card size="sm" className="transition-colors hover:bg-muted/60 active:bg-muted">
+                  <Card size="sm" className={rowCard}>
                     <CardContent className="flex items-center justify-between gap-3">
                       <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
                         <span className="max-w-full min-w-0 text-xl font-semibold wrap-anywhere">{category.name}</span>

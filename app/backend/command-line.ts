@@ -4,16 +4,20 @@ import { hashSecret, newSignInCode } from "../shared/secret.ts";
 
 /**
  * What the developer's command line sends to D1 (spec §3.5): the first Admin,
- * and a sign-in code when no Admin is signed in to issue one.
+ * a Worker added from a computer, and a sign-in code when no Admin is signed
+ * in to issue one.
  *
  * `wrangler d1 execute` takes SQL text without parameters, so these build
- * whole statements. They write the same rows as `addUser` and
- * `issueSignInCode` in ./sign-in.ts; tests/command-line.test.ts signs in with
- * the result to keep the two in step.
+ * whole statements. They write the same rows as `addUserWithCode` in
+ * ./users.ts and `issueSignInCode` in ./sign-in.ts;
+ * tests/command-line.test.ts signs in with the result to keep them in step.
  */
 
 /** As in ./sign-in.ts: a code stops working 10 minutes after it was issued. */
 const CODE_LIFETIME = 10 * 60 * 1000;
+
+/** As on Usuarios: a name is kept with its space trimmed and collapsed. */
+const tidyName = (name: string) => name.trim().replace(/\s+/g, " ");
 
 /** Text as a SQL literal. */
 function text(value: string): string {
@@ -28,23 +32,37 @@ export interface Issued {
   readonly statements: ReadonlyArray<string>;
 }
 
+/** A code for the User with this id, written only if there is one. */
 async function codeStatement(userId: string, issuedAt: number) {
   const code = newSignInCode();
   const sql =
     "INSERT INTO sign_in_codes (id, user_id, code_hash, issued_by, issued_at, expires_at) " +
-    `VALUES (${text(crypto.randomUUID())}, ${text(userId)}, ${text(await hashSecret(code))}, NULL, ` +
-    `${issuedAt}, ${issuedAt + CODE_LIFETIME})`;
+    `SELECT ${text(crypto.randomUUID())}, id, ${text(await hashSecret(code))}, NULL, ` +
+    `${issuedAt}, ${issuedAt + CODE_LIFETIME} FROM users WHERE id = ${text(userId)}`;
   return { code, sql };
 }
 
-/** A new Admin and a code for them. `issuedAt` is epoch milliseconds. */
-export async function firstAdmin(name: string, issuedAt: number): Promise<Issued> {
+/**
+ * A new User and a code for them. `issuedAt` is epoch milliseconds.
+ *
+ * As on Usuarios, no two Users share a name, ignoring capitals. The first
+ * statement returns the new User's id; when another User already has the
+ * name, it returns no row and neither statement writes anything.
+ */
+export async function newUser(
+  typedName: string,
+  role: "admin" | "worker",
+  issuedAt: number,
+): Promise<Issued & { readonly name: string }> {
+  const name = tidyName(typedName);
   const userId = crypto.randomUUID();
   const { code, sql } = await codeStatement(userId, issuedAt);
   return {
+    name,
     code,
     statements: [
-      `INSERT INTO users (id, name, role) VALUES (${text(userId)}, ${text(name)}, 'admin')`,
+      `INSERT INTO users (id, name, role) SELECT ${text(userId)}, ${text(name)}, ${text(role)} ` +
+        `WHERE NOT EXISTS (SELECT 1 FROM users WHERE name = ${text(name)} COLLATE NOCASE) RETURNING id`,
       sql,
     ],
   };

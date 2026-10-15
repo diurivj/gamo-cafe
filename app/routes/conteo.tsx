@@ -17,6 +17,7 @@ import { StickyBar } from "~/components/sticky-bar";
 import { Badge } from "~/components/ui/badge";
 import { Button, buttonClasses } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
+import { SearchInput } from "~/components/search-input";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import {
@@ -143,7 +144,7 @@ function Entry({
   return (
     <div className="flex flex-col gap-5">
       <Link to={STOCK_PATH} className={`${buttonClasses({ variant: "outline", size: "touch" })} max-w-full shrink self-start`}>
-        <BackDrawing />
+        <BackDrawing className="size-5" />
         <span className="min-w-0 wrap-anywhere">Inventario</span>
       </Link>
       <div className="flex flex-col gap-1">
@@ -164,9 +165,8 @@ function Entry({
         <>
           <div role="search" className="flex flex-col gap-2">
             <Label htmlFor="buscar">Buscar producto</Label>
-            <Input
+            <SearchInput
               id="buscar"
-              type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               autoComplete="off"
@@ -286,7 +286,7 @@ function Entry({
 function BackToEntry({ onBack }: { readonly onBack: () => void }) {
   return (
     <Button type="button" variant="outline" size="touch" onClick={onBack} className="max-w-full shrink self-start">
-      <BackDrawing />
+      <BackDrawing className="size-5" />
       <span className="min-w-0 wrap-anywhere">Volver a contar</span>
     </Button>
   );

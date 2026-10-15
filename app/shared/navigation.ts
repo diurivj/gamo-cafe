@@ -5,8 +5,22 @@
  * label or path of its own to a phone.
  */
 
-/** The drawing beside a destination's word. */
-export type NavigationIcon = "home" | "bag" | "calendar" | "box" | "receipt" | "person" | "people" | "menu";
+/** The drawing beside a destination's word, or a link's of Más. */
+export type NavigationIcon =
+  | "home"
+  | "bag"
+  | "calendar"
+  | "box"
+  | "receipt"
+  | "person"
+  | "people"
+  | "menu"
+  | "stack"
+  | "wallet"
+  | "scale"
+  | "clock"
+  | "tag"
+  | "badge";
 
 /** One of a role's four destinations. The first is Inicio, the last one Más. */
 export interface Destination {
@@ -21,6 +35,8 @@ export interface Destination {
 export interface MoreLink {
   readonly label: string;
   readonly to: string;
+  /** The drawing beside its words: what a User recognizes it by before reading. */
+  readonly icon: NavigationIcon;
 }
 
 /** The links of Más that belong to one task. */

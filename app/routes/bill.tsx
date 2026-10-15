@@ -554,7 +554,7 @@ function Pay({
   return (
     <div className="flex flex-col gap-6">
       <Button type="button" variant="outline" size="touch" onClick={onBack} className="self-start">
-        <BackDrawing />
+        <BackDrawing className="size-5" />
         Volver a la cuenta
       </Button>
       <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
@@ -637,7 +637,7 @@ function Correct({
   return (
     <div className="flex flex-col gap-6">
       <Button type="button" variant="outline" size="touch" onClick={onBack} className="self-start">
-        <BackDrawing />
+        <BackDrawing className="size-5" />
         Volver a la cuenta
       </Button>
       <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
@@ -982,7 +982,7 @@ function BillScreen({ loaderData, actionData }: Route.ComponentProps) {
   };
   const listLink = (variant: "outline" | "default") => (
     <Link to={listReturn(listPath)} onClick={toList} className={`${buttonClasses({ size: "touch", variant })} ${variant === "outline" ? "self-start" : ""}`}>
-      {variant === "outline" ? <BackDrawing /> : null}
+      {variant === "outline" ? <BackDrawing className="size-5" /> : null}
       {listName(listPath)}
     </Link>
   );

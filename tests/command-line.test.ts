@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 
-import { codeForUser, findActiveUsers, firstAdmin } from "~/backend/command-line";
+import { codeForUser, findActiveUsers, newUser } from "~/backend/command-line";
 
 import { appFetch } from "./support/auth";
 
@@ -23,7 +23,7 @@ async function signInWith(code: string) {
 
 describe("the command line", () => {
   it("creates the first Admin with a code that signs them in", async () => {
-    const { code, statements } = await firstAdmin("Diego", Date.now());
+    const { code, statements } = await newUser("Diego", "admin", Date.now());
     expect(code).toMatch(/^[A-HJKMNP-Z2-9]{8}$/);
 
     await execute(statements);
@@ -35,8 +35,38 @@ describe("the command line", () => {
     expect(html).toContain("Administrador");
   });
 
+  it("creates a Worker with a code that signs them in, the name kept as Usuarios keeps it", async () => {
+    const { name, code, statements } = await newUser("  Luis   Ángel ", "worker", Date.now());
+    expect(name).toBe("Luis Ángel");
+
+    const [added] = await execute(statements);
+    expect(added).toEqual([{ id: expect.any(String) }]);
+    const [found] = await execute([findActiveUsers("Luis Ángel")]);
+    expect(found).toEqual([{ id: (added![0] as { id: string }).id, name: "Luis Ángel", role: "worker" }]);
+
+    const { response, home } = await signInWith(code);
+    expect(response.status).toBe(302);
+    const html = await home!.text();
+    expect(html).toContain("Luis Ángel");
+    expect(html).toContain("Empleado");
+  });
+
+  it("adds no one when another User has the name, ignoring capitals, and its code signs no one in", async () => {
+    await execute((await newUser("Ana Maria", "admin", Date.now())).statements);
+
+    const again = await newUser(" ana   MARIA", "worker", Date.now());
+    const [added] = await execute(again.statements);
+
+    expect(added).toEqual([]);
+    const { n } = (await env.DB.prepare("SELECT count(*) AS n FROM users WHERE name = 'Ana Maria' COLLATE NOCASE").first<{
+      n: number;
+    }>())!;
+    expect(n).toBe(1);
+    expect((await signInWith(again.code)).response.status).toBe(400);
+  });
+
   it("issues a code for an existing User, found by name", async () => {
-    await execute((await firstAdmin("Sofía", Date.now())).statements);
+    await execute((await newUser("Sofía", "admin", Date.now())).statements);
 
     const [found] = await execute([findActiveUsers("Sofía")]);
     expect(found).toEqual([{ id: expect.any(String), name: "Sofía", role: "admin" }]);
@@ -49,7 +79,7 @@ describe("the command line", () => {
 
   it("issues codes that expire after 10 minutes like any other", async () => {
     const elevenMinutesAgo = Date.now() - 11 * 60 * 1000;
-    const { code, statements } = await firstAdmin("Tarde", elevenMinutesAgo);
+    const { code, statements } = await newUser("Tarde", "admin", elevenMinutesAgo);
     await execute(statements);
 
     expect((await signInWith(code)).response.status).toBe(400);
@@ -58,21 +88,21 @@ describe("the command line", () => {
   it("takes a name with a quote in it as a name and not as SQL", async () => {
     const name = "D'Angelo'); DROP TABLE users; --";
 
-    await execute((await firstAdmin(name, Date.now())).statements);
+    await execute((await newUser(name, "admin", Date.now())).statements);
 
     const [found] = await execute([findActiveUsers(name)]);
     expect(found).toEqual([{ id: expect.any(String), name, role: "admin" }]);
   });
 
   it("does not find a deactivated User", async () => {
-    await execute((await firstAdmin("Inactiva", Date.now())).statements);
+    await execute((await newUser("Inactiva", "admin", Date.now())).statements);
     await env.DB.prepare("UPDATE users SET active = 0 WHERE name = ?").bind("Inactiva").run();
 
     expect(await execute([findActiveUsers("Inactiva")])).toEqual([[]]);
   });
 
   it("never puts the code itself in what it sends to D1", async () => {
-    const { code, statements } = await firstAdmin("Diego", Date.now());
+    const { code, statements } = await newUser("Diego", "admin", Date.now());
     expect(statements.join("\n")).not.toContain(code);
   });
 });

@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Notice } from "~/components/notice";
 import { hint } from "~/components/styles";
 import { Button } from "~/components/ui/button";
-import { Input } from "~/components/ui/input";
+import { SearchInput } from "~/components/search-input";
 import { Label } from "~/components/ui/label";
 import type { loader } from "~/routes/resources/customer-picker";
 import { normalizeName } from "~/shared/normalize-name";
@@ -136,9 +136,8 @@ export function CustomerPicker({
     <div className="flex flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
       <input type="hidden" name={name} value="" />
-      <Input
+      <SearchInput
         id={id}
-        type="search"
         value={typed}
         autoComplete="off"
         autoCorrect="off"

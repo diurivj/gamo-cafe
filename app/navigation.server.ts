@@ -26,36 +26,36 @@ const destinations: Readonly<Record<Role, ReadonlyArray<Destination>>> = {
   ],
 };
 
-const customers: MoreLink = { label: "Clientes", to: "/clientes" };
-const myDay: MoreLink = { label: "Mi día", to: "/mi-dia" };
+const customers: MoreLink = { label: "Clientes", to: "/clientes", icon: "people" };
+const myDay: MoreLink = { label: "Mi día", to: "/mi-dia", icon: "person" };
 
 const moreGroups: Readonly<Record<Role, ReadonlyArray<MoreGroup>>> = {
   admin: [
     {
       title: "Cuentas y clientes",
       links: [
-        { label: "Cuentas abiertas", to: "/cuentas-abiertas" },
-        { label: "Cuentas", to: "/cuentas" },
-        { label: "Por cobrar", to: "/por-cobrar" },
+        { label: "Cuentas abiertas", to: "/cuentas-abiertas", icon: "receipt" },
+        { label: "Cuentas", to: "/cuentas", icon: "stack" },
+        { label: "Por cobrar", to: "/por-cobrar", icon: "wallet" },
         customers,
       ],
     },
     {
       title: "Inventario",
       links: [
-        { label: "Inventario", to: "/inventario" },
-        { label: "Diferencias", to: "/diferencias" },
+        { label: "Inventario", to: "/inventario", icon: "box" },
+        { label: "Diferencias", to: "/diferencias", icon: "scale" },
       ],
     },
     {
       title: "Revisar",
-      links: [myDay, { label: "Historial", to: "/historial" }],
+      links: [myDay, { label: "Historial", to: "/historial", icon: "clock" }],
     },
     {
       title: "Catálogo y accesos",
       links: [
-        { label: "Productos", to: "/productos" },
-        { label: "Usuarios", to: "/usuarios" },
+        { label: "Productos", to: "/productos", icon: "tag" },
+        { label: "Usuarios", to: "/usuarios", icon: "badge" },
       ],
     },
   ],

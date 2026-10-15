@@ -28,7 +28,9 @@ function AlertDialogOverlay({
     <AlertDialogPrimitive.Backdrop
       data-slot="alert-dialog-overlay"
       className={cn(
-        "fixed inset-0 isolate z-50 bg-black/80 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        // Espresso over the screen, without a blur: blurring what is under it
+        // costs a phone a pass of the whole screen on every frame.
+        "fixed inset-0 isolate z-50 bg-[rgb(31_26_23/0.5)] duration-150 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
         className
       )}
       {...props}
@@ -43,15 +45,36 @@ function AlertDialogContent({
 }: AlertDialogPrimitive.Popup.Props & {
   size?: "default" | "sm"
 }) {
+  // What has the focus stays in sight when the dialog is laid out again —
+  // larger text, a phone turned on its side — as `keepFocusClear` does for
+  // the screen under it: a control that already has the focus is not brought
+  // into sight by the browser again. A ref that runs as the popup mounts,
+  // since it mounts only when the dialog opens.
+  const keepFocusInSight = React.useCallback((popup: HTMLDivElement | null) => {
+    if (!popup) return
+    const observer = new ResizeObserver(() => {
+      const focused = document.activeElement
+      if (focused instanceof HTMLElement && focused !== popup && popup.contains(focused)) {
+        focused.scrollIntoView({ block: "nearest" })
+      }
+    })
+    observer.observe(popup)
+    return () => observer.disconnect()
+  }, [])
+
   return (
     <AlertDialogPortal>
       <AlertDialogOverlay />
       <AlertDialogPrimitive.Popup
+        ref={keepFocusInSight}
         data-slot="alert-dialog-content"
         data-size={size}
         className={cn(
-          // Narrower than the screen at 320px, and scrolls when large text makes it tall (UI redesign §8).
-          "group/alert-dialog-content fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] -translate-x-1/2 overflow-y-auto -translate-y-1/2 gap-6 rounded-4xl bg-popover p-6 text-popover-foreground ring-1 ring-foreground/5 duration-100 outline-none data-[size=default]:max-w-xs data-[size=sm]:max-w-xs data-[size=default]:sm:max-w-md data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          // Narrower than the screen at 320px, and scrolls when large text
+          // makes it tall (UI redesign §8). Its margins and padding are small
+          // enough that, with text twice as large, an action's word breaks
+          // once at most.
+          "group/alert-dialog-content fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-[calc(100%-1.5rem)] -translate-x-1/2 overflow-y-auto -translate-y-1/2 gap-6 rounded-3xl bg-popover p-5 text-popover-foreground shadow-float ring-1 ring-border duration-200 ease-out outline-none data-[size=default]:max-w-xs data-[size=sm]:max-w-xs data-[size=default]:sm:max-w-md sm:p-6 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-open:slide-in-from-bottom-2 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
         {...props}
@@ -116,8 +139,10 @@ function AlertDialogTitle({
     <AlertDialogPrimitive.Title
       data-slot="alert-dialog-title"
       className={cn(
-        // 20px and 18px, not the preset's 18px and 14px (UI redesign §8).
-        "font-heading text-xl font-medium sm:group-data-[size=default]/alert-dialog-content:group-has-data-[slot=alert-dialog-media]/alert-dialog-content:col-start-2",
+        // The display serif at 28px, over 18px words, not the preset's 18px and
+        // 14px (UI redesign §8). A word wider than the dialog breaks: with text
+        // twice as large on a 320px phone, "registrando" is.
+        "font-display text-[1.75rem] leading-tight font-normal tracking-[-0.01em] wrap-anywhere sm:group-data-[size=default]/alert-dialog-content:group-has-data-[slot=alert-dialog-media]/alert-dialog-content:col-start-2",
         className
       )}
       {...props}
@@ -133,7 +158,7 @@ function AlertDialogDescription({
     <AlertDialogPrimitive.Description
       data-slot="alert-dialog-description"
       className={cn(
-        "text-lg text-balance text-muted-foreground md:text-pretty *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-foreground",
+        "text-lg text-balance wrap-anywhere text-muted-foreground md:text-pretty *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-foreground",
         className
       )}
       {...props}
@@ -151,7 +176,7 @@ function AlertDialogAction({
     <Button
       data-slot="alert-dialog-action"
       size={size}
-      className={cn(className)}
+      className={cn("px-4", className)}
       {...props}
     />
   )
@@ -167,7 +192,7 @@ function AlertDialogCancel({
   return (
     <AlertDialogPrimitive.Close
       data-slot="alert-dialog-cancel"
-      className={cn(className)}
+      className={cn("px-4", className)}
       render={<Button variant={variant} size={size} />}
       {...props}
     />

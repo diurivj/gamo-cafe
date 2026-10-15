@@ -1,8 +1,9 @@
 import { useId } from "react";
 
-import { hint } from "~/components/styles";
+import { CashDrawing, TransferDrawing } from "~/components/icons";
+import { MoneyInput } from "~/components/money-input";
+import { amount, hint } from "~/components/styles";
 import { Button } from "~/components/ui/button";
-import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "~/components/ui/radio-group";
 import { type Centavos, formatMoney } from "~/shared/money";
@@ -50,28 +51,34 @@ export function PaymentEntry({ value, onChange, full, tooMuch, insist = false }:
           value={value.method}
           onValueChange={(method) => onChange({ ...value, method: method as PaymentMethod })}
           // Side by side where both fit; one under the other with large text.
-          className="grid-cols-1 @[20rem]:grid-cols-2"
+          className="grid-cols-1 @[18rem]:grid-cols-2"
         >
-          {PAYMENT_METHODS.map((method) => (
-            // The whole card is the target; the one that is on has a heavier
-            // edge and words as well as the filled mark.
-            <Label
-              key={method}
-              className="min-h-14 min-w-0 cursor-pointer gap-3 rounded-2xl border border-input wrap-anywhere bg-background px-4 py-3 has-data-checked:border-foreground has-data-checked:bg-muted has-data-checked:font-semibold has-data-checked:ring-1 has-data-checked:ring-foreground"
-            >
-              <RadioGroupItem value={method} />
-              {paymentMethodLabel[method]}
-            </Label>
-          ))}
+          {PAYMENT_METHODS.map((method) => {
+            const Drawing = method === "cash" ? CashDrawing : TransferDrawing;
+            return (
+              // The whole card is the target; the one that is on has a heavier
+              // edge and words as well as the filled mark. The drawing sits over
+              // the words, so "Transferencia" keeps its line on a narrow phone.
+              <Label
+                key={method}
+                className="min-h-14 min-w-0 cursor-pointer flex-col items-start gap-3 rounded-2xl border border-input bg-card px-4 py-3.5 wrap-anywhere shadow-[0_1px_2px_rgb(31_26_23/0.05)] transition-[background-color,border-color,box-shadow] duration-150 has-data-checked:border-foreground has-data-checked:bg-[color-mix(in_oklch,var(--card),var(--brand)_6%)] has-data-checked:font-semibold has-data-checked:ring-1 has-data-checked:ring-foreground"
+              >
+                <span className="flex w-full items-center justify-between gap-3">
+                  <Drawing className="size-7" />
+                  <RadioGroupItem value={method} />
+                </span>
+                {paymentMethodLabel[method]}
+              </Label>
+            );
+          })}
         </RadioGroup>
       </div>
 
       {value.partial ? (
         <div className="flex flex-col gap-2">
           <Label htmlFor={`${id}-amount`}>Monto a cobrar</Label>
-          <Input
+          <MoneyInput
             id={`${id}-amount`}
-            inputMode="decimal"
             autoComplete="off"
             autoFocus
             value={value.amountText}
@@ -95,9 +102,8 @@ export function PaymentEntry({ value, onChange, full, tooMuch, insist = false }:
       {value.method === "cash" ? (
         <div className="flex flex-col gap-2">
           <Label htmlFor={`${id}-handed`}>Efectivo que te entregan (opcional)</Label>
-          <Input
+          <MoneyInput
             id={`${id}-handed`}
-            inputMode="decimal"
             autoComplete="off"
             value={value.handedText}
             onChange={(event) => onChange({ ...value, handedText: event.target.value })}
@@ -105,11 +111,23 @@ export function PaymentEntry({ value, onChange, full, tooMuch, insist = false }:
             aria-describedby={`${id}-change`}
           />
           {/* Announced when it changes, without taking the keyboard from the field. */}
-          <p id={`${id}-change`} aria-live="polite" className={reading.handedProblem ? "font-medium text-destructive" : hint}>
+          <p
+            id={`${id}-change`}
+            aria-live="polite"
+            className={
+              reading.handedProblem
+                ? "font-medium text-destructive"
+                : reading.change !== null
+                  ? "flex flex-wrap items-baseline justify-between gap-x-3 rounded-2xl bg-success-soft px-4 py-3 font-medium text-success"
+                  : hint
+            }
+          >
             {reading.change !== null ? (
               <>
                 Cambio:{" "}
-                <b className="font-heading text-2xl font-semibold text-foreground tabular-nums">{formatMoney(reading.change)}</b>
+                <b className={`text-[1.75rem] leading-tight font-semibold tracking-[-0.01em] text-foreground ${amount}`}>
+                  {formatMoney(reading.change)}
+                </b>
               </>
             ) : (
               (reading.handedProblem ?? "Solo para calcular el cambio. No se guarda.")

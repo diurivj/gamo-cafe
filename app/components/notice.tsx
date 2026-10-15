@@ -29,8 +29,8 @@ export function Notice({ tone, id, className, children }: Props) {
     <Alert
       id={id}
       role={tone === "error" ? "alert" : "status"}
-      variant={tone === "error" ? "destructive" : "default"}
-      className={className}
+      variant={tone === "error" ? "destructive" : tone}
+      className={`animate-rise ${className ?? ""}`}
     >
       <ToneDrawing tone={tone} />
       {/* A long name in its words breaks instead of sticking out of a narrow phone. */}

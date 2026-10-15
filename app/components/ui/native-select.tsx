@@ -19,8 +19,8 @@ function NativeSelect({ className, ...props }: NativeSelectProps) {
     >
       <select
         data-slot="native-select"
-        // Larger than the preset, with a white fill, as `Input` is: 56px tall, 18px text (UI redesign §8).
-        className="h-14 w-full min-w-0 appearance-none rounded-4xl border border-input bg-background py-1 pr-12 pl-5 text-lg text-ellipsis transition-colors outline-none select-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed aria-invalid:border-destructive aria-invalid:ring-[3px] aria-invalid:ring-destructive/20 dark:bg-input/30 dark:hover:bg-input/50 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40"
+        // Larger than the preset, with the card's cream fill, as `Input` is: 56px tall, 18px text (UI redesign §8).
+        className="h-14 w-full min-w-0 appearance-none rounded-xl border border-input bg-card py-1 pr-12 pl-4.5 text-lg text-ellipsis shadow-[0_1px_2px_rgb(31_26_23/0.05)] transition-[color,border-color,box-shadow] outline-none select-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:pointer-events-none disabled:cursor-not-allowed aria-invalid:border-destructive aria-invalid:ring-[3px] aria-invalid:ring-destructive/20 dark:bg-input/30 dark:hover:bg-input/50 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40"
         {...props}
       />
       <span data-slot="native-select-icon" className="pointer-events-none absolute top-1/2 right-4 -translate-y-1/2 text-muted-foreground select-none">

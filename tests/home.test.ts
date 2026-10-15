@@ -11,6 +11,22 @@ import { runTest, setClock } from "./support/effect";
 // Inicio (UI redesign §4): what the home screen's cards say. A Worker's cards
 // hold their own figures and the Open Bills; the Day's figures of everyone
 // and Stock are an Admin's (spec §4.1, §4.2), and are not read for a Worker.
+// The first test runs on the file's empty database: no Item has been added yet.
+
+it("tells an Admin when there is nothing to sell yet, and stops once an Item is active", () =>
+  runTest(
+    Effect.gen(function* () {
+      yield* setClock("2026-10-05T10:00:00");
+      const ana = yield* seedUser("admin", "Ana Empieza");
+      const beto = yield* seedUser("worker", "Beto Empieza");
+
+      expect((yield* homeSummary.pipe(as(ana))).menuIsEmpty).toBe(true);
+      // A Worker cannot add one, and is not told.
+      expect((yield* homeSummary.pipe(as(beto))).menuIsEmpty).toBeNull();
+      yield* seedItem({ name: "Primero del menú", price: 1500, by: ana });
+      expect((yield* homeSummary.pipe(as(ana))).menuIsEmpty).toBe(false);
+    }),
+  ));
 
 it("gives a Worker their own figures and the Open Bills, and an Admin the Day and what to restock", () =>
   runTest(
@@ -35,6 +51,7 @@ it("gives a Worker their own figures and the Open Bills, and an Admin the Day an
       expect(betos.mine).toEqual({ sold: 2500, cash: 2500, transfer: 0, collected: 2500 });
       expect(betos.everyone).toBeNull();
       expect(betos.toRestock).toBeNull();
+      expect(betos.menuIsEmpty).toBeNull();
 
       const anas = yield* homeSummary.pipe(as(ana));
       expect(anas.day).toBe("2026-10-05");
@@ -43,5 +60,6 @@ it("gives a Worker their own figures and the Open Bills, and an Admin the Day an
       expect(anas.everyone).toEqual({ sold: 7900, cash: 2500, transfer: 1800, collected: 4300 });
       // Only the Item at or under its Minimum.
       expect(anas.toRestock).toBe(1);
+      expect(anas.menuIsEmpty).toBe(false);
     }),
   ));

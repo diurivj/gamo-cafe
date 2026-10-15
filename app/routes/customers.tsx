@@ -6,11 +6,12 @@ import { addCustomer, SEARCH_LIMIT, searchCustomers } from "~/backend/customers"
 import { run } from "~/backend/run.server";
 import { ChevronDrawing } from "~/components/icons";
 import { Notice } from "~/components/notice";
-import { hint, pageTitle, sectionTitle } from "~/components/styles";
+import { hint, pageTitle, rowCard, sectionTitle } from "~/components/styles";
 import { SubmitButton } from "~/components/submit-button";
 import { Badge } from "~/components/ui/badge";
 import { buttonClasses } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
+import { SearchInput } from "~/components/search-input";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { requireUser } from "~/session.server";
@@ -83,10 +84,9 @@ export default function Customers({ loaderData, actionData }: Route.ComponentPro
         onChange={(event) => submit(event.currentTarget, { replace: true, preventScrollReset: true })}
       >
         <Label htmlFor="q">Buscar o agregar</Label>
-        <Input
+        <SearchInput
           id="q"
           name="q"
-          type="search"
           defaultValue={typed}
           autoComplete="off"
           autoCorrect="off"
@@ -109,7 +109,7 @@ export default function Customers({ loaderData, actionData }: Route.ComponentPro
             <li key={customer.id}>
               {/* The Customer's page goes back to this entry, not on to a new list. */}
               <Link to={`/clientes/${customer.id}`} state={{ fromList: "/clientes" }} className="block rounded-2xl">
-                <Card size="sm" className="transition-colors hover:bg-muted/60 active:bg-muted">
+                <Card size="sm" className={rowCard}>
                   <CardContent className="flex items-center justify-between gap-3">
                     <span className="flex min-w-0 flex-col gap-1">
                       <span className="flex flex-wrap items-center gap-x-3 gap-y-1">

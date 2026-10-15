@@ -25,6 +25,7 @@
   "dependencies": {
     "@base-ui/react": "^1.8.0",
     "@fontsource-variable/figtree": "^5.3.0",
+    "@fontsource/instrument-serif": "^5.3.0",
     "@hugeicons/core-free-icons": "^4.3.5",
     "@hugeicons/react": "^1.1.10",
     "@react-router/cloudflare": "^8.4.0",

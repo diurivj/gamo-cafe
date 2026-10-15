@@ -19,9 +19,12 @@ export interface HomeSummary {
   readonly everyone: Figures | null;
   /** How many active Items are at or under their Minimum, or below zero. An Admin's; null for a Worker. */
   readonly toRestock: number | null;
+  /** Whether there is no active Item yet, so nothing can be sold: Inicio then leads to Productos. An Admin's; null for a Worker. */
+  readonly menuIsEmpty: boolean | null;
 }
 
 const OpenBills = Schema.Struct({ count: Schema.Int, owed: Schema.Int });
+const AnyItem = Schema.Struct({ any: Schema.Int });
 
 /**
  * Inicio (UI redesign §4): the few figures its cards carry. Every User gets
@@ -39,11 +42,13 @@ export const homeSummary = Effect.gen(function* () {
      FROM bills WHERE state IN ('open', 'partial')`,
   );
   const summary = { openBills: openBills ?? { count: 0, owed: 0 }, ...(yield* todaysFigures) };
-  if (user.role !== "admin") return { ...summary, toRestock: null } satisfies HomeSummary;
+  if (user.role !== "admin") return { ...summary, toRestock: null, menuIsEmpty: null } satisfies HomeSummary;
 
   const inventory = yield* listInventory;
+  const anyItem = yield* db.first(AnyItem, "SELECT EXISTS (SELECT 1 FROM items WHERE retired_at IS NULL) AS any");
   return {
     ...summary,
     toRestock: inventory.filter((line) => !line.retired && (line.needsRestock || line.belowZero)).length,
+    menuIsEmpty: anyItem?.any !== 1,
   } satisfies HomeSummary;
 });

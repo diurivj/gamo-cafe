@@ -8,7 +8,7 @@ import { requireAdminUser } from "~/catalog-forms.server";
 import { FiguresPanel } from "~/components/figures";
 import { ChevronDrawing } from "~/components/icons";
 import { Notice } from "~/components/notice";
-import { hint, pageTitle } from "~/components/styles";
+import { hint, pageTitle, rowCard } from "~/components/styles";
 import { SubmitButton } from "~/components/submit-button";
 import { buttonClasses } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
@@ -116,7 +116,7 @@ export default function Dia({ loaderData }: Route.ComponentProps) {
 
           {/* What is still owed is not a figure of these dates: it has a screen of its own. */}
           <Link to="/por-cobrar" className="block rounded-2xl">
-            <Card size="sm" className="transition-colors hover:bg-muted/60 active:bg-muted">
+            <Card size="sm" className={rowCard}>
               <CardContent className="flex items-center justify-between gap-3">
                 <span>
                   <span className="block text-lg font-medium">Por cobrar</span>

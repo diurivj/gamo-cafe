@@ -44,10 +44,17 @@ export default {
       passThroughOnException: ctx.passThroughOnException.bind(ctx),
     } as AdapterEvent);
 
-    // Staff data only: nothing dynamic may be stored by a shared cache.
-    if (response.headers.has("Cache-Control")) return response;
     const headers = new Headers(response.headers);
-    headers.set("Cache-Control", "no-store");
+    // Staff data only: nothing dynamic may be stored by a shared cache.
+    if (!headers.has("Cache-Control")) headers.set("Cache-Control", "no-store");
+    // No other page may frame the app, so a tap on Registrar pago is always
+    // the User's own; the browser keeps to the types it is sent, and other
+    // sites are not told which screen a link was followed from.
+    headers.set("Content-Security-Policy", "frame-ancestors 'none'");
+    headers.set("X-Frame-Options", "DENY");
+    headers.set("X-Content-Type-Options", "nosniff");
+    headers.set("Referrer-Policy", "same-origin");
+    headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,

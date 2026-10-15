@@ -3,13 +3,18 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "cn"
 
 const alertVariants = cva(
-  "group/alert relative grid w-full gap-0.5 rounded-2xl border px-4 py-3 text-left text-lg has-data-[slot=alert-action]:relative has-data-[slot=alert-action]:pr-18 has-[>svg]:grid-cols-[auto_1fr] has-[>svg]:gap-x-2.5 *:[svg]:row-span-2 *:[svg]:translate-y-0.5 *:[svg]:text-current *:[svg:not([class*='size-'])]:size-6",
+  "group/alert relative grid w-full gap-0.5 rounded-2xl border px-4 py-3.5 text-left text-lg has-data-[slot=alert-action]:relative has-data-[slot=alert-action]:pr-18 has-[>svg]:grid-cols-[auto_1fr] has-[>svg]:gap-x-3 *:[svg]:row-span-2 *:[svg]:translate-y-0.5 *:[svg]:text-current *:[svg:not([class*='size-'])]:size-6",
   {
     variants: {
       variant: {
         default: "bg-card text-card-foreground",
+        // Each tone is a tint of its own color, its drawing in that color and
+        // its words 4.5:1 or more on the tint (UI redesign §8).
         destructive:
-          "bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90 *:[svg]:text-current",
+          "border-destructive/30 bg-destructive-soft text-destructive *:data-[slot=alert-description]:text-destructive *:[svg]:text-current",
+        success:
+          "border-success/25 bg-success-soft text-success *:data-[slot=alert-description]:text-foreground",
+        info: "border-border bg-muted/70 text-foreground",
       },
     },
     defaultVariants: {

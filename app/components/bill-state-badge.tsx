@@ -1,8 +1,11 @@
 import { Badge } from "~/components/ui/badge";
 import { type BillState, billStateLabel } from "~/shared/bill-state";
 
-/** How each state is drawn. Its word says which it is; the fill only helps. */
-const variantOf = { open: "outline", partial: "secondary", paid: "default", voided: "destructive" } as const;
+/**
+ * How each state is drawn. Its word says which it is; the tint only helps:
+ * still owing is plain, owing a part is amber, settled is green, cancelled red.
+ */
+const variantOf = { open: "outline", partial: "warning", paid: "success", voided: "destructive" } as const;
 
 /**
  * A Bill's state, as every list and Cuenta show it: Abierta, Pago parcial,

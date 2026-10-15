@@ -7,7 +7,7 @@ import { run } from "~/backend/run.server";
 import { refuseRead, requireAdminUser } from "~/catalog-forms.server";
 import { ChevronDrawing } from "~/components/icons";
 import { LoadMore, usePagedList } from "~/components/paged-list";
-import { hint, pageTitle } from "~/components/styles";
+import { hint, pageTitle, rowCard } from "~/components/styles";
 import { Badge } from "~/components/ui/badge";
 import { Card, CardContent } from "~/components/ui/card";
 import { CURSOR_PARAM, cursorOf, nextText } from "~/shared/cursor";
@@ -44,7 +44,6 @@ const hrefFor = (cursor: string) => `/por-cobrar?${CURSOR_PARAM}=${encodeURIComp
 const figureRow = "flex flex-wrap items-baseline justify-between gap-x-3";
 // An amount too long for its line breaks where it must: it is never cut.
 const amountClasses = "max-w-full min-w-0 font-heading font-semibold wrap-anywhere tabular-nums";
-const rowCard = "transition-colors hover:bg-muted/60 active:bg-muted";
 const leadsOn = "inline-flex items-center gap-1 font-medium";
 
 export default function Owed({ loaderData }: Route.ComponentProps) {

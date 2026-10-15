@@ -18,7 +18,7 @@ import { BackLink } from "~/components/back-link";
 import { FieldError, FormError, type FormRefusal, refusedField, useFocusOnRefusal } from "~/components/field-error";
 import { ChevronDrawing } from "~/components/icons";
 import { Notice } from "~/components/notice";
-import { hint, pageTitle, sectionTitle } from "~/components/styles";
+import { hint, pageTitle, rowCard, sectionTitle } from "~/components/styles";
 import { SubmitButton } from "~/components/submit-button";
 import { Badge } from "~/components/ui/badge";
 import { buttonClasses } from "~/components/ui/button";
@@ -305,7 +305,7 @@ function Recorded({
   return (
     <div id={RECORDED} tabIndex={-1} className="flex flex-col gap-3 rounded-2xl outline-none">
       {code ? (
-        <Card size="sm">
+        <Card size="sm" className="animate-rise bg-[color-mix(in_oklch,var(--card),var(--brand)_6%)] ring-brand/25">
           <CardContent className="flex flex-col gap-2">
             <p className="wrap-anywhere">
               Código de acceso para <strong>{code.name}</strong>
@@ -313,8 +313,9 @@ function Recorded({
             <output
               // Read out one character at a time, not as two words.
               aria-label={code.code.replace(" ", ",").split("").join(" ")}
-              // Each group of four fits a 320px phone with text twice as large, and the code breaks between them.
-              className="font-mono text-3xl font-semibold tracking-widest select-all"
+              // Each group of four fits a 320px phone with text twice as large, and the code breaks between them:
+              // in a font whose letters are all as wide, which a W or an M of the app's own font is not.
+              className="my-1 font-mono text-3xl font-semibold tracking-widest select-all"
             >
               {code.code}
             </output>
@@ -407,7 +408,7 @@ function UserRow({ user, isMe }: { readonly user: User; readonly isMe: boolean }
   return (
     <li aria-label={user.name}>
       <Link to={userHref(user.id)} className="block rounded-2xl">
-        <Card size="sm" className="transition-colors hover:bg-muted/60 active:bg-muted">
+        <Card size="sm" className={rowCard}>
           <CardContent className="flex items-center justify-between gap-3">
             <span className="flex min-w-0 flex-col gap-1">
               <span className="flex flex-wrap items-center gap-x-3 gap-y-1">

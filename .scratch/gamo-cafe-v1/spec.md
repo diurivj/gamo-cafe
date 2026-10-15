@@ -157,7 +157,7 @@ See ADR 0004.
 - An Admin can issue a new code for an existing User (a new phone), sign a User out of every phone, and deactivate or reactivate a User. Deactivating signs the User out everywhere.
 - The last active Admin cannot be deactivated or made a Worker.
 - Failed code entries are limited to 10 per 10 minutes across the whole app. Beyond that, sign-in is refused until the window passes.
-- The first Admin's code, and a code when every Admin is signed out, are issued by the developer from the command line.
+- The first Admin's code, and a code when every Admin is signed out, are issued by the developer from the command line. The developer can also add a Worker there, under the same rules as Usuarios.
 - The server rejects any non-GET request whose `Origin` is not the app's own.
 
 ### 3.6 Deployment

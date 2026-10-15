@@ -115,12 +115,27 @@ describe("the four destinations", () => {
 describe("Inicio", () => {
   it("is where a User lands, with a card for a new sale and one for each thing worth knowing", async () => {
     const ana = await signedIn("admin", "Ana Llega");
+    // Before anything can be sold, an Admin's first card leads to adding it.
+    const empty = main(await page(ana, "/inicio"));
+    expect(linksIn(empty).map((link) => link.to)).toEqual([
+      "/productos?paso=nuevo",
+      "/",
+      "/dia",
+      "/cuentas-abiertas",
+      "/inventario",
+      "/clientes",
+      "/mi-dia",
+    ]);
+    expect(textOf(empty)).toContain("Agrega lo que vende la cafetería");
+
+    await runTest(seedItem({ name: "Para empezar a vender", price: 1000 }));
     const html = main(await page(ana, "/inicio"));
 
     expect(textOf(html)).toContain("Hola, Ana Llega");
     expect(linksIn(html).map((link) => link.to)).toEqual(["/", "/dia", "/cuentas-abiertas", "/inventario", "/clientes", "/mi-dia"]);
     expect(textOf(html)).toContain("Nueva venta");
     expect(textOf(html)).toContain("Cobrado hoy");
+    expect(textOf(html)).not.toContain("Agrega lo que vende la cafetería");
   });
 
   it("gives a Worker their own Day in place of everyone's, and no Inventario", async () => {

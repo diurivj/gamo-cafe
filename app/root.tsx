@@ -1,5 +1,8 @@
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
 
+import figtreeLatin from "@fontsource-variable/figtree/files/figtree-latin-wght-normal.woff2?url";
+import instrumentSerifLatin from "@fontsource/instrument-serif/files/instrument-serif-latin-400-normal.woff2?url";
+
 import type { Route } from "./+types/root";
 import "./app.css";
 import { ErrorPage } from "./components/error-screen";
@@ -13,13 +16,21 @@ export const middleware: Route.MiddlewareFunction[] = [sessionMiddleware, notice
 
 export const meta: Route.MetaFunction = () => [{ title: "Gamo Cafe" }];
 
+// The two faces every screen shows before anything else, asked for before the
+// stylesheet asks: a title never paints in the fallback serif and then jumps.
+// Text never waits for them either (`font-display: swap`, spec §9).
+export const links: Route.LinksFunction = () => [
+  { rel: "preload", href: figtreeLatin, as: "font", type: "font/woff2", crossOrigin: "anonymous" },
+  { rel: "preload", href: instrumentSerifLatin, as: "font", type: "font/woff2", crossOrigin: "anonymous" },
+];
+
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es-MX">
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-        <meta name="theme-color" content="#ffffff" />
+        <meta name="theme-color" content="#f7f3ec" />
         <meta name="robots" content="noindex" />
         <link rel="manifest" href="/manifest.webmanifest" />
         <link rel="icon" href="/icon.svg" type="image/svg+xml" />
@@ -27,7 +38,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Meta />
         <Links />
       </head>
-      <body className="min-h-dvh text-lg antialiased">
+      <body className="min-h-dvh text-lg leading-relaxed antialiased">
         {children}
         <ScrollRestoration />
         <Scripts />

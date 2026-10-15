@@ -15,15 +15,23 @@ import { CurrentUser } from "~/backend/current-user";
 import { run } from "~/backend/run.server";
 import { ConfirmDialog } from "~/components/confirm-dialog";
 import { CustomerPicker } from "~/components/customer-picker";
-import { BackDrawing, CategoryDrawing, CheckDrawing, StepDrawing } from "~/components/icons";
+import {
+  ArrowDrawing,
+  BackDrawing,
+  CategoryDrawing,
+  CheckDrawing,
+  RecordedDrawing,
+  StepDrawing,
+} from "~/components/icons";
 import { Notice } from "~/components/notice";
 import { PaymentEntry } from "~/components/payment-entry";
 import { useRecorded } from "~/shared/recorded";
-import { amount, figureRow, hint, pageTitle, sectionTitle } from "~/components/styles";
+import { amount, eyebrow, figureRow, hint, pageTitle, sectionTitle } from "~/components/styles";
 import { Change } from "~/components/recording";
 import { StickyBar } from "~/components/sticky-bar";
 import { Button, buttonClasses } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
+import { SearchInput } from "~/components/search-input";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { requireUser } from "~/session.server";
@@ -115,9 +123,9 @@ type Heading = RefObject<HTMLHeadingElement | null>;
 /** The Open Bill the selection is added to, always in sight (UI redesign §5.3). */
 function TargetBill({ target }: { readonly target: Target }) {
   return (
-    <Card size="sm" role="region" aria-label="Cuenta destino">
+    <Card size="sm" role="region" aria-label="Cuenta destino" className="bg-[color-mix(in_oklch,var(--card),var(--brand)_6%)] ring-brand/25">
       <CardContent className="flex flex-col gap-1">
-        <p className="font-medium">
+        <p className="font-semibold">
           {target.customer
             ? `Se agrega a la cuenta de ${target.customer.name}`
             : "Se agrega a una cuenta sin cliente"}
@@ -143,18 +151,19 @@ function Selection({ snapshot }: { readonly snapshot: Pick<SaleSnapshot, "lines"
         <h2 id={id} className={sectionTitle}>
           Selección
         </h2>
-        <ul className="flex flex-col gap-2">
+        <ul className="flex flex-col gap-2.5">
           {snapshot.lines.map((line) => (
             <li key={line.itemId} className={figureRow}>
               <span className="min-w-0 wrap-break-word">
-                <span className="font-semibold tabular-nums">{line.quantity} ×</span> {line.name}
+                <span className="font-semibold text-muted-foreground figures">{line.quantity} ×</span> {line.name}
               </span>{" "}
-              <span className={`ml-auto ${amount}`}>{formatMoney(line.unitPrice * line.quantity)}</span>
+              <span className={`ml-auto font-medium ${amount}`}>{formatMoney(line.unitPrice * line.quantity)}</span>
             </li>
           ))}
         </ul>
-        <p className={`${figureRow} border-t pt-3 text-xl font-semibold`}>
-          <span>Total</span> <span className={amount}>{formatMoney(snapshot.total)}</span>
+        {/* The receipt's tear: a dashed rule before what it adds up to. */}
+        <p className={`${figureRow} border-t border-dashed border-input/60 pt-3.5 text-xl font-semibold`}>
+          <span>Total</span> <span className={`text-[1.75rem] leading-tight tracking-[-0.01em] ${amount}`}>{formatMoney(snapshot.total)}</span>
         </p>
       </CardContent>
     </Card>
@@ -197,11 +206,14 @@ function Catalog({
     .filter((category) => category.items.length > 0);
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
-          Vender
-        </h1>
+    <div className="flex animate-enter flex-col gap-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex min-w-0 flex-col gap-2">
+          <p className={eyebrow}>Paso 1 de 2</p>
+          <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
+            Vender
+          </h1>
+        </div>
         {units > 0 ? (
           <Button type="button" variant="outline" size="touch" onClick={() => setClearing(true)}>
             Vaciar
@@ -213,14 +225,20 @@ function Catalog({
       {sale.refusal ? <Notice tone="error">{sale.refusal}</Notice> : null}
 
       {offered.length === 0 ? (
-        <p className={hint}>Todavía no hay productos. Pídele a un administrador que agregue el menú.</p>
+        <Card>
+          <CardContent className="flex flex-col items-start gap-3">
+            <span className="grid size-12 place-items-center rounded-2xl bg-muted">
+              <CategoryDrawing name="cup" className="size-7" />
+            </span>
+            <p className={`${hint} wrap-anywhere`}>Todavía no hay productos. Pídele a un administrador que agregue el menú.</p>
+          </CardContent>
+        </Card>
       ) : (
         <>
           <div className="flex flex-col gap-2">
             <Label htmlFor={searchId}>Buscar producto</Label>
-            <Input
+            <SearchInput
               id={searchId}
-              type="search"
               value={typed}
               autoComplete="off"
               autoCorrect="off"
@@ -242,7 +260,7 @@ function Catalog({
                     aria-pressed={on}
                     onClick={() => setCategoryId(category.id)}
                     // The one that is on is told by its mark and weight, not only its fill.
-                    className="min-h-12 px-4 py-2 aria-pressed:border-foreground aria-pressed:bg-muted aria-pressed:font-semibold"
+                    className="min-h-12 px-4 py-2 font-medium aria-pressed:border-foreground aria-pressed:bg-secondary aria-pressed:font-semibold aria-pressed:shadow-none"
                   >
                     {on ? <CheckDrawing className="size-5" /> : null}
                     {category.name}
@@ -258,8 +276,15 @@ function Catalog({
             const drawing = categoryDrawing(category.name);
             return (
               <section key={category.id} aria-labelledby={`categoria-${category.id}`} className="flex flex-col gap-3">
-                <h2 id={`categoria-${category.id}`} className="flex items-center gap-2 font-heading text-xl font-semibold">
-                  {drawing ? <CategoryDrawing name={drawing} className="size-7 text-muted-foreground" /> : null}
+                <h2
+                  id={`categoria-${category.id}`}
+                  className="flex items-center gap-3 font-display text-[1.875rem] leading-tight wrap-anywhere"
+                >
+                  {drawing ? (
+                    <span className="grid size-10 shrink-0 place-items-center rounded-full bg-muted text-foreground">
+                      <CategoryDrawing name={drawing} className="size-[1.375rem]" />
+                    </span>
+                  ) : null}
                   {category.name}
                 </h2>
                 <ul className="grid gap-2 sm:grid-cols-2">
@@ -277,15 +302,19 @@ function Catalog({
                           variant="outline"
                           size="touch"
                           onClick={() => dispatch({ type: "changed", itemId: item.id, by: 1 })}
-                          className={`col-start-1 row-start-1 min-h-16 flex-col items-start justify-center gap-0 rounded-2xl px-4 pt-2 pb-16 text-left @[17rem]:pr-40 @[17rem]:pb-2 ${
-                            quantity > 0 ? "border-foreground" : ""
+                          // A card that answers the finger; one that is in the
+                          // selection is edged in ink, as well as counted.
+                          className={`col-start-1 row-start-1 min-h-[4.5rem] flex-col items-start justify-center gap-0.5 rounded-2xl px-4.5 pt-3 pb-16 text-left shadow-card hover:bg-card hover:shadow-raised @[17rem]:pr-40 @[17rem]:pb-3 ${
+                            quantity > 0
+                              ? "border-foreground bg-[color-mix(in_oklch,var(--card),var(--brand)_6%)] shadow-raised hover:bg-[color-mix(in_oklch,var(--card),var(--brand)_6%)]"
+                              : "border-border"
                           }`}
                         >
                           <span className="font-medium wrap-break-word">{item.name}</span>
-                          <span className="text-muted-foreground tabular-nums">{formatMoney(item.price)}</span>
+                          <span className="text-muted-foreground figures">{formatMoney(item.price)}</span>
                         </Button>
                         {quantity > 0 ? (
-                          <div className="z-1 col-start-1 row-start-1 flex items-center gap-1 self-end justify-self-end pr-2 pb-2 @[17rem]:self-center @[17rem]:pb-0">
+                          <div className="z-1 col-start-1 row-start-1 flex animate-fade items-center gap-1 self-end justify-self-end pr-2 pb-2 @[17rem]:self-center @[17rem]:pb-0">
                             <Button
                               type="button"
                               variant="outline"
@@ -297,7 +326,8 @@ function Catalog({
                             </Button>
                             <span
                               aria-label={`${quantity} de ${item.name}`}
-                              className="min-w-8 text-center text-xl font-semibold tabular-nums"
+                              // As narrow as it can be: with text twice as large, the stepper only just fits a 320px phone.
+                              className="min-w-8 text-center text-[1.375rem] font-semibold figures"
                             >
                               {quantity}
                             </span>
@@ -329,31 +359,32 @@ function Catalog({
       {units > 0 ? (
         // Rests just above the navigation bar, never under it.
         <StickyBar>
-          <Card size="sm" role="region" aria-label="Total" className="shadow-lg ring-foreground/25">
+          <Card size="sm" role="region" aria-label="Total" className="animate-rise rounded-3xl shadow-float ring-foreground/15">
             <CardContent className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
               <p className="min-w-0">
                 <span className={`block ${hint}`}>{unitsText(units)}</span>
-                <span className={`block font-heading text-2xl leading-tight font-semibold ${amount}`}>
+                <span className={`block text-[1.75rem] leading-tight font-semibold tracking-[-0.01em] ${amount}`}>
                   {formatMoney(total)}
                 </span>
               </p>
-              <Button type="button" size="touch" onClick={onReview}>
+              <Button type="button" size="touch" onClick={onReview} className="px-7">
                 {target ? "Continuar" : "Cobrar"}
+                <ArrowDrawing className="size-5" />
               </Button>
             </CardContent>
           </Card>
         </StickyBar>
       ) : offered.length > 0 ? (
-        <p className={hint}>Toca un producto para agregarlo.</p>
+        <p className={`${hint} text-center`}>Toca un producto para agregarlo.</p>
       ) : null}
 
       {units === 0 ? (
         // After a phone restart nothing here knows what the last sale became.
-        <div>
+        <div className="flex flex-col items-center gap-0.5 border-t pt-5 text-center">
           <p className={hint}>¿No sabes si una venta se registró?</p>
           <Link
             to="/mi-dia"
-            className="inline-flex min-h-12 items-center font-medium underline underline-offset-4"
+            className="inline-flex min-h-12 items-center font-medium underline decoration-input underline-offset-4 hover:decoration-foreground"
           >
             Revísala en Mi día
           </Link>
@@ -423,14 +454,17 @@ function Review({
   );
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex animate-enter flex-col gap-7">
       <Button type="button" variant="outline" size="touch" onClick={onBack} className="self-start">
-        <BackDrawing />
+        <BackDrawing className="size-5" />
         Cambiar productos
       </Button>
-      <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
-        {target ? "Agregar a la cuenta" : "Cobrar"}
-      </h1>
+      <div className="flex flex-col gap-2">
+        <p className={eyebrow}>Paso 2 de 2</p>
+        <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
+          {target ? "Agregar a la cuenta" : "Cobrar"}
+        </h1>
+      </div>
 
       {target ? <TargetBill target={target} /> : null}
       {sale.refusal ? <Notice tone="error">{sale.refusal}</Notice> : null}
@@ -474,7 +508,7 @@ function Review({
       </section>
 
       {/* The usual action leads: paying a new sale, adding to a Bill that is already Open. */}
-      <div className="flex flex-col gap-4">{target ? [leaveOpen, pay] : [pay, leaveOpen]}</div>
+      <div className="flex flex-col gap-4 border-t pt-6">{target ? [leaveOpen, pay] : [pay, leaveOpen]}</div>
     </div>
   );
 }
@@ -485,7 +519,7 @@ function Sent({ snapshot, target }: { readonly snapshot: SaleSnapshot; readonly 
     <>
       <Selection snapshot={snapshot} />
       {target || snapshot.customer || snapshot.note || snapshot.payment ? (
-        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-2xl bg-muted/60 px-4 py-3">
           {target ? (
             <SentField label="Cuenta">{target.customer ? `De ${target.customer.name}` : "Sin cliente"}</SentField>
           ) : null}
@@ -525,7 +559,10 @@ function Pending({
 }) {
   const recording = sale.phase === "recording";
   return (
-    <div className="flex flex-col gap-6" aria-busy={recording}>
+    <div className="flex animate-enter flex-col gap-6" aria-busy={recording}>
+      {recording ? (
+        <span aria-hidden="true" className="size-9 animate-spin rounded-full border-[3px] border-muted border-t-brand" />
+      ) : null}
       <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
         {recording ? recordingText(sale.snapshot) : "No sabemos si se registró"}
       </h1>
@@ -578,7 +615,10 @@ function Confirmed({
 
   return (
     // The Bill, for what follows the sale: a test, or a tool, reads it here.
-    <div data-bill-id={result.billId} className="flex flex-col gap-6">
+    <div data-bill-id={result.billId} className="flex animate-enter flex-col gap-6">
+      <span className="grid size-16 animate-pop place-items-center rounded-full bg-success-soft text-success">
+        <RecordedDrawing className="size-10" />
+      </span>
       <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
         {outcome.title}
       </h1>

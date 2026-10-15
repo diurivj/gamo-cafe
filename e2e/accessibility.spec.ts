@@ -28,8 +28,17 @@ const FOCUS_GUARDS = "[data-base-ui-focus-guard]";
 
 /** What axe finds on the screen as it is now, one line per rule broken. */
 async function violations(page: Page): Promise<string[]> {
-  // A dialog that is still fading in has the contrast of neither end.
-  await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)));
+  // A dialog that is still fading in has the contrast of neither end. What
+  // turns for as long as something is on its way (a spinner) never ends, and
+  // changes no color: it is not waited for.
+  await page.evaluate(() =>
+    Promise.allSettled(
+      document
+        .getAnimations()
+        .filter((animation) => animation.effect?.getComputedTiming().endTime !== Infinity)
+        .map((animation) => animation.finished),
+    ),
+  );
   const { violations } = await new AxeBuilder({ page }).withTags(RULES).exclude(FOCUS_GUARDS).analyze();
   return violations.map(
     (violation) =>

@@ -1,6 +1,7 @@
 import { formatMoney } from "~/shared/money";
 
 import { FieldError, type FormRefusal, refusedField } from "./field-error";
+import { MoneyInput } from "./money-input";
 import { hint } from "./styles";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -48,11 +49,10 @@ export function ItemFields({ categories, item, refusal }: Props) {
 
       <div className="flex flex-col gap-2">
         <Label htmlFor="price">Precio</Label>
-        <Input
+        <MoneyInput
           id="price"
           name="price"
           required
-          inputMode="decimal"
           defaultValue={item ? formatMoney(item.price).replace("$", "") : undefined}
           autoComplete="off"
           {...refusedField(refusal, "price", "price-hint")}

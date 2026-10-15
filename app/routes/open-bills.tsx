@@ -5,9 +5,9 @@ import { run } from "~/backend/run.server";
 import { BillStateBadge } from "~/components/bill-state-badge";
 import { ChevronDrawing } from "~/components/icons";
 import { LoadMore, usePagedList } from "~/components/paged-list";
-import { amount, figureRow, hint, pageTitle } from "~/components/styles";
+import { amount, figureRow, hint, pageTitle, rowCard } from "~/components/styles";
 import { Card, CardContent } from "~/components/ui/card";
-import { Input } from "~/components/ui/input";
+import { SearchInput } from "~/components/search-input";
 import { Label } from "~/components/ui/label";
 import { requireUser } from "~/session.server";
 import { CURSOR_PARAM, cursorOf, nextText } from "~/shared/cursor";
@@ -66,10 +66,9 @@ export default function OpenBills({ loaderData }: Route.ComponentProps) {
         onChange={(event) => submit(event.currentTarget, { replace: true, preventScrollReset: true })}
       >
         <Label htmlFor="q">Buscar por cliente</Label>
-        <Input
+        <SearchInput
           id="q"
           name="q"
-          type="search"
           defaultValue={typed}
           autoComplete="off"
           autoCorrect="off"
@@ -105,7 +104,7 @@ export default function OpenBills({ loaderData }: Route.ComponentProps) {
             <li key={bill.id} data-bill-id={bill.id}>
               {/* Cuenta goes back to this entry, not on to a new list. */}
               <Link to={`/cuentas/${bill.id}`} state={{ fromList: "/cuentas-abiertas" }} className="block rounded-2xl">
-                <Card size="sm" className="transition-colors hover:bg-muted/60 active:bg-muted">
+                <Card size="sm" className={rowCard}>
                   <CardContent className="flex flex-col gap-2">
                     <span className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
                       <span className="min-w-0 text-xl font-semibold wrap-break-word">

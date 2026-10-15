@@ -25,14 +25,18 @@ type Heading = RefObject<HTMLHeadingElement | null>;
 /** What was sent, for as long as it is on screen: "Pago", "$20.00 · Efectivo". */
 export function SentRows({ rows }: { readonly rows: ReadonlyArray<readonly [label: string, value: string]> }) {
   return (
-    <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
-      {rows.map(([label, value]) => (
-        <Fragment key={label}>
-          <dt className={hint}>{label}</dt>
-          <dd className="min-w-0 font-medium wrap-break-word">{value}</dd>
-        </Fragment>
-      ))}
-    </dl>
+    // Each label beside its value where both fit; with text twice as large
+    // on a narrow phone, the label over its value, which then has the line.
+    <div className="rounded-2xl bg-muted/60 px-4 py-3 @container">
+      <dl className="grid grid-cols-1 gap-x-4 gap-y-1.5 @[15rem]:grid-cols-[auto_1fr]">
+        {rows.map(([label, value]) => (
+          <Fragment key={label}>
+            <dt className={hint}>{label}</dt>
+            <dd className="mb-1.5 min-w-0 font-medium wrap-break-word last:mb-0 @[15rem]:mb-0">{value}</dd>
+          </Fragment>
+        ))}
+      </dl>
+    </div>
   );
 }
 
@@ -66,7 +70,10 @@ export function Pending({
   readonly children: ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-6" aria-busy={recording}>
+    <div className="flex animate-enter flex-col gap-6" aria-busy={recording}>
+      {recording ? (
+        <span aria-hidden="true" className="size-9 animate-spin rounded-full border-[3px] border-muted border-t-brand" />
+      ) : null}
       <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
         {recording ? title : "No sabemos si se registró"}
       </h1>
@@ -102,10 +109,10 @@ export function Pending({
 /** The cash to hand back, kept in sight with a confirmed Payment (UI redesign §5.4). */
 export function Change({ amount }: { readonly amount: string }) {
   return (
-    <Card size="sm" role="region" aria-label="Cambio">
-      <CardContent className={figureRow}>
-        <span className="text-xl font-medium">Cambio</span>{" "}
-        <span className={`font-heading text-4xl font-semibold ${amountClasses}`}>{amount}</span>
+    <Card size="sm" role="region" aria-label="Cambio" className="animate-rise bg-success-soft ring-success/25">
+      <CardContent className={`${figureRow} gap-y-1`}>
+        <span className="text-xl font-semibold text-success">Cambio</span>{" "}
+        <span className={`text-[2.75rem] leading-none font-semibold tracking-[-0.02em] ${amountClasses}`}>{amount}</span>
       </CardContent>
     </Card>
   );

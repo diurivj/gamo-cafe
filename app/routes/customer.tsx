@@ -14,7 +14,7 @@ import { LoadMore, usePagedList } from "~/components/paged-list";
 import { PaymentEntry } from "~/components/payment-entry";
 import { Change, Pending, SentRows, useLeaveGuard, useReadAgainSince } from "~/components/recording";
 import { useRecorded } from "~/shared/recorded";
-import { amount, figureRow, hint, pageTitle, sectionTitle } from "~/components/styles";
+import { amount, figureRow, hint, pageTitle, rowCard, sectionTitle } from "~/components/styles";
 import { SubmitButton } from "~/components/submit-button";
 import { Badge } from "~/components/ui/badge";
 import { Button, buttonClasses } from "~/components/ui/button";
@@ -209,7 +209,7 @@ function Owed({ data, named = false }: { readonly data: Data; readonly named?: b
 function BillRow({ bill, from }: { readonly bill: OpenBill | PastBill; readonly from: string }) {
   return (
     <Link to={`/cuentas/${bill.id}`} state={{ fromList: from }} className="block rounded-2xl">
-      <Card size="sm" className="transition-colors hover:bg-muted/60 active:bg-muted">
+      <Card size="sm" className={rowCard}>
         <CardContent className="flex flex-col gap-2">
           <span className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
             <span className="text-xl font-semibold">{formatDay(bill.day)}</span>
@@ -480,7 +480,7 @@ function Abonar({
   return (
     <div className="flex flex-col gap-6">
       <Button type="button" variant="outline" size="touch" onClick={onBack} className="self-start">
-        <BackDrawing />
+        <BackDrawing className="size-5" />
         Volver al cliente
       </Button>
       <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
@@ -768,7 +768,7 @@ function CustomerScreen({ loaderData, actionData }: Route.ComponentProps) {
               onClick={toList}
               className={`${buttonClasses({ size: "touch", variant: "outline" })} self-start`}
             >
-              <BackDrawing />
+              <BackDrawing className="size-5" />
               {LISTS[listPath]}
             </Link>
           }

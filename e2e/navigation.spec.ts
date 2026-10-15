@@ -39,10 +39,12 @@ test("an Admin signs in on Inicio, walks its cards, the four destinations and ev
   await expect(current(page)).toHaveText("Inicio");
   await expect(current(page)).toHaveAttribute("aria-current", "page");
 
-  // Each card leads to the screen it is about.
+  // Each card leads to the screen it is about. Before the menu has anything
+  // to sell, the first one leads to adding it.
   const cards = page.getByRole("main").getByRole("link");
-  await expect(cards).toHaveCount(6);
+  await expect(cards).toHaveCount(7);
   for (const [card, name] of [
+    [/Agregar productos/, "Agregar producto"],
     [/Nueva venta/, "Vender"],
     [/Cobrado hoy/, "Día"],
     [/Cuentas abiertas/, "Cuentas abiertas"],

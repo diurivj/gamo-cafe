@@ -7,14 +7,15 @@ import { listInventory, listRecentAdjustments } from "~/backend/inventory";
 import { run } from "~/backend/run.server";
 import { refuseRead, requireAdminUser } from "~/catalog-forms.server";
 import { ConfirmDialog } from "~/components/confirm-dialog";
-import { BackDrawing, ChevronDrawing } from "~/components/icons";
+import { BackDrawing, ChevronDrawing, NavigationDrawing } from "~/components/icons";
 import { Notice } from "~/components/notice";
 import { Pending, SentRows, useLeaveGuard, useReadAgainSince } from "~/components/recording";
 import { useRecorded } from "~/shared/recorded";
-import { hint, pageTitle, sectionTitle } from "~/components/styles";
+import { hint, pageTitle, rowCard, sectionTitle } from "~/components/styles";
 import { Badge } from "~/components/ui/badge";
 import { Button, buttonClasses } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
+import { SearchInput } from "~/components/search-input";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "~/components/ui/native-select";
@@ -23,6 +24,7 @@ import { ADJUSTMENT_REASONS, type AdjustmentReason, adjustmentReasonLabel, adjus
 import { COUNT_PATH, DISCREPANCIES_PATH } from "~/shared/count";
 import { formatDay, formatTime } from "~/shared/day";
 import { newId } from "~/shared/id";
+import type { NavigationIcon } from "~/shared/navigation";
 import { normalizeName } from "~/shared/normalize-name";
 import { sendForRecord } from "~/shared/record-request";
 import {
@@ -107,7 +109,7 @@ function Back({ label, onBack }: { readonly label: string; readonly onBack: () =
   return (
     // Its one word may be wider than a narrow phone with large text: it breaks instead of sticking out.
     <Button type="button" variant="outline" size="touch" onClick={onBack} className="max-w-full shrink self-start">
-      <BackDrawing />
+      <BackDrawing className="size-5" />
       <span className="min-w-0 wrap-anywhere">{label}</span>
     </Button>
   );
@@ -119,7 +121,7 @@ function Warnings({ line }: { readonly line: Line }) {
   return (
     <span className="flex max-w-full flex-wrap gap-2">
       {line.retired ? <Badge variant="secondary">Retirado</Badge> : null}
-      {line.needsRestock ? <Badge variant="outline">Reponer</Badge> : null}
+      {line.needsRestock ? <Badge variant="warning">Reponer</Badge> : null}
       {line.belowZero ? <Badge variant="destructive">Bajo cero</Badge> : null}
     </span>
   );
@@ -169,19 +171,24 @@ function Stock({
         <Card size="sm">
           <CardContent>
             <ul className="flex flex-col divide-y">
-              {[
-                { to: adjustHref({ reason: "waste" }), label: "Registrar merma o consumo interno", state: WITHIN },
-                { to: ADJUSTMENTS_HREF, label: "Ajustes recientes", state: WITHIN },
-                { to: DISCREPANCIES_PATH, label: "Diferencias de los conteos", state: undefined },
-              ].map((way) => (
+              {(
+                [
+                  { to: adjustHref({ reason: "waste" }), label: "Registrar merma o consumo interno", state: WITHIN, icon: "box" },
+                  { to: ADJUSTMENTS_HREF, label: "Ajustes recientes", state: WITHIN, icon: "clock" },
+                  { to: DISCREPANCIES_PATH, label: "Diferencias de los conteos", state: undefined, icon: "scale" },
+                ] satisfies ReadonlyArray<{ to: string; label: string; state: typeof WITHIN | undefined; icon: NavigationIcon }>
+              ).map((way) => (
                 <li key={way.to}>
                   <Link
                     to={way.to}
                     state={way.state}
-                    className="flex min-h-12 items-center justify-between gap-3 py-2 font-medium"
+                    className="group flex min-h-14 items-center justify-between gap-3 py-2 font-medium @container"
                   >
-                    <span className="min-w-0 wrap-break-word">{way.label}</span>
-                    <ChevronDrawing className="size-5" />
+                    <span className="hidden size-9 shrink-0 place-items-center rounded-xl bg-muted @[15rem]:grid">
+                      <NavigationDrawing icon={way.icon} className="size-5" />
+                    </span>
+                    <span className="min-w-0 flex-1 wrap-break-word">{way.label}</span>
+                    <ChevronDrawing className="size-5 text-muted-foreground transition-transform duration-150 group-hover:translate-x-0.5" />
                   </Link>
                 </li>
               ))}
@@ -203,9 +210,8 @@ function Stock({
             {/* The Items are all here, so the search is the screen's own: nothing is asked of the server. */}
             <div role="search" className="flex flex-col gap-2">
               <Label htmlFor="buscar">Buscar producto</Label>
-              <Input
+              <SearchInput
                 id="buscar"
-                type="search"
                 value={query}
                 onChange={(event) => onQuery(event.target.value)}
                 autoComplete="off"
@@ -233,7 +239,7 @@ function Stock({
               {found.map((line) => (
                 <li key={line.id} aria-label={line.name}>
                   <Link to={adjustHref({ itemId: line.id })} state={WITHIN} className="block rounded-2xl">
-                    <Card size="sm" className="transition-colors hover:bg-muted/60 active:bg-muted">
+                    <Card size="sm" className={rowCard}>
                       <CardContent className="flex flex-col gap-2">
                         <span className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
                           <span className="max-w-full min-w-0 text-xl font-semibold wrap-anywhere">{line.name}</span>
@@ -243,7 +249,10 @@ function Stock({
                           <span className="font-medium">Existencias</span>{" "}
                           <span
                             data-figure="stock"
-                            className="max-w-full min-w-0 font-heading text-2xl font-semibold wrap-anywhere tabular-nums"
+                            // Its color repeats what the words above it say: under zero, or to restock.
+                            className={`max-w-full min-w-0 font-heading text-[1.75rem] leading-tight font-semibold wrap-anywhere figures ${
+                              line.belowZero ? "text-destructive" : line.needsRestock ? "text-warning" : ""
+                            }`}
                           >
                             {line.stock}
                           </span>
