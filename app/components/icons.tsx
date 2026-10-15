@@ -108,6 +108,13 @@ const navigation: Readonly<Record<NavigationIcon, ReactNode>> = {
       <path d="M8 17.5a4 4 0 0 1 8 0" />
     </>
   ),
+  cup: (
+    <>
+      <path d="M4.5 9h11v4.5a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5V9z" />
+      <path d="M15.5 10.5h1.25a2.5 2.5 0 0 1 0 5H15.5M3.5 21h15" />
+      <path d="M8.5 3c-.9 1 .9 2 0 3M12 3c-.9 1 .9 2 0 3" />
+    </>
+  ),
 };
 
 /** The drawing of one of the navigation's destinations, of a card of Inicio, or of a link of Más. */

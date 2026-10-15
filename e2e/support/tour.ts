@@ -2,11 +2,12 @@ import type { Page, Route } from "@playwright/test";
 
 import { SESSION_COOKIE } from "../../app/shared/secret.ts";
 import { expect, type TestFixtures } from "../fixtures";
-import { openCorrection, openPay, payBill } from "./bill";
+import { openCorrection, openPay, payBill, payInFull } from "./bill";
 import { type Cafe, LONG_CUSTOMER, LONG_ITEM } from "./cafe";
 import { abonar } from "./customer";
 import { recordCount, reviewCount, typeCount } from "./count";
 import { holdSubmissions } from "./held";
+import { INTERNAL_USE, typeInternalUse } from "./internal-use";
 import { destinations } from "./navigate";
 import { leaveOpen, pay, review, select, selection } from "./sell";
 import { adjust, typeAdjustment } from "./stock";
@@ -262,6 +263,54 @@ function collectStops(cafe: Cafe): ReadonlyArray<Stop> {
     after("Cliente: Abono registrado", customer, async (page) => {
       await abonar(page, { amount: "1", method: "Transferencia" });
     }),
+    // Last: it closes a Bill no later stop needs open.
+    after("Inicio: a Bill paid and closed, with its change", bill(cafe.bills.corrected), async (page) => {
+      await payInFull(page, { handed: "20" });
+    }),
+  ];
+}
+
+/** Consumo interno, for either role: its one step, and every way an Internal use ends. */
+function internalUseStops(): ReadonlyArray<Stop> {
+  const typed = (page: Page) => typeInternalUse(page, { item: "Galleta de nuez", units: "1", note: "Para la junta de la tarde" });
+  const record = (page: Page) => page.getByRole("button", { name: "Registrar consumo interno de 1" }).click();
+  return [
+    at("Consumo interno", "/consumo-interno", "Consumo interno"),
+    after("Consumo interno: nothing chosen, and its action tapped", "/consumo-interno", async (page) => {
+      await page.getByRole("button", { name: "Registrar consumo interno" }).click();
+      await expect(page.getByRole("alert").first()).toBeVisible();
+    }),
+    after("Consumo interno: typed, with what it will do", "/consumo-interno", async (page) => {
+      await typed(page);
+      await expect(page.getByText("No se cobra.")).toBeVisible();
+    }),
+    after("Consumo interno: on its way", "/consumo-interno", async (page) => {
+      await typed(page);
+      const held = await holdSubmissions(page);
+      await record(page);
+      await expect(title(page, /^Registrando consumo interno/)).toBeVisible();
+      return async () => {
+        await held.releaseAll();
+        await held.stop();
+        await expect(title(page, "Consumo interno registrado")).toBeVisible();
+      };
+    }),
+    after("Consumo interno: of unknown outcome", "/consumo-interno", async (page) => {
+      await typed(page);
+      const answer = await withoutAnswer(page, INTERNAL_USE);
+      await record(page);
+      await expect(title(page, "No sabemos si se registró")).toBeVisible();
+      return async () => {
+        await answer();
+        await page.getByRole("button", { name: "Volver a intentar" }).click();
+        await expect(title(page, "Consumo interno registrado")).toBeVisible();
+      };
+    }),
+    after("Consumo interno: registrado", "/consumo-interno", async (page) => {
+      await typed(page);
+      await record(page);
+      await expect(title(page, "Consumo interno registrado")).toBeVisible();
+    }),
   ];
 }
 
@@ -309,6 +358,7 @@ export function adminStops(cafe: Cafe): Readonly<Record<(typeof ADMIN_WALKS)[num
     }),
     at("Diferencias", "/diferencias", "Diferencias"),
     at("Historial", "/historial", "Historial"),
+    ...internalUseStops(),
     after("Inventario: an Adjustment on its way", "/inventario?paso=ajustar", async (page) => {
       await typeAdjustment(page, { item: "Galleta de nuez", units: "2" });
       const held = await holdSubmissions(page);
@@ -433,6 +483,7 @@ export function workerStops(cafe: Cafe): ReadonlyArray<Stop> {
     at("Mi día", "/mi-dia", "Mi día"),
     ...sellStops(cafe),
     ...collectStops(cafe),
+    ...internalUseStops(),
     at("A screen that is an Admin's", "/dia", "No tienes acceso a esta página"),
     at("A Bill that is no longer Open", `/cuentas/${cafe.bills.paid}`, "Esta cuenta ya no está abierta"),
     after("Cuenta: a Payment for a Bill another phone closed", `/cuentas/${cafe.bills.partial}?paso=cobrar`, async (page, { query }) => {
@@ -452,6 +503,7 @@ export const emptyWorkerStops: ReadonlyArray<Stop> = [
   at("Cuentas abiertas, with none, as a Worker", "/cuentas-abiertas", "Cuentas abiertas"),
   at("Clientes, with none, as a Worker", "/clientes", "Clientes"),
   at("Mi día, with nothing, as a Worker", "/mi-dia", "Mi día"),
+  at("Consumo interno, with no Item, as a Worker", "/consumo-interno", "Consumo interno"),
 ];
 
 /** The lists and figures of an app nobody has used yet, as its first Admin finds them. */

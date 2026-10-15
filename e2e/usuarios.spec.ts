@@ -46,7 +46,7 @@ test("an Admin adds a User, and the code shown signs that User in on their phone
   await openNewUser(page);
   await expect(title(page, "Agregar usuario")).toBeFocused();
   // What each role may do is said where the role is chosen.
-  await expect(page.getByLabel("Rol")).toHaveAccessibleDescription(/Empleado: Vende, cobra y ve su propio día\./);
+  await expect(page.getByLabel("Rol")).toHaveAccessibleDescription(/Empleado: Vende, cobra, registra el consumo interno y ve su propio día\./);
   await page.getByLabel("Nombre").fill("Beto");
   await page.getByLabel("Rol").selectOption({ label: "Empleado" });
   await page.getByRole("button", { name: "Agregar y dar código" }).click();
@@ -208,7 +208,7 @@ test("a change of role says what it gives and takes, and the User's phone follow
   await page.goto("/usuarios");
   await openUser(page, "Beto");
   const role = page.getByRole("region", { name: "Rol" });
-  await expect(role).toContainText("Empleado: Vende, cobra y ve su propio día.");
+  await expect(role).toContainText("Empleado: Vende, cobra, registra el consumo interno y ve su propio día.");
   await expect(role).toContainText("Como Administrador: Podrá ver el día de todos");
   await expect(role).toContainText("su sesión sigue abierta");
 

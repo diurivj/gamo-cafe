@@ -107,7 +107,7 @@ export interface BillEditEntry {
   readonly next: string | null;
 }
 
-/** An Adjustment an Admin recorded on an Item (spec §5.8). */
+/** An Adjustment recorded on an Item: an Admin's, or any User's Internal use (spec §4.1, §5.8). */
 export interface AdjustmentEntry {
   readonly kind: "adjustment";
   readonly id: string;

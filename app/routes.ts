@@ -13,6 +13,7 @@ export default [
   route("clientes/:customerId/abonar", "routes/resources/record-handover.ts"),
   route("inventario/ajustar", "routes/resources/record-stock-change.ts"),
   route("inventario/conteo/registrar", "routes/resources/record-count.ts"),
+  route("consumo-interno/registrar", "routes/resources/record-internal-use.ts"),
 
   // The signed-in shell: screens go inside it.
   layout("routes/shell.tsx", [
@@ -32,6 +33,7 @@ export default [
       route("historial", "routes/historial.tsx"),
       route("inventario", "routes/inventario.tsx"),
       route("inventario/conteo", "routes/conteo.tsx"),
+      route("consumo-interno", "routes/consumo-interno.tsx"),
       route("por-cobrar", "routes/owed.tsx"),
       route("productos", "routes/productos.tsx"),
       route("productos/:itemId", "routes/producto.tsx"),

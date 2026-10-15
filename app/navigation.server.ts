@@ -28,6 +28,8 @@ const destinations: Readonly<Record<Role, ReadonlyArray<Destination>>> = {
 
 const customers: MoreLink = { label: "Clientes", to: "/clientes", icon: "people" };
 const myDay: MoreLink = { label: "Mi día", to: "/mi-dia", icon: "person" };
+// Every User's: what staff consumed or gave away (spec §4.1), with no Stock in sight.
+const internalUse: MoreLink = { label: "Consumo interno", to: "/consumo-interno", icon: "cup" };
 
 const moreGroups: Readonly<Record<Role, ReadonlyArray<MoreGroup>>> = {
   admin: [
@@ -44,6 +46,7 @@ const moreGroups: Readonly<Record<Role, ReadonlyArray<MoreGroup>>> = {
       title: "Inventario",
       links: [
         { label: "Inventario", to: "/inventario", icon: "box" },
+        internalUse,
         { label: "Diferencias", to: "/diferencias", icon: "scale" },
       ],
     },
@@ -59,7 +62,10 @@ const moreGroups: Readonly<Record<Role, ReadonlyArray<MoreGroup>>> = {
       ],
     },
   ],
-  worker: [{ title: "Clientes y tu día", links: [customers, myDay] }],
+  worker: [
+    { title: "Clientes y tu día", links: [customers, myDay] },
+    { title: "Registrar", links: [internalUse] },
+  ],
 };
 
 /** The four destinations of a role, in order: Inicio first, Más last. */

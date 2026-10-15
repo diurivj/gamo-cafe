@@ -20,7 +20,8 @@ export type NavigationIcon =
   | "scale"
   | "clock"
   | "tag"
-  | "badge";
+  | "badge"
+  | "cup";
 
 /** One of a role's four destinations. The first is Inicio, the last one Más. */
 export interface Destination {

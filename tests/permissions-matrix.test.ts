@@ -7,12 +7,13 @@ import { voidBill } from "~/backend/corrections";
 import type { NewItem } from "~/backend/catalog";
 import { CurrentUser, type Role } from "~/backend/current-user";
 import type { Db } from "~/backend/db";
+import { stockOf } from "~/backend/stock";
 
 import { appFetch, as, landing, seedUser, type SignedIn, signedIn } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { seedCustomer } from "./support/customers";
 import { runTest } from "./support/effect";
-import { correctionPath, recordHandover, recordPayment, recordSale, saleForm } from "./support/sales";
+import { correctionPath, recordHandover, recordPayment, recordSale, saleForm, sendInternalUse } from "./support/sales";
 
 /**
  * Spec §4.1 and §10.6: the server enforces the permissions matrix in every
@@ -211,6 +212,18 @@ const routes: Readonly<Record<string, RouteRule>> = {
     // An action and no loader: there is nothing to read here.
     get: { worker: 400, admin: 400 },
     post: { worker: 403, admin: 400 },
+  },
+  "/consumo-interno": {
+    about: "Consumo interno: what staff consumed or gave away, for every User and with no Stock",
+    signedOut: "redirect",
+    get: { worker: 200, admin: 200 },
+  },
+  "/consumo-interno/registrar": {
+    about: "Where Consumo interno sends an Internal use, for every User",
+    signedOut: "redirect",
+    // An action and no loader: there is nothing to read here.
+    get: { worker: 400, admin: 400 },
+    post: { worker: 400, admin: 400 },
   },
   "/por-cobrar": {
     about: "Por cobrar: what Customers owe, Admin only",
@@ -749,7 +762,27 @@ const rows: ReadonlyArray<MatrixRow> = [
     },
   },
   {
-    capability: "Record or cancel an Adjustment, and record a Count",
+    capability: "Record an Internal use",
+    worker: "yes",
+    admin: "yes",
+    async check(who, label) {
+      const item = await seedItemFor({ startingStock: 3 });
+
+      const page = await who.fetch("/consumo-interno");
+      expect(page.status, label).toBe(200);
+      expect(await page.text(), label).toContain(item.name);
+
+      const sent = await sendInternalUse(who, { itemId: item.id, units: "2" });
+      expect(sent.response.status, label).toBe(200);
+      // That it was recorded, and no Stock: a Worker never sees one (§4.2).
+      expect(Object.keys(sent.internalUse ?? {}), label).toEqual(["id"]);
+      const left = await seed((author) => stockOf(item.id).pipe(as(author)));
+      expect(left, label).toBe(1);
+      return sent.response;
+    },
+  },
+  {
+    capability: "Record a Restock or Waste, cancel an Adjustment, and record a Count",
     worker: "no",
     admin: "yes",
     async check(who, label) {
@@ -759,6 +792,15 @@ const rows: ReadonlyArray<MatrixRow> = [
       if (who.user.role === "worker") {
         const recorded = await who.fetch("/inventario/ajustar", form(adjustment));
         expect(recorded.status, label).toBe(403);
+        const waste = await who.fetch("/inventario/ajustar", form({ ...adjustment, reason: "waste" }));
+        expect(waste.status, label).toBe(403);
+        // Not even their own Internal use is theirs to cancel.
+        const { internalUse } = await sendInternalUse(who, { itemId: item.id, units: "1" });
+        const cancelled = await who.fetch(
+          "/inventario/ajustar",
+          form({ intent: "cancelar", adjustmentId: internalUse!.id, reason: "Me equivoqué" }),
+        );
+        expect(cancelled.status, label).toBe(403);
         const review = await who.fetch(
           "/inventario/conteo/registrar",
           form({ intent: "revisar", [`units.${item.id}`]: "5" }),
@@ -928,7 +970,8 @@ describe("§4.1 the permissions matrix", () => {
       "See Paid and Voided Bills",
       "See the Day, Bills, Owed, Discrepancies and History lists",
       "See Stock, Minimums, Adjustments and Counts",
-      "Record or cancel an Adjustment, and record a Count",
+      "Record an Internal use",
+      "Record a Restock or Waste, cancel an Adjustment, and record a Count",
       "Manage Items and Categories",
       "Rename, retire or restore a Customer",
       "Manage Users and issue sign-in codes",

@@ -61,7 +61,7 @@ describe("Usuarios, for an Admin", () => {
 
     const step = await (await ana.fetch("/usuarios?paso=nuevo")).text();
     expect(step).toContain("Agregar usuario");
-    expect(step).toContain("Vende, cobra y ve su propio día.");
+    expect(step).toContain("Vende, cobra, registra el consumo interno y ve su propio día.");
     expect(step).toContain("administra productos y usuarios");
 
     const response = await ana.fetch("/usuarios?paso=nuevo", {

@@ -16,7 +16,7 @@ A User who, besides everything a Worker does, manages Items and Stock and sees w
 _On screen_: Administrador
 
 **Worker**:
-A User limited to recording Bills, taking Payments and adding Customers.
+A User limited to recording Bills, taking Payments, adding Customers and recording Internal use.
 _Avoid_: Employee, cashier
 _On screen_: Empleado
 
@@ -59,8 +59,8 @@ An Open Bill whose Payments add up to more than nothing and less than its total.
 _On screen_: Pago parcial
 
 **Paid**:
-The state of a Bill whose Payments add up to its total.
-_On screen_: Pagada
+The state of a Bill whose Payments add up to its total. A Payment that leaves a Bill Paid closes it: nothing more is owed or collected on it.
+_On screen_: Pagada; the Payment that makes it so says **Cuenta pagada y cerrada**
 
 **Voided**:
 The state of a Bill cancelled by an Admin, with a reason. A Voided Bill stays on record but counts toward nothing.
@@ -102,7 +102,7 @@ The Stock level, set per Item by an Admin, at or below which the Item is flagged
 _On screen_: Mínimo
 
 **Adjustment**:
-A change to an Item's Stock made by an Admin outside of selling, for one of three reasons: Restock, Waste, or Internal use.
+A change to an Item's Stock outside of selling, for one of three reasons: Restock, Waste, or Internal use. An Admin records any of them; a Worker records only Internal use. Only an Admin cancels one.
 _On screen_: Ajuste
 
 **Restock**:
@@ -114,7 +114,7 @@ An Adjustment that removes units that expired, broke or were otherwise lost.
 _On screen_: Merma
 
 **Internal use**:
-An Adjustment that removes units consumed by staff or given away.
+An Adjustment that removes units consumed by staff or given away. Any User records one, without being shown Stock.
 _On screen_: Consumo interno
 
 **Count**:
@@ -129,5 +129,5 @@ _On screen_: Diferencia, shown as Faltante when units are missing and Sobrante w
 ### The app
 
 **Notice**:
-The short message a screen shows after a User records something, once: a Bill, a Payment, an Adjustment, or a sign-in code to read out. It travels in the answer to the form that was sent; a document POST carries it in a short-lived cookie. It is never in the URL.
+The short message a screen shows after a User records something, once: a Bill, a Payment, an Adjustment, or a sign-in code to read out. It travels in the answer to the form that was sent; a document POST carries it in a short-lived cookie. It is never in the URL. One Notice leaves the screen that sent its form: a Payment on Cuenta that leaves the Bill Paid takes the User to Inicio, and Inicio says it.
 _Avoid_: Flash, toast, alert

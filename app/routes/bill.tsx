@@ -21,7 +21,7 @@ import { BackDrawing } from "~/components/icons";
 import { Notice } from "~/components/notice";
 import { PaymentEntry } from "~/components/payment-entry";
 import { Change, Pending, SentRows, useLeaveGuard, useReadAgainSince } from "~/components/recording";
-import { useRecorded } from "~/shared/recorded";
+import { carry, useRecorded } from "~/shared/recorded";
 import { amount, figureRow, hint, pageTitle, sectionTitle } from "~/components/styles";
 import { SubmitButton } from "~/components/submit-button";
 import { Button, buttonClasses } from "~/components/ui/button";
@@ -90,9 +90,10 @@ import type { Route } from "./+types/bill";
 // A Payment is `~/shared/bill-payment`: typed, frozen at the tap, sent to
 // `/cuentas/:billId/cobrar` (`./resources/record-payment`) with the browser's
 // own `fetch`, and kept on screen until the server's own answer says what
-// happened. Nothing is read after it until the User asks, so a Worker sees
-// the result of a Payment that left the Bill Paid without being sent into a
-// Bill they may no longer open (spec §4.1).
+// happened. A Payment that left the Bill Paid closed it: the User goes on to
+// Inicio, which says so, change included, and a Worker is never sent into a
+// Bill they may no longer open (spec §4.1). After any other Payment nothing
+// is read until the User asks.
 //
 // A correction (spec §5.7, UI redesign §7.2) is `~/shared/correction`, and is
 // never one tap away from the routine actions: **Quitar** on a Line or a
@@ -764,7 +765,7 @@ function Confirmed({
   readonly onOpenBill: () => void;
   readonly children: ReactNode;
 }) {
-  useRecorded(title, details);
+  useRecorded(title, details, change);
   return (
     <div className="flex flex-col gap-6">
       <h1 ref={heading} tabIndex={-1} className={`${pageTitle} outline-none`}>
@@ -956,6 +957,17 @@ function BillScreen({ loaderData, actionData }: Route.ComponentProps) {
   const unsure = (phase: string) => phase === "recording" || phase === "unknown";
   const unfinished = unsure(payment.phase) ? "payment" : unsure(correction.phase) ? "correction" : null;
   const guard = useLeaveGuard(unfinished !== null);
+
+  // A Payment that left the Bill Paid closed it, and there is nothing left to
+  // do here: the User goes on to Inicio, which says so with the change to hand
+  // over (UI redesign §5.4). Inicio's entry takes the step's place, and the
+  // result stays on this screen until Inicio is there. After the guard above,
+  // so that what is no longer on its way does not hold the User back.
+  const closed = payment.phase === "confirmed" && payment.result.paid ? payment : null;
+  useEffect(() => {
+    if (closed === null) return;
+    void navigate("/inicio", { replace: true, state: carry(billPaymentOutcome(closed.snapshot, closed.result)) });
+  }, [closed]);
 
   // Whether a list is the history entry before this Bill, and whether the
   // step was reached from the Bill in this history: going back, not on to a

@@ -182,18 +182,20 @@ export const billPaymentRecordingText = (snapshot: BillPaymentSnapshot) =>
 
 /**
  * What a confirmed Payment says (UI redesign §5.4): what the server recorded
- * and what the Bill still owes. The Bill is called Paid only when the server
- * says nothing is owed.
+ * and what the Bill still owes. The Bill is called Paid, and closed, only
+ * when the server says nothing is owed; that result is then said on Inicio
+ * (`app/routes/bill.tsx`).
  */
 export function billPaymentOutcome(snapshot: BillPaymentSnapshot, result: BillPaymentResult) {
   const bill = snapshot.customerName ? `La cuenta de ${snapshot.customerName}` : "La cuenta";
-  const owed = result.owed === 0 ? "Cuenta pagada." : `${bill} todavía debe ${formatMoney(result.owed)}.`;
+  const closed = result.owed === 0;
+  const owed = closed ? `${bill} ya no debe nada.` : `${bill} todavía debe ${formatMoney(result.owed)}.`;
   const change =
     snapshot.handedOver !== null && snapshot.handedOver >= result.amount
       ? formatMoney(changeFor(snapshot.handedOver, result.amount))
       : null;
   return {
-    title: "Pago registrado",
+    title: closed ? "Cuenta pagada y cerrada" : "Pago registrado",
     details: `${formatMoney(result.amount)} ${paidByMethod[snapshot.method]}. ${owed}`,
     change,
   };

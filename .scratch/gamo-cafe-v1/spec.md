@@ -188,7 +188,8 @@ See ADR 0004.
 | See Paid and Voided Bills | No | Yes |
 | See the Day, Bills, Owed, Discrepancies and History lists | No | Yes |
 | See Stock, Minimums, Adjustments and Counts | No | Yes |
-| Record or cancel an Adjustment, and record a Count | No | Yes |
+| Record an Internal use | Yes | Yes |
+| Record a Restock or Waste, cancel an Adjustment, and record a Count | No | Yes |
 | Manage Items and Categories | No | Yes |
 | Rename, retire or restore a Customer | No | Yes |
 | Manage Users and issue sign-in codes | No | Yes |
@@ -197,7 +198,7 @@ The server enforces this matrix in every loader and action. Hiding a control is 
 
 ### 4.2 What a Worker never sees
 
-Stock numbers, another User's totals, Paid or Voided Bills outside their own activity for today, and History.
+Stock numbers, another User's totals, Paid or Voided Bills outside their own activity for today, and History. Recording an Internal use shows them none of these: not the Stock it changes, and not the Adjustments others recorded.
 
 ## 5. Domain rules
 
@@ -275,7 +276,8 @@ A Bill's state is derived from its records and is never set by hand.
 - Stock changes when a Line is added (down by its quantity), when a Line is removed or its Bill is Voided (back up), when an Adjustment is recorded or cancelled, and when a Count is recorded (set to the units found).
 - Stock is maintained only by those operations. No screen edits the number directly, and it can be rebuilt from the records at any time.
 - An Adjustment is one Item, a whole number of units of at least 1, a reason and an optional note. Restock adds; Waste and Internal use subtract.
-- An Admin can cancel an Adjustment, with a reason, which reverses its effect.
+- Any User can record an Internal use; only an Admin records a Restock or Waste.
+- An Admin can cancel an Adjustment, with a reason, which reverses its effect. A Worker cannot, not even an Internal use of their own.
 - The starting Stock entered when an Item is created is recorded as a Restock.
 - A Count covers any subset of Items. The entry step shows Item names and no expected numbers. A review step then shows expected, found and difference before the Admin confirms.
 - Confirming a Count records, per Item, the Stock expected at that moment, the units found and the Discrepancy (found minus expected), and then sets Stock to the units found. A Discrepancy of zero is recorded too.
@@ -304,6 +306,7 @@ Titles are the Spanish shown on screen. Navigation and URLs are implementation d
 - **Cuenta.** One Bill: its Lines with who and when, its Payments with who, when and method, its state and what it owes. Actions as permitted: add Items, take a Payment, set the Customer or note, remove a Line and, for Admins, remove a Payment or void.
 - **Clientes.** Search and add. A Customer's page shows their Open Bills and what they owe, with **Abonar** to pay across Bills. Admins can also rename, retire and see past Bills.
 - **Mi día.** What this User sold and collected today, in cash and by transfer, with their Lines and Payments.
+- **Consumo interno.** Records an Internal use: an active stock-tracked Item, its units and an optional note. It shows no Stock; cancelling one is an Admin's, on Inventario.
 
 ### 6.2 For Admins
 

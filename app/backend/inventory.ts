@@ -6,7 +6,7 @@ import { newId } from "~/shared/id";
 import { trimToNull } from "~/shared/text";
 
 import { ItemNotFound } from "./catalog";
-import { requireAdmin } from "./current-user";
+import { CurrentUser, requireAdmin } from "./current-user";
 import { Db, statement } from "./db";
 import { adjustmentStatements } from "./stock";
 import { json, notYetRecorded, recordedAnswer, submissionOf, submissionStatement } from "./submissions";
@@ -15,7 +15,10 @@ import { now, today } from "./time";
 /**
  * Inventario (spec §5.8, §6.2): an Admin's view of Stock and Minimums, and the
  * Adjustments that move Stock outside of selling. Every operation here starts
- * with `requireAdmin`: a Worker never sees a Stock number (spec §4.2).
+ * with `requireAdmin`, because a Worker never sees a Stock number (spec §4.2),
+ * except the two of Consumo interno: `internalUseItems` and
+ * `recordInternalUse` are any User's (spec §4.1), and neither reads nor
+ * answers a Stock.
  *
  * The statements that touch `stock_levels` live in `./stock`; this module is
  * the operations that use them.
@@ -81,6 +84,23 @@ export const listInventory = Effect.gen(function* () {
   );
 });
 
+const CountedItemRow = Schema.Struct({ id: Schema.String, name: Schema.String });
+
+/**
+ * The Items Consumo interno offers (spec §4.1): every active Item that counts
+ * its units, in name order, and nothing of their Stock, so any User may read
+ * it. What is left of a retired Item is an Admin's to adjust, on Inventario.
+ */
+export const internalUseItems = Effect.gen(function* () {
+  const db = yield* Db;
+  return yield* db.all(
+    CountedItemRow,
+    `SELECT id, name FROM items
+     WHERE stock_tracked = 1 AND retired_at IS NULL
+     ORDER BY normalized_name, id`,
+  );
+});
+
 export interface NewAdjustmentInput {
   readonly itemId: string;
   readonly reason: AdjustmentReason;
@@ -106,13 +126,34 @@ const AdjustmentAnswer = Schema.Struct({ id: Schema.String });
  * same form sent twice is recorded once (spec §3.4, `./submissions`).
  */
 export const recordAdjustment = Effect.fn("recordAdjustment")(function* (input: NewAdjustmentInput) {
-  const admin = yield* requireAdmin;
+  return yield* adjustmentBy(yield* requireAdmin, input);
+});
+
+/** An Internal use as Consumo interno sends it: an Adjustment whose reason is already said. */
+export type InternalUseInput = Omit<NewAdjustmentInput, "reason">;
+
+/**
+ * Records an Internal use (spec §4.1, §5.8): units of an Item that staff
+ * consumed or gave away, taken off its Stock. Any User may, a Worker
+ * included, so it asks nobody to be an Admin; and it answers no Stock, which
+ * a Worker never sees (spec §4.2). It is `recordAdjustment`'s fact, batch and
+ * submission; cancelling one is still an Admin's (`cancelAdjustment`).
+ */
+export const recordInternalUse = Effect.fn("recordInternalUse")(function* (input: InternalUseInput) {
+  return yield* adjustmentBy(yield* CurrentUser, { ...input, reason: "internal_use" });
+});
+
+/**
+ * What both ways of recording an Adjustment do once they know who records it:
+ * the rules, the batch, and one submission per form.
+ */
+const adjustmentBy = Effect.fnUntraced(function* (author: CurrentUser["Service"], input: NewAdjustmentInput) {
   const db = yield* Db;
 
   if (!Number.isSafeInteger(input.units) || input.units < 1) return yield* new InvalidAdjustmentUnits();
   const note = trimToNull(input.note);
 
-  const submission = yield* submissionOf("adjustment", admin.id, input.submissionKey, [
+  const submission = yield* submissionOf("adjustment", author.id, input.submissionKey, [
     input.itemId,
     input.reason,
     input.units,
@@ -128,7 +169,7 @@ export const recordAdjustment = Effect.fn("recordAdjustment")(function* (input: 
   // `changes` says whether the Adjustment was recorded.
   const [fact] = yield* db.batch([
     ...adjustmentStatements(
-      { id, itemId: input.itemId, reason: input.reason, units: input.units, note, by: admin.id, at, day: yield* today },
+      { id, itemId: input.itemId, reason: input.reason, units: input.units, note, by: author.id, at, day: yield* today },
       notYetRecorded(submission),
     ),
     submissionStatement(submission, {
@@ -265,7 +306,7 @@ export interface RecentAdjustment {
   readonly reason: AdjustmentReason;
   readonly units: number;
   readonly note: string | null;
-  /** The Admin who recorded it. */
+  /** The User who recorded it: a Worker's Internal use too. */
   readonly byName: string;
   readonly at: Instant;
   readonly day: Day;

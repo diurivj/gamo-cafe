@@ -199,12 +199,15 @@ describe("what a Payment is sent as", () => {
 });
 
 describe("what a confirmed Payment says", () => {
-  it("says the Bill is Paid only when the server says nothing is owed", () => {
+  it("says the Bill is paid and closed only when the server says nothing is owed", () => {
     expect(billPaymentOutcome(frozen(), result)).toEqual({
-      title: "Pago registrado",
-      details: "$25.00 en efectivo. Cuenta pagada.",
+      title: "Cuenta pagada y cerrada",
+      details: "$25.00 en efectivo. La cuenta de Familia Ruiz ya no debe nada.",
       change: null,
     });
+    expect(billPaymentOutcome({ ...frozen(), customerName: null }, result).details).toBe(
+      "$25.00 en efectivo. La cuenta ya no debe nada.",
+    );
   });
 
   it("says what the Bill still owes after a part, by transfer, and whose it is", () => {

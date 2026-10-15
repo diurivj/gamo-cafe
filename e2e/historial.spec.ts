@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import { payBill, removeLine, removePayment, seeBill, voidBill } from "./support/bill";
+import { backToBill, closedNotice, payInFull, removeLine, removePayment, seeBill, voidBill } from "./support/bill";
 import { goTo } from "./support/navigate";
 import { adjust, cancelAdjustment, openAdjustments, seeStock } from "./support/stock";
 import { leaveOpen } from "./support/sell";
@@ -36,9 +36,9 @@ test("§10.4: each correction and Adjustment appears in Historial with its autho
   // Paid in full by an Admin, who may go on opening it (a Worker may not).
   await signInAs("admin", "Ana");
   await page.goto(`/cuentas/${billId}`);
-  await payBill(page);
-  await expect(page.getByRole("status")).toContainText("Cuenta pagada");
-  await seeBill(page);
+  await payInFull(page);
+  await expect(closedNotice(page)).toContainText("Cuenta pagada y cerrada");
+  await backToBill(page);
 
   // Remove the Payment: an Admin, with a reason (spec §5.7).
   await removePayment(page, "$18.50", "Se cobró por error");

@@ -1,11 +1,13 @@
-import type { CSSProperties, ReactNode } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useRef } from "react";
 import { Effect } from "effect";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 
 import { CurrentUser } from "~/backend/current-user";
 import { homeSummary } from "~/backend/home";
 import { run } from "~/backend/run.server";
 import { ArrowDrawing, NavigationDrawing } from "~/components/icons";
+import { Notice } from "~/components/notice";
+import { Change } from "~/components/recording";
 import { amount, bigFigure, eyebrow, figureRow, hint, pageTitle, rowCard } from "~/components/styles";
 import { buttonClasses } from "~/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -13,6 +15,7 @@ import { requireUser } from "~/session.server";
 import { formatDay } from "~/shared/day";
 import { formatMoney } from "~/shared/money";
 import type { NavigationIcon } from "~/shared/navigation";
+import { useCarried } from "~/shared/recorded";
 
 import type { Route } from "./+types/inicio";
 
@@ -22,6 +25,10 @@ import type { Route } from "./+types/inicio";
 // everyone and Stock are an Admin's, and `homeSummary` reads them for no one
 // else (spec §4.1, §4.2). Every figure is about Bills, Payments or Stock, so
 // the loader runs again like any other.
+//
+// It is also where a Payment that closed its Bill ends (`app/routes/bill.tsx`):
+// the result the navigation carried (`useCarried`) is said over the cards,
+// once, with the change to hand over.
 
 export const meta: Route.MetaFunction = () => [{ title: "Inicio · Gamo Cafe" }];
 
@@ -95,12 +102,30 @@ export default function Inicio({ loaderData }: Route.ComponentProps) {
   // An Admin's large card is the Day of everyone; a Worker's is their own.
   const collected = everyone ?? mine;
 
+  // What the screen that sent the User here confirmed. It is why they are
+  // here, so it takes the keyboard and the screen reader, before the shell
+  // would take them to the screen as a whole.
+  const carried = useCarried(useLocation());
+  const said = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (carried) said.current?.focus({ preventScroll: true });
+  }, [carried]);
+
   return (
     <div className="flex flex-col gap-7">
       <div className="flex animate-enter flex-col gap-2">
         <p className={eyebrow}>{formatDay(day)}</p>
         <h1 className={pageTitle}>Hola, {name}</h1>
       </div>
+
+      {carried ? (
+        <div ref={said} tabIndex={-1} className="flex flex-col gap-3 rounded-2xl outline-none">
+          <Notice tone="success">
+            <strong className="font-semibold">{carried.title}.</strong> {carried.details}
+          </Notice>
+          {carried.change ? <Change amount={carried.change} /> : null}
+        </div>
+      ) : null}
 
       {menuIsEmpty ? (
         // Nothing can be sold until there is something to sell: the first thing an Admin does.

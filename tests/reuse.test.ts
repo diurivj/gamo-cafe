@@ -154,6 +154,7 @@ describe("what is about Bills, Payments or Stock", () => {
       "/por-cobrar",
       "/inventario",
       "/inventario/conteo",
+      "/consumo-interno",
       "/diferencias",
       "/historial",
       "/productos",

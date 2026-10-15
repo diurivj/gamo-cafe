@@ -117,9 +117,9 @@ Replace the wrapping header link collection with four labeled destinations in a 
 
 ### 4.2 Remaining destinations
 
-Admin's Más exposes **Cuentas abiertas**, **Cuentas**, **Por cobrar**, **Clientes**, **Inventario**, **Diferencias**, **Mi día**, **Historial**, **Productos** and **Usuarios**. Group these by task; do not produce another unstructured wall of links.
+Admin's Más exposes **Cuentas abiertas**, **Cuentas**, **Por cobrar**, **Clientes**, **Inventario**, **Consumo interno**, **Diferencias**, **Mi día**, **Historial**, **Productos** and **Usuarios**. Group these by task; do not produce another unstructured wall of links.
 
-Worker's Más exposes **Clientes**, **Mi día** and session information/actions. It contains no Admin-only links or placeholder capabilities.
+Worker's Más exposes **Clientes**, **Mi día**, **Consumo interno** (under **Registrar**) and session information/actions. It contains no Admin-only links or placeholder capabilities.
 
 Inventario also provides contextual access to Conteo and Diferencias. Clientes, Cuentas and Por cobrar retain their contextual paths to individual Customers and Bills. Important secondary workflows should not require returning to Más at every step.
 
@@ -166,6 +166,8 @@ After authoritative confirmation, show a readable success state with the amount 
 
 Provide **Nueva venta** prominently. It starts a fresh selection and resets sale-specific fields. Secondary actions may return to an applicable Open Bill or Customer, subject to permissions. A Worker must not be routed into an inaccessible Paid Bill merely to see confirmation.
 
+On Cuenta, a Payment that leaves the Bill owing nothing closes it, and the User has nothing left to do there: they land on **Inicio**, which says **Cuenta pagada y cerrada** with the amount, the method and the Customer, takes the focus, and keeps the cash change in sight until the User goes on. It replaces the Payment step in the history, so Back is the Bill — an Admin's to open, a Worker's to be told it is no longer open. A Payment for part of what is owed keeps its result on Cuenta. Vender's sale and Abonar keep theirs on their own screen.
+
 For selections left Open or added to an existing Bill, describe that exact result instead of showing a payment-success message.
 
 ## 6. Submission, recovery and unfinished work
@@ -185,7 +187,7 @@ For selections left Open or added to an existing Bill, describe that exact resul
 - Freeze an unresolved submission snapshot; do not allow changes to method, amount, Items or target to masquerade as a retry. Resolve the original outcome before turning it into a different sale.
 - If the mutation succeeded but a subsequent read failed, retain the confirmed mutation result and explain that figures need refreshing. Never retry the mutation as a new sale to fix a failed read.
 - No payment/Stock optimism. Preserve the existing atomic, revision and idempotency guarantees on the server, including races between different phones.
-- Each Notice remains associated with the submitting screen/action; unrelated navigation or another tab must not consume its answer.
+- Each Notice remains associated with the submitting screen/action; unrelated navigation or another tab must not consume its answer. The one that leaves its screen is a Payment that closes its Bill on Cuenta (§5.4): it goes with the navigation it starts to Inicio, held in that tab's memory, never in the URL or in storage, and is shown once. If Inicio cannot be read, what stands in still says it, change included.
 - Other forms also need immediate pending feedback, specific errors and confirmation appropriate to their effect.
 
 ### 6.2 Leaving and recovery boundaries
@@ -212,6 +214,7 @@ Every row includes readable loading, empty, populated, error and applicable succ
 | Clientes — `customers.tsx` | Search and add with existing duplicate-name behavior; keep recognition and selection straightforward. |
 | Cliente — `customer.tsx` | Lead with Customer identity and Owed, then Open Bills and Abonar. Preserve grouped payment history and Admin-only past Bills, rename, retire and restore. Retired Customers' existing debts remain collectable. |
 | Mi día — `mi-dia.tsx` | Clearly identify these as the signed-in User's figures and records. Lead with Cobrado, split by method, then Vendido; never expose other Users' totals. |
+| Consumo interno — `consumo-interno.tsx` | Any User, a Worker included, records an Internal use in one step: an active stock-tracked Item, the units and an optional note, with what it will do in words. No Stock anywhere on it. Pending, refused, unknown and confirmed as §6.1; a Worker is told that only an Admin can cancel it. |
 | Día — `dia.tsx` | Default to today with a clear displayed date/range. Lead with Cobrado, Efectivo and Transferencia, then Vendido. Preserve date-range selection, per-User details and Items sold without overwhelming the summary. |
 | Cuentas — `cuentas.tsx` | Admin's all-Bills list; preserve date/state/Customer filters and paging, clearly distinguish it from Cuentas abiertas. |
 | Por cobrar — `owed.tsx` | Clearly labeled current outstanding debt, Customer totals and oldest Open Day; preserve anonymous Open Bills and older-Day warnings. It is not a historical Day total. |

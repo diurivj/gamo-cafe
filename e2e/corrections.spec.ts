@@ -1,7 +1,7 @@
 import type { Page, Route } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
-import { openCorrection, payBill, removeLine, removePayment, seeBill, summary, voidBill } from "./support/bill";
+import { backToBill, closedNotice, openCorrection, payInFull, removeLine, removePayment, seeBill, summary, voidBill } from "./support/bill";
 import { holdSubmissions } from "./support/held";
 import { destinations } from "./support/navigate";
 import { addToBill, leaveOpen } from "./support/sell";
@@ -153,12 +153,12 @@ test("§8.5: an Admin removes the Payment and then voids, each with a reason; th
   await page.getByRole("link", { name: "Volver a la cuenta" }).click();
 
   // An Admin pays it in full from Cuenta, so the Payment is on a Paid Bill
-  // (ticket 08); a Worker would be sent to the list instead (§4.1).
+  // (ticket 08), and goes back to it from Inicio, which a Worker could not (§4.1).
   await signInAs("admin", "Ana");
   await page.goto(`/cuentas/${billId}`);
-  await payBill(page);
-  await expect(page.getByRole("status")).toHaveText("$37.00 en efectivo. Cuenta pagada.");
-  await seeBill(page);
+  await payInFull(page);
+  await expect(closedNotice(page)).toHaveText("Cuenta pagada y cerrada. $37.00 en efectivo. La cuenta ya no debe nada.");
+  await backToBill(page);
   expect(await query("SELECT units FROM stock_levels WHERE item_id = ?", [agua.id])).toEqual([{ units: 8 }]);
   const main = page.getByRole("main");
   await expect(main).toContainText("Pagada");

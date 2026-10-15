@@ -77,6 +77,7 @@ test("an Admin signs in on Inicio, walks its cards, the four destinations and ev
     "Por cobrar",
     "Clientes",
     "Inventario",
+    "Consumo interno",
     "Diferencias",
     "Mi día",
     "Historial",
@@ -123,7 +124,8 @@ test("a Worker walks Inicio, Vender, Cuentas and Más, and is offered nothing of
 
   await goTo(page, "Más");
   const more = page.getByRole("main");
-  await expect(more.getByRole("link")).toHaveText(["Clientes", "Mi día"]);
+  await expect(more.getByRole("heading", { level: 2 })).toHaveText(["Clientes y tu día", "Registrar", "Tu sesión"]);
+  await expect(more.getByRole("link")).toHaveText(["Clientes", "Mi día", "Consumo interno"]);
   await expect(more).toContainText("Beto");
   await expect(more).toContainText("Empleado");
   await expect(more.getByRole("button", { name: "Salir" })).toBeVisible();
@@ -133,6 +135,10 @@ test("a Worker walks Inicio, Vender, Cuentas and Más, and is offered nothing of
 
   await goTo(page, "Mi día");
   await expect(heading(page, "Mi día")).toBeVisible();
+  await expect(current(page)).toHaveText("Más");
+
+  await goTo(page, "Consumo interno");
+  await expect(heading(page, "Consumo interno")).toBeVisible();
   await expect(current(page)).toHaveText("Más");
 });
 
@@ -156,6 +162,7 @@ test("a link that opens a screen directly still works, and says where the User i
   for (const [path, name, under] of [
     ["/mi-dia", "Mi día", "Más"],
     ["/clientes", "Clientes", "Más"],
+    ["/consumo-interno", "Consumo interno", "Más"],
     ["/inicio", "Hola, Beto", "Inicio"],
     ["/cuentas-abiertas", "Cuentas abiertas", "Cuentas"],
     ["/mas", "Más", "Más"],

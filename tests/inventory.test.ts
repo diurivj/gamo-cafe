@@ -5,9 +5,11 @@ import { getItem, retireItem, updateItem } from "~/backend/catalog";
 import {
   adjustmentStanding,
   cancelAdjustment,
+  internalUseItems,
   listInventory,
   listRecentAdjustments,
   recordAdjustment,
+  recordInternalUse,
 } from "~/backend/inventory";
 import { listAdjustments, stockOf } from "~/backend/stock";
 
@@ -16,8 +18,9 @@ import { seedCategory, seedItem } from "./support/catalog";
 import { runTest, setClock, advanceClock } from "./support/effect";
 
 // Inventario through its operations: recording and cancelling Adjustments
-// (spec §5.8, §7.3), and the Stock and Minimums an Admin sees. The routes are
-// tested in inventario.test.ts.
+// (spec §5.8, §7.3), and the Stock and Minimums an Admin sees; and Consumo
+// interno's, which any User runs (spec §4.1). The routes are tested in
+// inventario.test.ts and consumo-interno.test.ts.
 
 const recorded = (admin: Parameters<typeof as>[0], ids: ReadonlyArray<string>) =>
   listRecentAdjustments().pipe(
@@ -96,6 +99,108 @@ describe("recordAdjustment", () => {
           recordAdjustment({ itemId: "no-existe", reason: "restock", units: 1 }).pipe(as(ana)),
         );
         expect(error._tag).toBe("ItemNotFound");
+      }),
+    ));
+});
+
+describe("recordInternalUse", () => {
+  it("lets a Worker take units off an Item's Stock as an Internal use, with their name, and answers no Stock", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const beto = yield* seedUser("worker");
+        const item = yield* seedItem({ name: "Refresco del turno", startingStock: 10, by: ana });
+        yield* setClock("2026-10-05T10:00:00");
+
+        const answer = yield* recordInternalUse({ itemId: item.id, units: 2, note: " Para la comida " }).pipe(as(beto));
+
+        expect(Object.keys(answer)).toEqual(["id"]);
+        expect(yield* stockOf(item.id).pipe(as(ana))).toBe(8);
+        const internal = (yield* recorded(ana, [item.id])).filter(({ reason }) => reason === "internal_use");
+        expect(internal.map(({ id, units, note, day, byName }) => [id, units, note, day, byName])).toEqual([
+          [answer.id, 2, "Para la comida", "2026-10-05", "Beto"],
+        ]);
+      }),
+    ));
+
+  it("records the same form once: sent again with its key and content it is answered as the first", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const beto = yield* seedUser("worker");
+        const item = yield* seedItem({ name: "Consumo sin repetir", startingStock: 5, by: ana });
+        const form = { itemId: item.id, units: 1, note: null, submissionKey: "llave-consumo" };
+
+        const first = yield* recordInternalUse(form).pipe(as(beto));
+        const again = yield* recordInternalUse(form).pipe(as(beto));
+
+        expect(again).toEqual(first);
+        expect(yield* stockOf(item.id).pipe(as(ana))).toBe(4);
+        // The same key with other content is another form, recorded as such.
+        yield* recordInternalUse({ ...form, units: 2 }).pipe(as(beto));
+        expect(yield* stockOf(item.id).pipe(as(ana))).toBe(2);
+      }),
+    ));
+
+  it("is an Admin's to cancel, whoever recorded it", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const beto = yield* seedUser("worker");
+        const item = yield* seedItem({ name: "Consumo por cancelar", startingStock: 6, by: ana });
+        const { id } = yield* recordInternalUse({ itemId: item.id, units: 3 }).pipe(as(beto));
+
+        expect((yield* Effect.flip(cancelAdjustment(id, "Me equivoqué").pipe(as(beto))))._tag).toBe("AdminOnly");
+        expect(yield* stockOf(item.id).pipe(as(ana))).toBe(3);
+
+        yield* cancelAdjustment(id, "Lo anotó dos veces").pipe(as(ana));
+        expect(yield* stockOf(item.id).pipe(as(ana))).toBe(6);
+      }),
+    ));
+
+  it("refuses what an Adjustment refuses, and writes nothing", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const beto = yield* seedUser("worker");
+        const category = yield* seedCategory("Consumo de cocina", ana);
+        const prepared = yield* seedItem({ name: "Café preparado", categoryId: category.id, stockTracked: false, by: ana });
+        const counted = yield* seedItem({ name: "Consumo con unidades", startingStock: 2, by: ana });
+
+        const notTracked = yield* Effect.flip(recordInternalUse({ itemId: prepared.id, units: 1 }).pipe(as(beto)));
+        expect(notTracked._tag).toBe("ItemNotStockTracked");
+        const missing = yield* Effect.flip(recordInternalUse({ itemId: "no-existe", units: 1 }).pipe(as(beto)));
+        expect(missing._tag).toBe("ItemNotFound");
+        for (const units of [0, -1, 1.5]) {
+          const error = yield* Effect.flip(recordInternalUse({ itemId: counted.id, units }).pipe(as(beto)));
+          expect(error._tag).toBe("InvalidAdjustmentUnits");
+        }
+
+        expect(yield* listAdjustments(prepared.id).pipe(as(ana))).toEqual([]);
+        expect(yield* stockOf(counted.id).pipe(as(ana))).toBe(2);
+      }),
+    ));
+});
+
+describe("internalUseItems", () => {
+  it("offers every active Item that counts its units, by name, and nothing of their Stock", () =>
+    runTest(
+      Effect.gen(function* () {
+        const ana = yield* seedUser("admin");
+        const category = yield* seedCategory("Para el consumo interno", ana);
+        const water = yield* seedItem({ name: "Agua para el personal", categoryId: category.id, startingStock: 9, by: ana });
+        const bread = yield* seedItem({ name: "Pan para el personal", categoryId: category.id, startingStock: 4, by: ana });
+        const coffee = yield* seedItem({ name: "Café para el personal", categoryId: category.id, stockTracked: false, by: ana });
+        const gone = yield* seedItem({ name: "Galleta para el personal", categoryId: category.id, startingStock: 1, by: ana });
+        yield* retireItem(gone.id).pipe(as(ana));
+        const ours = [water.id, bread.id, coffee.id, gone.id];
+
+        const offered = (yield* internalUseItems).filter(({ id }) => ours.includes(id));
+
+        expect(offered).toEqual([
+          { id: water.id, name: "Agua para el personal" },
+          { id: bread.id, name: "Pan para el personal" },
+        ]);
       }),
     ));
 });
@@ -256,9 +361,13 @@ describe("a Worker", () => {
 
         expect((yield* Effect.flip(listInventory.pipe(as(beto))))._tag).toBe("AdminOnly");
         expect((yield* Effect.flip(listRecentAdjustments().pipe(as(beto))))._tag).toBe("AdminOnly");
-        expect(
-          (yield* Effect.flip(recordAdjustment({ itemId: item.id, reason: "restock", units: 1 }).pipe(as(beto))))._tag,
-        ).toBe("AdminOnly");
+        // An Entrada, a Merma, and even an Internal use through Inventario's
+        // own operation: a Worker's Internal use is `recordInternalUse`.
+        for (const reason of ["restock", "waste", "internal_use"] as const) {
+          expect(
+            (yield* Effect.flip(recordAdjustment({ itemId: item.id, reason, units: 1 }).pipe(as(beto))))._tag,
+          ).toBe("AdminOnly");
+        }
         expect((yield* Effect.flip(cancelAdjustment(id, "porque sí").pipe(as(beto))))._tag).toBe("AdminOnly");
 
         expect(yield* stockOf(item.id).pipe(as(ana))).toBe(2);

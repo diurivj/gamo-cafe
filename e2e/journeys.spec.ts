@@ -3,7 +3,7 @@ import type { Page } from "@playwright/test";
 import { verifyProjectionsSql } from "../app/backend/rebuild.ts";
 import { dayOf, formatDay } from "../app/shared/day.ts";
 import { expect, test } from "./fixtures";
-import { payBill, removeLine, removePayment, seeBill, voidBill } from "./support/bill";
+import { backToBill, closedNotice, payBill, payInFull, removeLine, removePayment, seeBill, voidBill } from "./support/bill";
 import { addItemOnScreen, catalogItem, typeItem } from "./support/catalog";
 import { expectLine, recordCount, recorded, reviewCount, typeCount } from "./support/count";
 import { abonar, seeCustomer } from "./support/customer";
@@ -125,8 +125,10 @@ test("a day at the cafe: what each screen records is what the others then show",
   await goTo(page, "Cuentas abiertas");
   await page.getByRole("list", { name: "Cuentas abiertas" }).getByRole("link", { name: /Mesa 2/ }).click();
   await expect(title(page, "Cuenta")).toBeVisible();
-  await payBill(page);
-  await seeBill(page);
+  // Paid in full, the Bill is closed and Ana lands on Inicio; Back is the Bill.
+  await payInFull(page);
+  await expect(closedNotice(page)).toHaveText("Cuenta pagada y cerrada. $18.50 en efectivo. La cuenta ya no debe nada.");
+  await backToBill(page);
   await removePayment(page, "$18.50", "Se cobró a la mesa equivocada");
   await seeBill(page);
   await voidBill(page, "La mesa no consumió nada");

@@ -42,6 +42,8 @@ Both shapes are emulation: a desktop browser engine in a phone's viewport, with 
 
 150 stops per phone shape. A new screen, step or state gets a stop in `tour.ts` and is then scanned and measured with the rest.
 
+Added 2026-10-15, with Consumo interno and the closing Payment's landing (v1 ticket 36, UI redesign ticket 14): 15 stops, 165 per phone shape. Consumo interno's six states — the step, nothing chosen, typed with what it will do, on its way, of unknown outcome, registrado — for an Admin (figures and Stock, now 31) and for a Worker; the step with no Item, as a Worker (nothing recorded yet, now 22); and Inicio after a Payment that closed its Bill, with its change, for both roles (Bills and Customers, now 27; Worker, now 46). axe and the layout sweep find nothing on any of them: `npm run test:e2e`, 427 passed, 1 skipped.
+
 Spec §7's rows map onto them: Entrar (signed out); Shell and Más (selling, Worker); Inicio; Vender; Cuentas abiertas; Cuenta; Clientes; Cliente; Mi día; Día; Cuentas; Por cobrar; Inventario; Conteo; Diferencias; Historial; Productos; Producto; Usuarios; shared surfaces (the three error stops, the Customer picker on the review and on Cuenta, `PaymentEntry` on Vender, Cuenta and Abonar, the notices, `ConfirmDialog`, and **Cargar más**, which `load-more.spec.ts` drives).
 
 Not stops, so neither scanned nor measured, and covered only by their screen's own spec: the second page of a list after **Cargar más**; a Count while it is on its way; the result of each remaining correction and of a cancellation; every refusal a rule can give beyond the ones above. Loading states are the shell's "Cargando…" (`navigation.spec.ts`) and the dimmed figures while Día or Cuentas read another range (`dia.spec.ts`, `cuentas-admin.spec.ts`, `pending-ui.spec.ts`).
@@ -237,6 +239,7 @@ VoiceOver on an iPhone or a Mac with Safari, and TalkBack on an Android phone wi
 4. **A report**: Día's date, then Cobrado, Efectivo, Transferencia and Vendido, each with its amount; how an amount is pronounced.
 5. **A Stock task**: Inventario's rows ("Reponer", "Bajo cero"); an Adjustment's reason with what it does; what will happen, before the action.
 6. **A dialog** (Vaciar on Vender): its title and text, both buttons, Escape, where the focus returns; on Safari, what is said at the dialog's edges (§4.4).
+7. **A Bill paid in full on Cuenta** (added 2026-10-15): on arriving at Inicio, "Cuenta pagada y cerrada" with what it says and the change, before the cards; and **Consumo interno**: what it will do, read as the units change, and a Worker's line about who can cancel it.
 
 Result: _not done._
 

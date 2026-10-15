@@ -4,7 +4,7 @@ import { expect, it } from "vitest";
 import { as, seedUser, signedIn, type SignedIn } from "./support/auth";
 import { seedItem } from "./support/catalog";
 import { runTest } from "./support/effect";
-import { recordSale } from "./support/sales";
+import { recordSale, sendInternalUse } from "./support/sales";
 
 /**
  * Spec §4.2: what a Worker never sees. Stock numbers, another User's totals,
@@ -126,6 +126,18 @@ it("a Worker's pages carry no Stock, no other User's totals, no History and no P
   for (const word of [...hiddenWords, "Inventario", "Historial", "Usuarios"]) {
     expect(moreHtml, `Más does not say «${word}»`).not.toContain(word);
   }
+
+  // Consumo interno: the Items that count their units, by name, and no Stock.
+  // What she records there is answered without one too.
+  const internal = await carla.fetch("/consumo-interno");
+  expect(internal.status).toBe(200);
+  const internalHtml = await internal.text();
+  expect(internalHtml, "the Items are offered by name").toContain("Producto Visible");
+  expect(internalHtml, "Consumo interno shows no Stock number").not.toContain("98765");
+  for (const word of hiddenWords) expect(internalHtml, `Consumo interno does not say «${word}»`).not.toContain(word);
+  const consumed = await sendInternalUse(carla, { itemId: theirs.id, units: "1" });
+  expect(consumed.response.status, "a Worker records an Internal use").toBe(200);
+  expect(JSON.stringify(consumed.internalUse), "its answer carries no Stock").not.toMatch(/9876[0-9]/);
 
   // The lists §4.1 reserves for Admins, each refused to a Worker's face.
   for (const path of [

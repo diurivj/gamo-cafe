@@ -162,6 +162,7 @@ describe("Más", () => {
       "Por cobrar /por-cobrar",
       "Clientes /clientes",
       "Inventario /inventario",
+      "Consumo interno /consumo-interno",
       "Diferencias /diferencias",
       "Mi día /mi-dia",
       "Historial /historial",
@@ -175,7 +176,7 @@ describe("Más", () => {
     expect(element(html, "a", 'aria-current="page"')).toContain("Más");
   });
 
-  it("gives a Worker Clientes, Mi día and their session, and nothing of an Admin's", async () => {
+  it("gives a Worker Clientes, Mi día, Consumo interno and their session, and nothing of an Admin's", async () => {
     const beto = await signedIn("worker", "Beto Más");
     const html = await page(beto, "/mas");
     const shown = main(html);
@@ -183,6 +184,7 @@ describe("Más", () => {
     expect(linksIn(shown)).toEqual([
       { to: "/clientes", label: "Clientes" },
       { to: "/mi-dia", label: "Mi día" },
+      { to: "/consumo-interno", label: "Consumo interno" },
     ]);
     expect(textOf(shown)).toContain("Beto Más");
     expect(textOf(shown)).toContain("Empleado");

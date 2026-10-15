@@ -91,7 +91,7 @@ export interface NewAdjustment {
   /** A whole number of units, at least 1. */
   readonly units: number;
   readonly note: string | null;
-  /** The Admin who records it. */
+  /** The User who records it: an Admin, or anyone for an Internal use (spec §4.1). */
   readonly by: string;
   readonly at: Instant;
   readonly day: Day;

@@ -1,7 +1,7 @@
 import type { Locator, Page, Route } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
-import { openPay, payBill, seeBill, summary, typePayment } from "./support/bill";
+import { backToBill, closedNotice, openPay, payBill, payInFull, seeBill, summary, typePayment } from "./support/bill";
 import { holdSubmissions } from "./support/held";
 import { destinations, goTo } from "./support/navigate";
 import { addToBill, leaveOpen } from "./support/sell";
@@ -9,7 +9,9 @@ import { addToBill, leaveOpen } from "./support/sell";
 // Finding an Open Bill and collecting a Payment (UI redesign §5.3, §6, §7,
 // §10.1.7): Cuentas abiertas by Customer, Cuenta leading with what is owed,
 // its two routine actions apart, and a Payment that is sent once, frozen, and
-// said only as what is known: on its way, confirmed, refused or unknown.
+// said only as what is known: on its way, confirmed, refused or unknown. A
+// Payment that leaves nothing owed closes the Bill, and the User lands on
+// Inicio, which says so with the change to hand over.
 // Requests are held or failed on purpose; no test waits on the network's own
 // timing. Both projects run a phone viewport (playwright.config.ts).
 
@@ -142,19 +144,29 @@ test("a Worker finds a Customer's Bill by search, adds Items to it through Vende
   await expect(page.getByLabel("Efectivo que te entregan (opcional)")).toHaveCount(0);
   await page.getByRole("button", { name: "Registrar pago de $23.50" }).click();
 
-  // The Worker sees the result without being sent into a Bill they may no longer open.
-  await expect(title(page, "Pago registrado")).toBeFocused();
-  await expect(page.getByRole("status")).toHaveText("$23.50 por transferencia. Cuenta pagada.");
+  // Nothing is owed: the Bill is paid and closed, and the Worker lands on
+  // Inicio, which says so and holds the keyboard there. They are never sent
+  // into a Bill they may no longer open.
+  await expect(page).toHaveURL(/\/inicio$/);
+  await expect(closedNotice(page)).toHaveText(
+    "Cuenta pagada y cerrada. $23.50 por transferencia. La cuenta de Familia Ruiz ya no debe nada.",
+  );
+  await expect(page.locator(":focus")).toContainText("Cuenta pagada y cerrada.");
   await expect(page.getByRole("region", { name: "Cambio" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Ver cuenta" })).toHaveCount(0);
   await expect(title(page, "No tienes acceso a esta página")).toHaveCount(0);
+  // Inicio was read after the Payment: its figures count it.
+  await expect(main.getByRole("link", { name: /Cobraste hoy/ })).toContainText("$43.50");
 
-  // Back on the list the search is as it was left, and the Paid Bill is gone.
-  await main.getByRole("link", { name: "Cuentas abiertas" }).click();
-  await expect(page).toHaveURL(/\/cuentas-abiertas\?q=familia\+r$/);
-  await expect(page.getByLabel("Buscar por cliente")).toHaveValue("familia r");
-  await expect(main).toContainText("Ninguna cuenta abierta es de un cliente que empiece con «familia r».");
-  await main.getByRole("link", { name: "Ver todas las cuentas abiertas" }).click();
+  // Back leads to the Bill, which says it is no longer open, and nothing more.
+  await page.goBack();
+  await expect(title(page, "Esta cuenta ya no está abierta")).toBeVisible();
+  // Said once: coming back to Inicio says nothing of it again.
+  await page.goForward();
+  await expect(title(page, "Hola, Beto")).toBeVisible();
+  await expect(closedNotice(page)).toHaveCount(0);
+
+  // The Paid Bill has left the list.
+  await goTo(page, "Cuentas");
   await expect(rows(page)).toHaveText([/Familia Paz/]);
 
   expect(await query("SELECT total, paid, state FROM bills WHERE id = ?", [billId])).toEqual([
@@ -199,12 +211,14 @@ test("an Admin finds a Bill, adds Items, takes a part and the rest, and opens th
   // An Admin still changes the Customer and the note after a Payment.
   await expect(page.getByRole("heading", { name: "Cliente y nota", level: 2 })).toBeVisible();
 
-  await payBill(page, { handed: "100" });
-  await expect(page.getByRole("status")).toHaveText("$50.00 en efectivo. Cuenta pagada.");
+  await payInFull(page, { handed: "100" });
+  await expect(closedNotice(page)).toHaveText(
+    "Cuenta pagada y cerrada. $50.00 en efectivo. La cuenta de Familia Ruiz ya no debe nada.",
+  );
   await expect(page.getByRole("region", { name: "Cambio" })).toContainText("$50.00");
 
-  // An Admin may open the Paid Bill, and every correction is still there.
-  await seeBill(page);
+  // An Admin may open the Paid Bill, Back from Inicio, and every correction is still there.
+  await backToBill(page);
   const main = page.getByRole("main");
   await expect(main).toContainText("Pagada");
   await expect(summary(page)).toContainText("Debe $0.00");
@@ -423,8 +437,10 @@ test("a Payment against a Bill another phone changed is refused visibly, writes 
   await expect(record).toBeVisible();
 
   await record.click();
-  await expect(title(page, "Pago registrado")).toBeVisible();
-  await expect(page.getByRole("status")).toHaveText("$20.00 por transferencia. Cuenta pagada.");
+  await expect(page).toHaveURL(/\/inicio$/);
+  await expect(closedNotice(page)).toHaveText(
+    "Cuenta pagada y cerrada. $20.00 por transferencia. La cuenta de Familia Ruiz ya no debe nada.",
+  );
   expect(await query("SELECT amount, method FROM payments")).toEqual([{ amount: 2000, method: "transfer" }]);
   expect(await query("SELECT paid, state FROM bills")).toEqual([{ paid: 5000, state: "paid" }]);
 });
@@ -457,7 +473,7 @@ test("an Admin whose Bill was paid in full from another phone is told on the Bil
   await expect(rows(page)).toHaveText([/Mesa 3/]);
 });
 
-test("a Payment confirmed after its step was left still shows its result and its change", async ({
+test("a Payment confirmed after its step was left still closes the Bill, and Inicio says so with its change", async ({
   page,
   signInAs,
   query,
@@ -484,16 +500,16 @@ test("a Payment confirmed after its step was left still shows its result and its
   await expect(title(page, "No sabemos si se registró")).toBeVisible();
 
   await page.getByRole("button", { name: "Volver a intentar" }).click();
-  await expect(title(page, "Pago registrado")).toBeVisible();
-  await expect(page.getByRole("status")).toHaveText("$50.00 en efectivo. Cuenta pagada.");
+  await expect(page).toHaveURL(/\/inicio$/);
+  await expect(closedNotice(page)).toHaveText("Cuenta pagada y cerrada. $50.00 en efectivo. La cuenta ya no debe nada.");
   await expect(page.getByRole("region", { name: "Cambio" })).toContainText("$50.00");
   expect(await query("SELECT amount FROM payments")).toEqual([{ amount: 5000 }]);
 
-  await seeBill(page);
+  await page.goto("/cuentas/tardia");
   await expect(page.getByRole("main")).toContainText("Pagada");
 });
 
-test("a Payment confirmed while a read of the Bill was on its way keeps its result and its change, until the User goes on", async ({
+test("a Payment confirmed while a read of the Bill was on its way still closes the Bill, and its result stays until Inicio says it", async ({
   page,
   signInAs,
   query,
@@ -513,20 +529,17 @@ test("a Payment confirmed while a read of the Bill was on its way keeps its resu
   await dialog(page).getByRole("button", { name: "Salir", exact: true }).click();
   await held.waitFor(2);
 
+  // The answer closes the Bill: its result, change included, is on screen
+  // for as long as Inicio, held too, is on its way.
   await held.release();
-  await expect(title(page, "Pago registrado")).toBeVisible();
-  // The Bill, read before or after: the result is what the screen is about.
-  await held.releaseAll();
-  await expect(page).toHaveURL(/\/cuentas\/carrera$/);
-  await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
-  await held.stop();
-  await expect(title(page, "Pago registrado")).toBeVisible();
-  await expect(page.getByRole("status")).toHaveText("$50.00 en efectivo. Cuenta pagada.");
+  await expect(title(page, "Cuenta pagada y cerrada")).toBeVisible();
   await expect(page.getByRole("region", { name: "Cambio" })).toContainText("$50.00");
+  await held.stop();
+  await expect(page).toHaveURL(/\/inicio$/);
+  await expect(closedNotice(page)).toHaveText("Cuenta pagada y cerrada. $50.00 en efectivo. La cuenta ya no debe nada.");
+  await expect(page.getByRole("region", { name: "Cambio" })).toContainText("$50.00");
+  await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
   expect(await query("SELECT amount FROM payments")).toEqual([{ amount: 5000 }]);
-
-  await seeBill(page);
-  await expect(page.getByRole("main")).toContainText("Pagada");
 });
 
 test("a Worker whose Bill was paid from another phone is told nothing was recorded, without an error page", async ({
@@ -646,14 +659,16 @@ test("on a 320px phone long names and large amounts stay whole, and the Payment 
   expect(box.y + box.height).toBeLessThanOrEqual(bar.y);
   await page.keyboard.press("Enter");
 
-  await expect(title(page, "Pago registrado")).toBeFocused();
-  await expect(page.getByRole("status")).toHaveText(
-    "$122,456.78 por transferencia. Cuenta pagada.",
+  // Paid and closed: Inicio says so, the keyboard on what it says.
+  await expect(page).toHaveURL(/\/inicio$/);
+  await expect(page.locator(":focus")).toContainText("Cuenta pagada y cerrada.");
+  await expect(closedNotice(page)).toHaveText(
+    "Cuenta pagada y cerrada. $122,456.78 por transferencia. La cuenta de Familia Hernández de la Torre y Villaseñor Echeverría ya no debe nada.",
   );
   expect(await nothingSideways(page)).toBe(true);
-  await page.getByRole("button", { name: "Ver cuenta" }).focus();
-  await page.keyboard.press("Enter");
-  await expect(title(page, "Cuenta")).toBeFocused();
+  // Nothing in it is cut, however long the Customer's name and the amount.
+  expect(await closedNotice(page).evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await backToBill(page);
   await expect(page.getByRole("main")).toContainText("Pagada");
   expect(await nothingSideways(page)).toBe(true);
 });

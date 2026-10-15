@@ -11,7 +11,8 @@ import { openAdjustments, openCancel, typeAdjustment } from "./support/stock";
 // UI redesign §6.1, for every screen that records with `sendForRecord` besides
 // Vender (whose own case is in e2e/vender-recovery.spec.ts): a confirmed
 // result needs no read, so a phone that can read nothing still shows it; and
-// when the read the User then asks for fails, what is shown in its place still
+// when the read the User then asks for fails — or, for a Payment that closes
+// its Bill, the read of Inicio it leads to — what is shown in its place still
 // says what was recorded, repeats nothing, and gives way to the record once it
 // can be read.
 // The second half is the double tap on the two actions that carry no
@@ -100,6 +101,40 @@ test("Cuenta's Payment and correction stay confirmed with every read failing, an
   await expect(page.getByRole("region", { name: "Resumen" })).toContainText("$1,253.00");
   expect(await paymentsOf(cafe.bills.open)).toEqual([]);
   expect(await query("SELECT reason FROM payment_removals WHERE reason = 'Se cobró a otra cuenta'")).toHaveLength(1);
+});
+
+test("a Payment that closes its Bill is still said, change included, when Inicio cannot be read", async ({
+  page,
+  baseURL,
+  addUser,
+  signIn,
+  addCategory,
+  addItem,
+  addCustomer,
+  query,
+}) => {
+  const cafe = await openCafe({ page, baseURL, addUser, signIn, addCategory, addItem, addCustomer, query });
+
+  // Everything Familia Ruiz's Bill owes, $1,253.00, with $1,300.00 handed over.
+  await page.goto(`/cuentas/${cafe.bills.open}`);
+  await openPay(page);
+  await typePayment(page, { handed: "1300" });
+  const connection = await unreadable(page);
+  await page.getByRole("button", { name: "Registrar pago de $1,253.00" }).click();
+
+  // The Bill is closed and Inicio is read for the User: the one read there
+  // is, and it fails. What stands in still says what was recorded, and the
+  // change to hand over is still in sight.
+  await expect(title(page, "Algo salió mal")).toBeVisible();
+  expect(connection.reads).toEqual(["/inicio.data"]);
+  await expect(page.getByRole("region", { name: "Cambio" })).toContainText("$47.00");
+  await failsThenShows(
+    page,
+    connection,
+    "Cuenta pagada y cerrada. $1,253.00 en efectivo. La cuenta de Familia Ruiz ya no debe nada.",
+    /^Hola, /,
+  );
+  expect(await query("SELECT amount FROM payments WHERE bill_id = ?", [cafe.bills.open])).toEqual([{ amount: 125300 }]);
 });
 
 test("an Abonar stays confirmed with every read failing, and the Customer is read when they can be", async ({

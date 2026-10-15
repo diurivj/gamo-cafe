@@ -2,6 +2,7 @@ import type { BillPaymentRefusal, BillPaymentResult } from "~/shared/bill-paymen
 import type { CorrectionRefusal, CorrectionResult } from "~/shared/correction";
 import { COUNT_RECORD_PATH, type CountAnswer, type CountReviewAnswer, UNITS_FIELD } from "~/shared/count";
 import type { CustomerPaymentRefusal, CustomerPaymentResult } from "~/shared/customer-payment";
+import { INTERNAL_USE_RECORD_PATH, type InternalUseAnswer } from "~/shared/internal-use";
 import type { Refusal } from "~/shared/record-request";
 import type { SaleRefusal, SaleResult } from "~/shared/sale";
 import { STOCK_CHANGE_PATH, type StockChangeResult } from "~/shared/stock-change";
@@ -169,4 +170,19 @@ export async function sendCount(
     .json()
     .catch(() => ({}))) as Partial<CountReviewAnswer & CountAnswer & Refusal>;
   return { response, review: answer.review, count: answer.count, error: answer.error };
+}
+
+/**
+ * Sends one Internal use as Consumo interno does and reads the route's JSON
+ * answer: that it was recorded, or the refusal.
+ *
+ *     const { internalUse } = await sendInternalUse(beto, { itemId, units: "2", submissionKey });
+ */
+export async function sendInternalUse(who: Pick<SignedIn, "fetch">, fields: Record<string, string>) {
+  const response = await who.fetch(INTERNAL_USE_RECORD_PATH, { method: "POST", body: new URLSearchParams(fields) });
+  const answer = (await response
+    .clone()
+    .json()
+    .catch(() => ({}))) as Partial<InternalUseAnswer & Refusal>;
+  return { response, internalUse: answer.internalUse, error: answer.error };
 }

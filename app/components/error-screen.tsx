@@ -3,6 +3,7 @@ import { isRouteErrorResponse, useLocation } from "react-router";
 
 import { LockDrawing, SearchDrawing, ToneDrawing } from "~/components/icons";
 import { Notice } from "~/components/notice";
+import { Change } from "~/components/recording";
 import { buttonClasses } from "~/components/ui/button";
 import { lastRecorded } from "~/shared/recorded";
 
@@ -27,7 +28,7 @@ const isClosedBill = (data: unknown) =>
  * a form on its way, and the page cannot know whether the server recorded it:
  * it says so, and never that nothing was saved. When it took the place of a
  * confirmed result — the read after it failed — it knows, and keeps saying
- * what was recorded (`~/shared/recorded`).
+ * what was recorded (`~/shared/recorded`), with the change to hand over.
  */
 export function ErrorScreen({ error }: { readonly error: unknown }) {
   const { pathname, search } = useLocation();
@@ -78,6 +79,8 @@ export function ErrorScreen({ error }: { readonly error: unknown }) {
       </span>
       <h1 className={pageTitle}>{title}</h1>
       {recorded ? <Notice tone="success">{`${recorded.title}. ${recorded.details}`}</Notice> : null}
+      {/* The cash to hand back is never taken off the screen by a failed read (UI redesign §5.4). */}
+      {recorded?.change ? <Change amount={recorded.change} /> : null}
       <p className={hint}>{details}</p>
       <div className="mt-2 flex flex-col gap-3 sm:flex-row">
         {retry ? (

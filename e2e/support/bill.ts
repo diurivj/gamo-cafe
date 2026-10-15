@@ -4,11 +4,15 @@ import { expect } from "../fixtures";
 
 /**
  * Cuenta as a User drives it (UI redesign §5.3): the Bill, the step that takes
- * a Payment, and the confirmed result, which stays until the User goes on.
+ * a Payment, and the confirmed result, which stays until the User goes on. A
+ * Payment that leaves nothing owed closes the Bill and ends on Inicio, which
+ * says so.
  *
  *     await page.goto(`/cuentas/${billId}`);
  *     await payBill(page, { amount: "10.00" });   // ends on "Pago registrado"
  *     await seeBill(page);                         // back on the Bill, read again
+ *     await payInFull(page);                       // ends on Inicio: "Cuenta pagada y cerrada."
+ *     await backToBill(page);                      // the browser's Back: the Bill, Paid (an Admin's)
  *
  * A correction is a step of its own too (UI redesign §7.2): the Bill's link
  * that names the record, the step that says what will happen, and its result.
@@ -47,7 +51,7 @@ export async function typePayment(page: Page, payment: BillPayment) {
   if (payment.handed) await page.getByLabel("Efectivo que te entregan (opcional)").fill(payment.handed);
 }
 
-/** A whole Payment from the Bill on screen: everything it owes in cash unless told otherwise. */
+/** A Payment of a part of what the Bill on screen owes, in cash unless told otherwise: it ends on its result. */
 export async function payBill(page: Page, payment: BillPayment = {}) {
   await openPay(page);
   await typePayment(page, payment);
@@ -55,9 +59,30 @@ export async function payBill(page: Page, payment: BillPayment = {}) {
   await expect(title(page, "Pago registrado")).toBeVisible();
 }
 
+/** What Inicio says of the Payment that closed a Bill: "Cuenta pagada y cerrada. $18.50 en efectivo. …". */
+export const closedNotice = (page: Page) => page.getByRole("main").getByRole("status");
+
+/**
+ * Everything the Bill on screen owes, in cash unless told otherwise: the
+ * Payment closes it, and the User lands on Inicio, which says so.
+ */
+export async function payInFull(page: Page, payment: Omit<BillPayment, "amount"> = {}) {
+  await openPay(page);
+  await typePayment(page, payment);
+  await page.getByRole("button", { name: /^Registrar pago de / }).click();
+  await expect(page).toHaveURL(/\/inicio$/);
+  await expect(closedNotice(page)).toContainText("Cuenta pagada y cerrada.");
+}
+
 /** From a confirmed Payment back to its Bill, read again. */
 export async function seeBill(page: Page) {
   await page.getByRole("button", { name: "Ver cuenta" }).click();
+  await expect(title(page, "Cuenta")).toBeVisible();
+}
+
+/** From Inicio, where a Payment that closed its Bill landed, back to that Bill: an Admin's to open. */
+export async function backToBill(page: Page) {
+  await page.goBack();
   await expect(title(page, "Cuenta")).toBeVisible();
 }
 

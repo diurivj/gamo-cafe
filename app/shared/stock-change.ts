@@ -62,8 +62,15 @@ export const adjustmentProblems = {
   whyMissing: "Escribe el motivo de la cancelación.",
 } as const;
 
-/** What a draft would record, and what keeps it from being sent. */
-export function readAdjustmentDraft(draft: AdjustmentDraft, items: ReadonlyArray<StockedItem>) {
+/**
+ * What a draft would record, and what keeps it from being sent. Only the Item
+ * and the units are read, so Consumo interno, which shows no Stock, reads its
+ * own with it too (`~/shared/internal-use`).
+ */
+export function readAdjustmentDraft<Item extends { readonly id: string }>(
+  draft: Pick<AdjustmentDraft, "itemId" | "unitsText">,
+  items: ReadonlyArray<Item>,
+) {
   const item = items.find((known) => known.id === draft.itemId) ?? null;
   const parsed = parseUnits(draft.unitsText);
   const units = parsed !== undefined && parsed >= 1 ? parsed : null;

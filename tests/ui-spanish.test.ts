@@ -174,6 +174,7 @@ it("every screen a User can open is in Spanish, with es-MX money and dates", asy
     "/historial",
     "/inventario",
     "/inventario/conteo",
+    "/consumo-interno",
     "/por-cobrar",
     "/productos",
     "/productos?paso=nuevo",
@@ -196,6 +197,7 @@ it("every screen a User can open is in Spanish, with es-MX money and dates", asy
     `/clientes/${world.customer.id}`,
     "/mi-dia",
     `/cuentas/${world.openBill}`,
+    "/consumo-interno",
     "/mas",
     "/inicio",
   ]);
